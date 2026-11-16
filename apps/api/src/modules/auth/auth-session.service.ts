@@ -252,8 +252,11 @@ export class AuthSessionService {
     });
   }
 
-  issueWsTicket(principal: AuthenticatedPrincipal, meta: RequestClientMeta): WsTicketResponse {
-    this.rateLimiter.enforce({
+  async issueWsTicket(
+    principal: AuthenticatedPrincipal,
+    meta: RequestClientMeta,
+  ): Promise<WsTicketResponse> {
+    await this.rateLimiter.enforce({
       endpointGroup: 'auth:ws-ticket',
       ip: meta.ip,
       accountKey: principal.userId,

@@ -284,10 +284,10 @@ export class AuthController {
   @Post('ws-ticket')
   @UseGuards(SessionAuthGuard)
   @HttpCode(HttpStatus.OK)
-  issueWsTicket(
+  async issueWsTicket(
     @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Req() req: FastifyRequest,
-  ): WsTicketResponse {
+  ): Promise<WsTicketResponse> {
     return this.sessionService.issueWsTicket(principal, extractClientMeta(req));
   }
 }

@@ -29,7 +29,6 @@ import {
 } from './providers/google-oauth.verifier.js';
 import { HttpAuthRateLimiter } from './security/http-rate-limiter.js';
 import { PasswordHasher } from './security/password-hasher.js';
-import { computeNextFailedLoginLockout } from './security/token-crypto.js';
 
 @Injectable()
 export class AuthService {
@@ -98,7 +97,7 @@ export class AuthService {
     input: GuestCreateRequest,
     meta: RequestClientMeta,
   ): Promise<SessionIssueBundle> {
-    this.rateLimiter.enforce({ endpointGroup: 'auth:guest', ip: meta.ip });
+    await this.rateLimiter.enforce({ endpointGroup: 'auth:guest', ip: meta.ip });
 
     const now = new Date(this.config.nowFn());
     const { nickname, nicknameLower } = await this.allocateAvailableGuestNickname();
@@ -126,7 +125,7 @@ export class AuthService {
 
   async register(input: RegisterRequest, meta: RequestClientMeta): Promise<SessionIssueBundle> {
     const emailLower = input.email.trim().toLowerCase();
-    this.rateLimiter.enforce({
+    await this.rateLimiter.enforce({
       endpointGroup: 'auth:register',
       ip: meta.ip,
       accountKey: emailLower,
@@ -180,7 +179,7 @@ export class AuthService {
     meta: RequestClientMeta,
   ): Promise<SessionIssueBundle> {
     const emailLower = input.email.trim().toLowerCase();
-    this.rateLimiter.enforce({
+    await this.rateLimiter.enforce({
       endpointGroup: 'auth:promote-guest',
       ip: meta.ip,
       accountKey: principal.userId,
@@ -246,50 +245,78 @@ export class AuthService {
 
   async login(input: LoginRequest, meta: RequestClientMeta): Promise<SessionIssueBundle> {
     const emailLower = input.email.trim().toLowerCase();
-    this.rateLimiter.enforce({
+    await this.rateLimiter.enforce({
       endpointGroup: 'auth:login',
       ip: meta.ip,
-      accountKey: emailLower,
+      accountIpKey: emailLower,
     });
 
     const nowMs = this.config.nowFn();
     const now = new Date(nowMs);
-    const user = await this.repo.findUserByEmail(emailLower);
 
-    if (user && user.lockedUntil && user.lockedUntil.getTime() > nowMs) {
+    // 1. Lockout progresivo estrictamente por combinación (cuenta + IP) para evitar DoS sobre terceros
+    const ipAcctLock = await this.rateLimiter.getLoginLockoutState(emailLower, meta.ip);
+    if (ipAcctLock.lockedUntilMs !== null && ipAcctLock.lockedUntilMs > nowMs) {
       await this.passwordHasher.verifyPasswordTimingSafe(input.password, null);
-      const retryAfterSeconds = Math.max(1, Math.ceil((user.lockedUntil.getTime() - nowMs) / 1000));
+      const retryAfterSeconds = Math.max(1, Math.ceil((ipAcctLock.lockedUntilMs - nowMs) / 1000));
       throw new DomainApiException(
         423,
         'ACCOUNT_LOCKED',
-        'Cuenta bloqueada temporalmente por múltiples intentos fallidos.',
-        { retryAfterSeconds },
+        'Demasiados intentos fallidos desde esta dirección IP para esta cuenta.',
+        { retryAfterSeconds, scope: 'account_ip' },
       );
     }
 
+    // 2. Umbral de fallos por cuenta global -> exige Captcha en vez de bloquear la cuenta
+    const accountFailures = await this.rateLimiter.getAccountLoginFailures(
+      emailLower,
+      this.config.loginFailureWindowMs,
+    );
+    if (accountFailures >= this.config.loginCaptchaThreshold) {
+      if (!input.captchaToken || input.captchaToken.trim().length === 0) {
+        await this.passwordHasher.verifyPasswordTimingSafe(input.password, null);
+        throw new DomainApiException(
+          400,
+          'CAPTCHA_FAILED',
+          'Se requiere verificación Captcha tras múltiples intentos fallidos sobre esta cuenta.',
+          { captchaRequired: true },
+        );
+      }
+      await this.captchaVerifier.verifyOrThrow(input.captchaToken, meta.ip);
+    } else if (input.captchaToken !== undefined) {
+      await this.captchaVerifier.verifyOrThrow(input.captchaToken, meta.ip);
+    }
+
+    const user = await this.repo.findUserByEmail(emailLower);
     const passwordMatches = await this.passwordHasher.verifyPasswordTimingSafe(
       input.password,
       user?.passwordHash ?? null,
     );
 
     if (!user || user.isGuest || user.deletedAt !== null || !passwordMatches) {
+      const { lockout: nextLock } = await this.rateLimiter.recordLoginFailure(
+        emailLower,
+        meta.ip,
+        nowMs,
+        this.config.loginFailureWindowMs,
+      );
+
       if (user && !user.isGuest && user.deletedAt === null) {
-        const nextLock = computeNextFailedLoginLockout(user.failedLoginCount, nowMs);
         await this.repo.updateLoginFailureState({
           userId: user.id,
-          failedLoginCount: nextLock.failedLoginCount,
-          lockedUntil: nextLock.lockedUntil,
+          failedLoginCount: user.failedLoginCount + 1,
+          lockedUntil: null,
           now,
         });
-        if (nextLock.lockedUntil) {
+        if (nextLock.lockedUntilMs !== null) {
           await this.audit.record({
             actorId: user.id,
-            action: 'AUTH_ACCOUNT_LOCKED',
+            action: 'AUTH_ACCOUNT_IP_LOCKED',
             entity: 'user',
             entityId: user.id,
             afterState: {
-              failedLoginCount: nextLock.failedLoginCount,
-              lockedUntil: nextLock.lockedUntil.toISOString(),
+              failedCount: nextLock.failedCount,
+              lockedUntil: new Date(nextLock.lockedUntilMs).toISOString(),
             },
             ip: meta.ip,
             now,
@@ -307,6 +334,7 @@ export class AuthService {
       throw new DomainApiException(403, 'FORBIDDEN', 'Esta cuenta está suspendida.');
     }
 
+    await this.rateLimiter.clearLoginFailuresOnSuccess(emailLower, meta.ip);
     const updatedUser = await this.repo.recordSuccessfulLogin(user.id, now);
     await this.audit.record({
       actorId: updatedUser.id,
@@ -324,7 +352,7 @@ export class AuthService {
     input: GoogleAuthRequest,
     meta: RequestClientMeta,
   ): Promise<SessionIssueBundle> {
-    this.rateLimiter.enforce({ endpointGroup: 'auth:google', ip: meta.ip });
+    await this.rateLimiter.enforce({ endpointGroup: 'auth:google', ip: meta.ip });
     const identity = await this.googleVerifier.verifyIdToken(input.idToken);
     const now = new Date(this.config.nowFn());
 

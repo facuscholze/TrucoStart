@@ -1,4 +1,8 @@
 import { type DynamicModule, Module } from '@nestjs/common';
+import {
+  RateLimitModule,
+  type RateLimitModuleOptions,
+} from './common/rate-limit/rate-limit.module.js';
 import { DatabaseModule } from './db/database.module.js';
 import type { DatabaseConnectionHandle } from './db/database.provider.js';
 import { AuditModule } from './modules/audit/audit.module.js';
@@ -10,6 +14,7 @@ import { UsersModule } from './modules/users/users.module.js';
 export interface CreateAppModuleOptions {
   readonly dbHandle?: DatabaseConnectionHandle;
   readonly authOptions?: AuthModuleOptions;
+  readonly rateLimitOptions?: RateLimitModuleOptions;
 }
 
 // TODO(STATE-04): Incorporar LobbyModule en M4.
@@ -22,10 +27,19 @@ export class AppModule {
       ? DatabaseModule.registerFromHandle(options.dbHandle)
       : DatabaseModule.registerAsyncFromEnv(process.env['DATABASE_URL']);
 
+    const sharedNowFn =
+      options.rateLimitOptions?.nowFn ??
+      options.authOptions?.rateLimitConfig?.nowFn ??
+      options.authOptions?.runtimeConfig?.nowFn;
+
     return {
       module: AppModule,
       imports: [
         dbImport,
+        RateLimitModule.register({
+          ...options.rateLimitOptions,
+          ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
+        }),
         AuditModule,
         AuthModule.register(options.authOptions),
         UsersModule,

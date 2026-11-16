@@ -326,7 +326,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
     expect(reuseAudits.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('enforces progressive brute-force lockout (60s -> 300s) and recovers once lockout expires', async () => {
+  it('enforces progressive lockout per (account + IP) and Captcha per account without locking out legitimate third-party IPs', async () => {
     await app.inject({
       method: 'POST',
       url: '/v1/auth/register',
@@ -338,34 +338,90 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       },
     });
 
-    // 5 intentos fallidos desde distintas IPs para no gatillar rate-limit antes del umbral de lockout (5)
-    for (let i = 1; i <= 5; i++) {
+    const attackerIp = '203.0.114.10';
+    const legitimateOwnerIp = '198.51.100.88';
+
+    // 1..3 intentos fallidos desde la IP atacante -> alcanza el umbral por cuenta para exigir Captcha (3)
+    for (let i = 1; i <= 3; i++) {
       const fail = await app.inject({
         method: 'POST',
         url: '/v1/auth/login',
-        headers: { 'x-forwarded-for': `203.0.114.${i}` },
+        headers: { 'x-forwarded-for': attackerIp },
         payload: { email: 'lockout@truco.ar', password: 'ClaveIncorrecta00' },
       });
       expect(fail.statusCode).toBe(401);
     }
 
-    // Incluso con la contraseña CORRECTA, mientras dure el bloqueo responde 423 ACCOUNT_LOCKED
-    const blockedAttempt = await app.inject({
+    // Sin captchaToken, cualquier nuevo intento sobre la cuenta recibe 400 CAPTCHA_FAILED (no bloquea la cuenta)
+    const missingCaptcha = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
-      headers: { 'x-forwarded-for': '203.0.114.20' },
+      headers: { 'x-forwarded-for': legitimateOwnerIp },
       payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
     });
-    expect(blockedAttempt.statusCode).toBe(423);
-    expect(blockedAttempt.json().error.code).toBe('ACCOUNT_LOCKED');
-    expect(blockedAttempt.json().error.details?.retryAfterSeconds).toBe(60);
+    expect(missingCaptcha.statusCode).toBe(400);
+    expect(missingCaptcha.json().error.code).toBe('CAPTCHA_FAILED');
+    expect(missingCaptcha.json().error.details?.captchaRequired).toBe(true);
 
-    // Avanzar 65s (vence el primer lockout y la ventana de rate limit) -> 6to fallo escala el bloqueo a 300s
+    // 4to y 5to fallo desde attackerIp (resolviendo Captcha pero errando clave) -> gatilla lockout 60s en (cuenta + attackerIp)
+    for (let i = 4; i <= 5; i++) {
+      const fail = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: { 'x-forwarded-for': attackerIp },
+        payload: {
+          email: 'lockout@truco.ar',
+          password: 'ClaveIncorrecta00',
+          captchaToken: 'sim-captcha-ok',
+        },
+      });
+      expect(fail.statusCode).toBe(401);
+    }
+
+    // La combinación (lockout@truco.ar + attackerIp) queda bloqueada con 423 ACCOUNT_LOCKED incluso con clave real
+    const blockedAttacker = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: { 'x-forwarded-for': attackerIp },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveRealLock123',
+        captchaToken: 'sim-captcha-ok',
+      },
+    });
+    expect(blockedAttacker.statusCode).toBe(423);
+    expect(blockedAttacker.json().error.code).toBe('ACCOUNT_LOCKED');
+    expect(blockedAttacker.json().error.details?.scope).toBe('account_ip');
+    expect(blockedAttacker.json().error.details?.retryAfterSeconds).toBe(60);
+
+    // El dueño legítimo desde OTRA IP (198.51.100.88) NO sufre bloqueo por terceros: pasa con clave real + Captcha
+    const ownerSuccess = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: { 'x-forwarded-for': legitimateOwnerIp },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveRealLock123',
+        captchaToken: 'sim-captcha-ok',
+      },
+    });
+    expect(ownerSuccess.statusCode).toBe(200);
+
+    // Entretanto, attackerIp sigue bloqueada hasta que venza su propio lockout
+    const stillBlockedAttacker = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: { 'x-forwarded-for': attackerIp },
+      payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
+    });
+    expect(stillBlockedAttacker.statusCode).toBe(423);
+
+    // Avanzar 65s (vence el primer lockout y la ventana de rate limit) -> 6to fallo desde attackerIp escala a 300s
     clockMs += 65_000;
     const sixthFail = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
-      headers: { 'x-forwarded-for': '203.0.114.21' },
+      headers: { 'x-forwarded-for': attackerIp },
       payload: { email: 'lockout@truco.ar', password: 'ClaveIncorrecta00' },
     });
     expect(sixthFail.statusCode).toBe(401);
@@ -373,18 +429,18 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
     const secondTierCheck = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
-      headers: { 'x-forwarded-for': '203.0.114.22' },
+      headers: { 'x-forwarded-for': attackerIp },
       payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
     });
     expect(secondTierCheck.statusCode).toBe(423);
     expect(secondTierCheck.json().error.details?.retryAfterSeconds).toBe(300);
 
-    // Avanzar 305s -> login válido tiene éxito y resetea el contador
+    // Avanzar 305s -> login válido desde attackerIp tiene éxito y limpia el estado de fallos
     clockMs += 305_000;
     const recovered = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
-      headers: { 'x-forwarded-for': '203.0.114.23' },
+      headers: { 'x-forwarded-for': attackerIp },
       payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
     });
     expect(recovered.statusCode).toBe(200);

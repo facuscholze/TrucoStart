@@ -57,7 +57,7 @@ describe('M3 Security Primitives & Pluggable Dev/Test Providers', () => {
     expect(verifyAccessSessionCookie(`${cookie}tamper`, secret, now)).toBeNull();
   });
 
-  it('enforces independent sliding-window rate limits per IP and per account', () => {
+  it('enforces independent sliding-window rate limits per IP, per (account + IP), and per account', async () => {
     let clock = 1_000_000;
     const limiter = new HttpAuthRateLimiter({
       windowMs: 60_000,
@@ -66,24 +66,24 @@ describe('M3 Security Primitives & Pluggable Dev/Test Providers', () => {
       nowFn: () => clock,
     });
 
-    limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.1', accountKey: 'ana@test.com' });
-    limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.2', accountKey: 'ana@test.com' });
-    // 3er intento para la misma cuenta desde una tercera IP distinta -> bloqueado por cuenta
-    expect(() =>
-      limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.3', accountKey: 'ana@test.com' }),
-    ).toThrow(/cuenta/);
+    await limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.1', accountKey: 'ana@test.com' });
+    await limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.2', accountKey: 'ana@test.com' });
+    // 3er intento para la misma cuenta desde una tercera IP distinta -> bloqueado por cuenta en endpoints globales
+    await expect(
+      limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.3', accountKey: 'ana@test.com' }),
+    ).rejects.toThrow(/cuenta/);
 
     // Exceso por IP aunque cambie de cuenta
-    limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.1', accountKey: 'b1@test.com' });
-    limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.1', accountKey: 'b2@test.com' });
-    expect(() =>
-      limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.1', accountKey: 'b3@test.com' }),
-    ).toThrow(/dirección IP/);
+    await limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.1', accountKey: 'b1@test.com' });
+    await limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.1', accountKey: 'b2@test.com' });
+    await expect(
+      limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.1', accountKey: 'b3@test.com' }),
+    ).rejects.toThrow(/dirección IP/);
 
     clock += 61_000;
-    expect(() =>
-      limiter.enforce({ endpointGroup: 'login', ip: '10.0.0.1', accountKey: 'ana@test.com' }),
-    ).not.toThrow();
+    await expect(
+      limiter.enforce({ endpointGroup: 'forgot', ip: '10.0.0.1', accountKey: 'ana@test.com' }),
+    ).resolves.toBeUndefined();
   });
 
   it('validates simulated Email, Google OAuth, and Captcha providers behind clean interfaces', async () => {

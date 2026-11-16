@@ -66,7 +66,7 @@ export class AuthRecoveryService {
     meta: RequestClientMeta,
   ): Promise<NonEnumeratingAckResponse> {
     const emailLower = input.email.trim().toLowerCase();
-    this.rateLimiter.enforce({
+    await this.rateLimiter.enforce({
       endpointGroup: 'auth:forgot',
       ip: meta.ip,
       accountKey: emailLower,
@@ -118,7 +118,7 @@ export class AuthRecoveryService {
     input: ResetPasswordRequest,
     meta: RequestClientMeta,
   ): Promise<NonEnumeratingAckResponse> {
-    this.rateLimiter.enforce({ endpointGroup: 'auth:reset', ip: meta.ip });
+    await this.rateLimiter.enforce({ endpointGroup: 'auth:reset', ip: meta.ip });
     const now = new Date(this.config.nowFn());
     const tokenHash = hashOpaqueTokenSha256(input.token);
     const consumed = await this.repo.consumeValidAuthToken(tokenHash, 'PASSWORD_RESET', now);
@@ -159,7 +159,7 @@ export class AuthRecoveryService {
     input: VerifyEmailRequest,
     meta: RequestClientMeta,
   ): Promise<NonEnumeratingAckResponse> {
-    this.rateLimiter.enforce({ endpointGroup: 'auth:verify-email', ip: meta.ip });
+    await this.rateLimiter.enforce({ endpointGroup: 'auth:verify-email', ip: meta.ip });
     const now = new Date(this.config.nowFn());
     const tokenHash = hashOpaqueTokenSha256(input.token);
     const consumed = await this.repo.consumeValidAuthToken(tokenHash, 'EMAIL_VERIFY', now);
@@ -190,7 +190,7 @@ export class AuthRecoveryService {
     meta: RequestClientMeta,
   ): Promise<NonEnumeratingAckResponse> {
     const emailLower = input.email.trim().toLowerCase();
-    this.rateLimiter.enforce({
+    await this.rateLimiter.enforce({
       endpointGroup: 'auth:resend-verification',
       ip: meta.ip,
       accountKey: emailLower,

@@ -211,7 +211,7 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
 - **Decisión:**
   1. Generar las migraciones SQL oficiales con `drizzle-kit generate` en `apps/api/drizzle/*.sql`.
   2. Implementar un proveedor adaptativo (`database.provider.ts`) que ejecuta **exactamente las mismas migraciones SQL**:
-     - Cuando `DATABASE_URL` está definido (producción y GitHub Actions CI): conecta vía `pg.Pool` contra PostgreSQL 16 real. En suites de pruebas paralelas crea un esquema efímero aislado (`CREATE SCHEMA test_<id>` + `search_path`) y lo elimina al cerrar.
+     - Cuando `DATABASE_URL` está definido (producción y GitHub Actions CI): conecta vía `pg.Pool` contra PostgreSQL 16 real. En suites de pruebas paralelas crea una base de datos efímera aislada (`CREATE DATABASE "truco_test_<id>"`) sobre el esquema real `public` —evitando colisiones con calificadores explícitos `"public"."users"` emitidos por `drizzle-kit generate`— y la elimina (`DROP DATABASE ... WITH (FORCE)`) al cerrar.
      - Cuando `DATABASE_URL` no está definido (desarrollo en sandbox sin Docker): carga dinámicamente `@electric-sql/pglite` (PostgreSQL real compilado a WASM en memoria), evitando que `PGlite` sea siquiera importado en despliegues productivos.
   3. Añadir aserción explícita en Vitest garantizando que cuando `CI=true` jamás se omita `DATABASE_URL`.
 - **Consecuencias:**
@@ -227,7 +227,27 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
 - **Decisión:**
   1. **Cookies `HttpOnly; Secure; SameSite=Lax`:** `truco_access` (`Path=/`, 15 min) firmada con HMAC-SHA256 bajo prefijo de dominio `access-v1:` y validada contra estado vivo de sesión/usuario en DB (revocación instantánea); `truco_refresh` (`Path=/v1/auth`, 30 días) opaca CSPRNG de 256 bits almacenando únicamente `SHA-256(token)` en `sessions.refresh_hash`.
   2. **Familias de sesión y detección de reúso:** cada login inaugura un `family_id`. Rotar un refresh token marca el eslabón previo con `revoked_reason = 'ROTATED'`. Si un token ya rotado vuelve a presentarse, el servidor revoca de inmediato **todos los miembros activos de ese `family_id`** (`REUSE_DETECTED`) y registra la intrusión en `audit_logs`.
-  3. **Separación criptográfica HTTP vs WS:** `POST /v1/auth/ws-ticket` emite un ticket firmado de 60 s compatible con `verifyWsAuthTicket` de `@truco/game-server`. Al usar claves/prefijos distintos al de `truco_access`, una cookie HTTP jamás puede reutilizarse directamente como ticket WebSocket ni viceversa.
+  3. **Separación criptográfica HTTP vs WS y ticket de un solo uso (`jti`):** `POST /v1/auth/ws-ticket` emite un ticket firmado de 60 s con identificador único `jti` compatible con `verifyWsAuthTicket` de `@truco/game-server`. En el primer handshake Socket.IO, `apps/game-server` consume atómicamente `jti` en `GameStore` (`SET NX PX` con TTL restante) rechazando cualquier intento de reutilización. Al usar claves/prefijos distintos al de `truco_access`, una cookie HTTP jamás puede reutilizarse directamente como ticket WebSocket ni viceversa.
   4. **Promoción in-place de invitados:** `POST /v1/auth/promote-guest` actualiza la fila existente en `users` conservando intacto `users.id`, `profiles` (nivel/XP/ajustes) y `match_players`.
 - **Consecuencias:**
-  - Mitigación robusta frente a robo de tokens, enumeración de cuentas y fuerza bruta progresiva (`60s -> 300s -> 900s -> 3600s`), verificada end-to-end contra `apps/game-server`.
+  - Mitigación robusta frente a robo de tokens, replay de tickets WS y enumeración de cuentas, verificada end-to-end contra `apps/game-server`.
+
+---
+
+## ADR-015: `RateLimitStore` Dual (`InMemory` + `Redis`), Lockout Progresivo por `(Cuenta + IP)` y Escalado a Captcha por Cuenta
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:**
+  1. Un limitador de tasa exclusivamente en memoria local pierde efectividad al escalar `apps/api` a múltiples réplicas detrás de un balanceador.
+  2. Aplicar bloqueo progresivo (`423 ACCOUNT_LOCKED`) de forma global sobre el correo electrónico (`users.locked_until`) introduce una vulnerabilidad clásica de **denegación de servicio (DoS) contra cuentas de terceros**: cualquier atacante que conozca el email de un jugador competitivo (o de un moderador/streamer) puede enviar 5 contraseñas erróneas rotando direcciones IP cada pocos minutos y dejar al propietario legítimo permanentemente fuera de su cuenta, incluso cuando ingresa su contraseña real desde su dispositivo habitual.
+- **Decisión:**
+  1. **Puerto `RateLimitStore` con adaptadores `InMemoryRateLimitStore` y `RedisRateLimitStore`:** siguiendo el mismo patrón contractual que `GameStore`, todas las cuotas de ventana deslizante (`consumeWindow`), bloqueos progresivos (`getLockoutState` / `recordLockoutFailure`) y contadores de fallos (`incrementFailureCounter`) se abstraen detrás de `RateLimitStore`, usando scripts Lua atómicos sobre `ZSET` y `HASH` en Redis 7 y verificándose con una suite de contrato compartida (`rate-limit-store.contract.spec.ts`).
+  2. **Lockout progresivo acotado a `(cuenta + IP)`:** el bloqueo escalonado (`60s -> 300s -> 900s -> 3600s` a partir de 5 fallos) actúa únicamente sobre la tupla normalizada `(emailLower + ip)`, frenando fuerza bruta desde un origen concreto sin bloquear jamás otros orígenes legítimos. De igual modo, la cuota HTTP de `POST /v1/auth/login` se aplica por `IP` y por `(cuenta + IP)`, nunca como bloqueo duro global por cuenta.
+  3. **Umbral por cuenta con escalado a Captcha (`LOGIN_ACCOUNT_CAPTCHA_THRESHOLD = 3`):** cuando una cuenta acumula `>= 3` intentos fallidos dentro de la ventana activa (`15 min`) desde cualquier conjunto de IPs (p. ej. credential stuffing distribuido), `POST /v1/auth/login` exige resolver un `captchaToken` válido antes de evaluar credenciales (`400 CAPTCHA_FAILED` con `details.captchaRequired = true`), aplicando la misma regla tanto a emails registrados como inexistentes para preservar anti-enumeración.
+- **Alternativas consideradas:**
+  - _Mantener bloqueo global por cuenta con tiempos más cortos_: descartado porque un script automatizado trivial puede renovar el bloqueo indefinidamente e impedir que un jugador reconecte a un torneo o partida activa.
+  - _Confiar únicamente en rate limit por IP sin umbral por cuenta_: descartado porque una botnet con miles de IPs residenciales probaría 1-2 contraseñas por IP sin activar ni el límite por IP ni el lockout `(cuenta + IP)`.
+- **Consecuencias:**
+  - Ningún tercero puede bloquear la cuenta de otro jugador conociendo su email: el dueño legítimo siempre puede iniciar sesión presentando su contraseña real junto con el desafío Captcha.
+  - Consistencia horizontal entre múltiples instancias de `apps/api` respaldada por Redis 7 en producción y CI.

@@ -2,6 +2,8 @@ import {
   DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
   DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
   DEFAULT_WS_TICKET_TTL_MS,
+  LOGIN_ACCOUNT_CAPTCHA_THRESHOLD,
+  LOGIN_FAILURE_WINDOW_MS,
 } from '@truco/shared';
 import type { CookieConfig } from './security/token-crypto.js';
 
@@ -13,6 +15,8 @@ export interface AuthRuntimeConfig {
   readonly accessTtlSeconds: number;
   readonly refreshTtlSeconds: number;
   readonly wsTicketTtlMs: number;
+  readonly loginCaptchaThreshold: number;
+  readonly loginFailureWindowMs: number;
   readonly nicknameBlockedTerms?: readonly string[];
   readonly nowFn: () => number;
 }
@@ -60,6 +64,8 @@ export function buildAuthRuntimeConfigFromEnv(
     accessTtlSeconds,
     refreshTtlSeconds,
     wsTicketTtlMs,
+    loginCaptchaThreshold: overrides.loginCaptchaThreshold ?? LOGIN_ACCOUNT_CAPTCHA_THRESHOLD,
+    loginFailureWindowMs: overrides.loginFailureWindowMs ?? LOGIN_FAILURE_WINDOW_MS,
     nicknameBlockedTerms: overrides.nicknameBlockedTerms ?? blockedFromEnv,
     nowFn: overrides.nowFn ?? Date.now,
     cookieConfig: overrides.cookieConfig ?? {

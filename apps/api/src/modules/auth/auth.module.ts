@@ -1,5 +1,9 @@
 import { type DynamicModule, Global, Module } from '@nestjs/common';
 import {
+  RATE_LIMIT_STORE,
+  type RateLimitStore,
+} from '../../common/rate-limit/rate-limit-store.interface.js';
+import {
   AUTH_RUNTIME_CONFIG,
   type AuthRuntimeConfig,
   buildAuthRuntimeConfigFromEnv,
@@ -63,7 +67,8 @@ export class AuthModule {
         { provide: AUTH_RUNTIME_CONFIG, useValue: runtimeConfig },
         {
           provide: HttpAuthRateLimiter,
-          useValue: new HttpAuthRateLimiter(rateLimitConfig),
+          useFactory: (store: RateLimitStore) => new HttpAuthRateLimiter(rateLimitConfig, store),
+          inject: [RATE_LIMIT_STORE],
         },
         {
           provide: EMAIL_PROVIDER,

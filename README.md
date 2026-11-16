@@ -63,7 +63,8 @@ El seed de desarrollo (bloqueado automáticamente si `NODE_ENV=production`) crea
 
 3. **Suite E2E automatizada multi-cliente (sin `pnpm dev:all`, todo efímero):**
    - `pnpm --filter @truco/web build && pnpm --filter @truco/web test:e2e` levanta automáticamente `apps/api/scripts/e2e-stack.ts` (API `:3001` + `game-server` `:3002` con base de datos adaptativa) y `vite preview` en `http://localhost:4173`, ejecutando dos escenarios reales: **Desktop `1280x800`** (crear mesa, unirse por código, reconexión a mitad de mano con `game.rejoin`, partida completa, revancha y perfil con estadísticas reales) y **Mobile `360x800`** (mismo flujo con drawer de cantos y `/anotador` recargado sin red vía Service Worker).
-   - `pnpm --filter @truco/web screenshots:m5b` regenera las **14 capturas** (`360px` y `1200px`) de `docs/screenshots/` sembrando una partida y una mesa pública reales.
+   - El reparto es **determinístico**: `apps/api/scripts/e2e-stack.ts` fija `E2E_DEAL_SEED_HEX` (configurable por variable de entorno) y la suite verifica que ambos asientos reciben siempre exactamente las mismas cartas y que la revancha reparte igual, de modo que cada corrida juega la misma partida.
+   - `pnpm --filter @truco/web screenshots:m5b` regenera las **20 capturas** (`360px` y `1200px`) de `docs/screenshots/` sembrando una partida y una mesa pública reales.
 
 ---
 

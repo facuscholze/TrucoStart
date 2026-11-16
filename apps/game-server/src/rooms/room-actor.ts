@@ -61,6 +61,8 @@ export interface RoomActorDeps {
   readonly defaultTurnTimeoutMs?: number;
   readonly reconnectGraceMs?: number;
   readonly nowFn?: () => number;
+  /** Semilla de reparto fija para tests/E2E reproducibles (nunca en producción). */
+  readonly dealSeedHex?: string;
 }
 
 export interface RoomCreateParams {
@@ -94,7 +96,8 @@ export class RoomActor {
   private turnWarningAt: number | null;
   private readonly processedEventIds: string[];
 
-  private readonly deps: Required<RoomActorDeps>;
+  private readonly deps: Required<Omit<RoomActorDeps, 'dealSeedHex'>> &
+    Pick<RoomActorDeps, 'dealSeedHex'>;
   private readonly timers = new RoomTimerController();
   private readonly socketsBySeat = new Map<number, Socket>();
   private writeChain: Promise<void> = Promise.resolve();
@@ -139,6 +142,7 @@ export class RoomActor {
       defaultTurnTimeoutMs: deps.defaultTurnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
       reconnectGraceMs: this.reconnectGraceMs,
       nowFn: deps.nowFn ?? Date.now,
+      ...(deps.dealSeedHex !== undefined ? { dealSeedHex: deps.dealSeedHex } : {}),
     };
   }
 
@@ -411,6 +415,7 @@ export class RoomActor {
       nowMs: now,
       tableStateEvent: this.buildTableStateEvent(now),
       allocateSeq: this.allocateSeq,
+      ...(this.deps.dealSeedHex !== undefined ? { dealSeedHex: this.deps.dealSeedHex } : {}),
     });
 
     this.matchId = started.matchId;

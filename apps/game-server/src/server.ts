@@ -45,6 +45,11 @@ export interface GameServerOptions {
   readonly internalRpcMaxSkewMs?: number;
   readonly rateLimiter?: WsRateLimiterConfig;
   readonly nowFn?: () => number;
+  /**
+   * Semilla de reparto fija (hex de 64 chars) para tests E2E reproducibles.
+   * Debe permanecer sin definir en producción: el reparto usa `randomBytes(32)`.
+   */
+  readonly dealSeedHex?: string;
 }
 
 export interface GameServerInstance {
@@ -110,6 +115,7 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       : {}),
     ...(options.ownerLeaseTtlMs !== undefined ? { ownerLeaseTtlMs: options.ownerLeaseTtlMs } : {}),
     ...(options.idleRoomTtlMs !== undefined ? { idleRoomTtlMs: options.idleRoomTtlMs } : {}),
+    ...(options.dealSeedHex !== undefined ? { dealSeedHex: options.dealSeedHex } : {}),
     nowFn,
   });
 

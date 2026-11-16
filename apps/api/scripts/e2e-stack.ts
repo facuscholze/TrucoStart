@@ -5,6 +5,13 @@ import { HttpGameRoomProvisioner } from '../src/modules/lobby/ports/game-room-pr
 import { InMemoryMatchLifecycleConsumer } from '../src/modules/lobby/ports/match-lifecycle-consumer.js';
 
 const SHARED_SECRET = 'm5b-playwright-e2e-shared-secret-min-32-chars!!';
+/**
+ * Semilla de reparto fija para E2E reproducibles: cada corrida reparte exactamente
+ * las mismas cartas (misma partida determinística). Solo entorno de pruebas.
+ */
+const E2E_DEAL_SEED_HEX =
+  process.env['E2E_DEAL_SEED_HEX'] ??
+  'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
 const API_PORT = Number(process.env['API_PORT'] ?? 3001);
 const GAME_PORT = Number(process.env['GAME_SERVER_PORT'] ?? 3002);
 
@@ -17,6 +24,7 @@ async function main() {
     internalSecret: SHARED_SECRET,
     seedEncryptionKey: SHARED_SECRET,
     allowAdHocRooms: false,
+    dealSeedHex: E2E_DEAL_SEED_HEX,
     reconnectGraceMs: 45_000,
     defaultTurnTimeoutMs: 45_000,
     lifecyclePublisher: inMemoryBus,

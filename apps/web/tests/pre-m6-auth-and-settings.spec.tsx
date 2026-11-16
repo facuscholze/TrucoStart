@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthScreen } from '../src/features/auth/AuthScreen.js';
 import { ProfileScreen } from '../src/features/profile/ProfileScreen.js';
+import type { AuthUserSummary } from '@truco/shared';
 import { loadClientPreferences } from '../src/lib/preferences.js';
 
 const registerAccountRequest = vi.fn();
@@ -46,18 +47,21 @@ vi.mock('../src/lib/api-client.js', async () => {
   };
 });
 
-const registeredUser = {
+const registeredUser: AuthUserSummary = {
   id: 'usr-1',
+  email: 'gaucho@truco.ar',
   nickname: 'GauchoDelSur',
   isGuest: false,
   emailVerified: true,
-  avatarSeed: 'gaucho',
+  role: 'PLAYER',
+  status: 'ACTIVE',
   createdAt: '2026-11-01T10:00:00.000Z',
 };
 
-const guestUser = {
+const guestUser: AuthUserSummary = {
   ...registeredUser,
   id: 'usr-guest',
+  email: null,
   nickname: 'Invitado_1234',
   isGuest: true,
   emailVerified: false,

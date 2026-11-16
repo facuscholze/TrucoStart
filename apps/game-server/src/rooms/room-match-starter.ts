@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { createGame, type GameState, type PlayerSeat, type RuleSet, viewFor } from '@truco/engine';
 import type { RoomSeatInfo, RulesetCode } from '@truco/shared';
 import {
+  computeSeedCommitment,
   createRngFromSeedHex,
   encryptSeedForStore,
   generateCommitRevealSeed,
@@ -36,6 +37,11 @@ export interface StartMatchParams {
   readonly nowMs: number;
   readonly tableStateEvent: PersistedSequencedEvent;
   readonly allocateSeq: () => number;
+  /**
+   * Semilla fija de reparto (solo tests/E2E): mantiene commit-reveal válido pero hace
+   * la partida reproducible entre corridas.
+   */
+  readonly dealSeedHex?: string;
 }
 
 export interface StartedMatchBundle {
@@ -60,7 +66,9 @@ export function createMatchStartBundle(params: StartMatchParams): StartedMatchBu
     allocateSeq,
   } = params;
 
-  const { seedHex, seedCommitment } = generateCommitRevealSeed();
+  const { seedHex, seedCommitment } = params.dealSeedHex
+    ? { seedHex: params.dealSeedHex, seedCommitment: computeSeedCommitment(params.dealSeedHex) }
+    : generateCommitRevealSeed();
   const ruleset = params.ruleset ?? resolveRulesetByCode(rulesetCode);
   const enginePlayers: PlayerSeat[] = publicSeats.map((s) => ({
     seat: s.seat,

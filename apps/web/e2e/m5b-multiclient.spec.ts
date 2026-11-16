@@ -2,6 +2,13 @@ import { type Browser, chromium, expect, type Page, test } from '@playwright/tes
 
 const BASE_URL = 'http://localhost:4173';
 
+/**
+ * Reparto esperado para el asiento 1 de la mesa privada 1v1 a 15 sin Flor con la semilla
+ * `E2E_DEAL_SEED_HEX` definida en `apps/api/scripts/e2e-stack.ts` (reproducibilidad E2E).
+ */
+const EXPECTED_DEAL_SEAT_0: string[] = ['6-bastos', '7-bastos', '7-espadas'];
+const EXPECTED_DEAL_SEAT_1: string[] = ['12-espadas', '3-copas', '5-copas'];
+
 async function launchIsolatedChromium(): Promise<Browser> {
   try {
     return await chromium.launch({ headless: true });
@@ -19,6 +26,17 @@ async function launchIsolatedChromium(): Promise<Browser> {
       env: { ...process.env } as Record<string, string>,
     });
   }
+}
+
+/**
+ * Lee las cartas repartidas al jugador humano desde el DOM (ids `svg[data-card-id]`).
+ * Con `E2E_DEAL_SEED_HEX` fijo en `apps/api/scripts/e2e-stack.ts` el reparto es determinístico.
+ */
+async function readMyCardIds(page: Page): Promise<string[]> {
+  const ids = await page
+    .locator('svg[data-card-id]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-card-id') ?? ''));
+  return ids.filter(Boolean).sort();
 }
 
 async function isResultModalOpen(page: Page): Promise<boolean> {
@@ -178,6 +196,16 @@ test.describe('M5b Multi-Client E2E — Desktop & Mobile + Reconexión + Revanch
       await expect(pageA.getByRole('region', { name: /Mesa de truco en vivo/i })).toBeVisible();
       await expect(pageB.getByRole('region', { name: /Mesa de truco en vivo/i })).toBeVisible();
 
+      // 4b. Reparto DETERMINÍSTICO: con la semilla fija del stack E2E, el asiento 0 recibe
+      // siempre las mismas 3 cartas (partida reproducible entre corridas).
+      const dealtA = await readMyCardIds(pageA);
+      const dealtB = await readMyCardIds(pageB);
+      expect(dealtA).toHaveLength(3);
+      expect(dealtB).toHaveLength(3);
+      expect(new Set([...dealtA, ...dealtB]).size).toBe(6);
+      expect(dealtA).toEqual(EXPECTED_DEAL_SEAT_0);
+      expect(dealtB).toEqual(EXPECTED_DEAL_SEAT_1);
+
       // 5. Jugar la primera carta de la mano y probar RECONEXIÓN A MITAD DE MANO
       const cardA = pageA.locator('button:not([disabled]):has(svg[data-card-id])').first();
       if ((await cardA.count()) > 0) {
@@ -226,6 +254,10 @@ test.describe('M5b Multi-Client E2E — Desktop & Mobile + Reconexión + Revanch
       ).toHaveCount(0);
       await expect(pageA.getByText('Mano #1').first()).toBeVisible();
       await expect(pageB.getByText('Mano #1').first()).toBeVisible();
+
+      // La revancha reusa la misma sala y la misma semilla fija: el reparto se repite exacto.
+      await expect(pageA.getByRole('region', { name: /Mesa de truco en vivo/i })).toBeVisible();
+      expect(await readMyCardIds(pageA)).toEqual(EXPECTED_DEAL_SEAT_0);
 
       // 8. Verificar en /perfil que las estadísticas reales e historial de PostgreSQL se actualizaron
       await pageA.goto(`${BASE_URL}/perfil`);
@@ -282,6 +314,9 @@ test.describe('M5b Multi-Client E2E — Desktop & Mobile + Reconexión + Revanch
 
       await expect(pageA.getByRole('region', { name: /Mesa de truco en vivo/i })).toBeVisible();
       await expect(pageB.getByRole('region', { name: /Mesa de truco en vivo/i })).toBeVisible();
+
+      // 3b. Mismo reparto determinístico que en escritorio (misma semilla fija del stack E2E).
+      expect(await readMyCardIds(pageA)).toEqual(EXPECTED_DEAL_SEAT_0);
 
       // 4. Jugar partida completa en viewport móvil (360px) usando el drawer de Cantos
       await playUntilMatchEnds(pageA, pageB, true);

@@ -297,6 +297,17 @@ async function main() {
         await page.goto(`${BASE_URL}/acceso`);
         await page.getByRole('heading', { name: /Tu cuenta en el paño/i }).waitFor();
         await capture(page, shot('m5b-login'), shotOpts);
+
+        // 1b. Registro de cuenta nueva
+        await page.getByRole('tab', { name: /Crear cuenta/i }).click();
+        await page.getByRole('button', { name: /Crear cuenta y entrar/i }).waitFor();
+        await capture(page, shot('m5b-registro'), shotOpts);
+
+        // 1c. Recuperación de contraseña (pedido de enlace por correo)
+        await page.getByRole('tab', { name: /Recuperar clave/i }).click();
+        await page.getByRole('button', { name: /Enviar enlace de recuperación/i }).waitFor();
+        await capture(page, shot('m5b-recuperar'), shotOpts);
+
         await context.close();
       }
 
@@ -334,6 +345,12 @@ async function main() {
         await page.goto(`${BASE_URL}/perfil`);
         await page.getByRole('heading', { name: /Estadísticas oficiales/i }).waitFor();
         await capture(page, shot('m5b-perfil'), shotOpts);
+
+        // 4b. Ajustes: sonido/animaciones + sesiones y dispositivos + exportar/eliminar cuenta
+        await capture(page, shot('m5b-ajustes'), {
+          ...shotOpts,
+          scrollTo: 'text=Sonido, animaciones y accesibilidad',
+        });
 
         // 5. Aprender (reglas, jerarquía de cartas y señas)
         await page.goto(`${BASE_URL}/aprender`);

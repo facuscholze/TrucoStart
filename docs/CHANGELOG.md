@@ -4,6 +4,27 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.6.0-m5a] — 2026-11-13 (Ajustes Pre-M5 y Sub-etapa M5a — Sistema de Diseño `@truco/ui`, Baraja Española SVG y Mesa Responsive en `@truco/web`)
+
+### Agregado
+
+- **Ajustes Pre-M5 (Ítems 1–4):**
+  - Inclusión idempotente de `ar-corto-15-flor-v1` en `apps/api/src/db/seed-dev.ts` manteniendo intacto `INITIAL_RULESETS` (3 elementos) en `@truco/engine` (`73dbfed`).
+  - Cola de fallos permanentes (DLQ `truco-match-lifecycle-dlq`) en `BullMqMatchLifecycleConsumer` tras agotar reintentos de BullMQ, con test real de agotamiento de reintentos y preservación del payload (`255d018`).
+  - Cableado productivo completo de `apps/game-server/src/main.ts` con `RedisGameStore`, `BullMqMatchLifecyclePublisher`, `parseGameServerEnv`, `allowAdHocRooms: false` y apagado limpio `SIGINT`/`SIGTERM` (`1b6c956`).
+  - Orquestador unificado `pnpm dev:all` (`scripts/dev-all.mjs` con `--dry-run`) y documentación completa de flujo local en `README.md` (`1dcdcb6`).
+- **Sistema de diseño `@truco/ui` y baraja española SVG original (`M5a-1`, `fc347e1`):**
+  - Tokens semánticos "Paño Criollo Contemporáneo" (`#0F3D2E`, `#09281E`, `#14201B`, `#1B2B24`, `#F6F0E2`, `#18221D`, `#E0B84C`, `#6FB1E0`, `#D6523F`/`#FF8F7E`, `#4CB782`), tipografías `Fraunces` + `Inter` (`tabular-nums`), contraste verificado **WCAG 2.1 AA** y soporte `prefers-reduced-motion`.
+  - Baraja española original de **40 cartas SVG vectoriales** (`Oros`, `Copas`, `Espadas`, `Bastos` `1–7, 10–12`) + dorso geométrico ornamental criollo, sin dependencias externas ni marcas registradas.
+  - 12 componentes accesibles con áreas táctiles `>= 44x44 px`, navegación por teclado y atributos ARIA: `Avatar`, `Badge`, `Card`, `Hand`, `ScoreBoard` (fósforos de a 5 en _Malas/Buenas_), `CallButton`, `PlayerSeat`, `Table`, `QuickChat`, `Toast`, `Modal` y `RankRow`.
+- **Mesa de juego responsive y conexión autoritativa en `apps/web` (`M5a-2`):**
+  - Proyector puro `GameTableView` sobre `PlayerView` (`viewFor`), `CallTray` (bottom-sheet en móvil / panel lateral en escritorio renderizando **estrictamente** `legalActions` informadas por el servidor para _Envido_, _Truco_, _Flor_, respuestas y las 10 _señas_ de 2v2) y `MatchResultModal` (anotador final, verificación SHA-256 commit-reveal y revancha vía `table.ready`).
+  - Hook autoritativo `useLiveGameRoom` sobre Socket.IO (`'envelope'`) con emisión de un `ws-ticket` nuevo single-use en el handshake inicial **y** en cada reconexión, reconexión automática vía `game.rejoin` (`{ roomId, sessionId, lastSeq }`), temporizador de turno, burbujas de cantos/frases y banner de gracia por desconexión rival.
+  - Ruta `/dev/mesa` (`MODO DESARROLLO`) con `React.lazy` bajo `import.meta.env.DEV` contra bots determinísticos de `@truco/engine` (`1v1`/`2v2`, `15`/`30 con Flor` y escenas de inspección), verificada por test automatizado como **excluida** del bundle productivo (`109.37 KB` gzip `< 200 KB`).
+  - Generador automatizado Playwright (`pnpm --filter @truco/web run screenshots:m5a`) y las **12 capturas reales** en `docs/screenshots/` para `360px`, `768px` y `1200px` (_mitad de mano_, _bandeja de cantos_, _resultado_ y _reconexión_).
+
+---
+
 ## [0.5.0-m4] — 2026-11-13 (Ajustes Pre-M4 y Módulo M4 — Lobby, Mesas, Matchmaking y Persistencia de Partidas)
 
 ### Agregado

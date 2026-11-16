@@ -381,6 +381,11 @@ export class RoomActor {
     }
 
     this.status = 'IN_GAME';
+    for (const s of this.seats) {
+      if (s.userId) {
+        await this.deps.store.setUserActiveRoom(s.userId, this.roomId);
+      }
+    }
     const timing = computeTurnTimingWindow(now, this.turnTimeoutMs);
     this.turnDeadline = timing.deadline;
     this.turnWarningAt = timing.warningAt;

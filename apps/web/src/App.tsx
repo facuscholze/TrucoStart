@@ -1,42 +1,154 @@
-import { DEFAULT_APP_NAME, type AuthUserSummary } from '@truco/shared';
-import { Badge, CallButton, Toast } from '@truco/ui';
-import { type FormEvent, lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { LiveMesaRoute } from './features/mesa/LiveMesaRoute.js';
+import type { AuthUserSummary } from '@truco/shared';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { AppShell } from './components/AppShell.js';
+import { OnboardingModal } from './components/OnboardingModal.js';
+import type { AuthTab } from './features/auth/AuthScreen.js';
+import { HomeScreen } from './features/home/HomeScreen.js';
 import { messagesEsAr } from './i18n/messages.es-AR.js';
+import { createGuestSessionRequest, getMeRequest } from './lib/api-client.js';
 import {
-  createTableRequest,
-  ensureGuestOrActiveSession,
-  joinTableByCodeRequest,
-} from './lib/api-client.js';
+  applyPreferencesToDocument,
+  loadClientPreferences,
+  markOnboardingSeen,
+} from './lib/preferences.js';
 
-// Exclusión garantizada en producción: Vite/Rollup elimina esta rama por dead-code elimination cuando import.meta.env.DEV === false
 const DevMesaLazy = import.meta.env.DEV
   ? lazy(() => import('./dev/DevMesaBotPlayground.js'))
   : null;
 
-function parseRoute(pathname: string, search: string) {
+const LiveMesaRouteLazy = lazy(() =>
+  import('./features/mesa/LiveMesaRoute.js').then((m) => ({ default: m.LiveMesaRoute })),
+);
+const LobbyScreenLazy = lazy(() =>
+  import('./features/lobby/LobbyScreen.js').then((m) => ({ default: m.LobbyScreen })),
+);
+const WaitingRoomScreenLazy = lazy(() =>
+  import('./features/waiting-room/WaitingRoomScreen.js').then((m) => ({
+    default: m.WaitingRoomScreen,
+  })),
+);
+const ProfileScreenLazy = lazy(() =>
+  import('./features/profile/ProfileScreen.js').then((m) => ({ default: m.ProfileScreen })),
+);
+const LearnScreenLazy = lazy(() =>
+  import('./features/learn/LearnScreen.js').then((m) => ({ default: m.LearnScreen })),
+);
+const ScorerScreenLazy = lazy(() =>
+  import('./features/scorer/ScorerScreen.js').then((m) => ({ default: m.ScorerScreen })),
+);
+const AuthScreenLazy = lazy(() =>
+  import('./features/auth/AuthScreen.js').then((m) => ({ default: m.AuthScreen })),
+);
+
+type ParsedAppRoute =
+  | { kind: 'dev-mesa' }
+  | { kind: 'live-mesa'; roomId: string; joinCode: string | null }
+  | { kind: 'waiting-room'; tableId: string }
+  | { kind: 'lobby'; inviteOrCode: string | null }
+  | { kind: 'profile' }
+  | { kind: 'learn' }
+  | { kind: 'scorer' }
+  | {
+      kind: 'auth';
+      tab?: AuthTab;
+      resetToken: string | null;
+      verifyToken: string | null;
+    }
+  | { kind: 'home' };
+
+function parseRoute(pathname: string, search: string): ParsedAppRoute {
   if (import.meta.env.DEV && pathname === '/dev/mesa') {
-    return { kind: 'dev-mesa' as const };
+    return { kind: 'dev-mesa' };
   }
+
+  const params = new URLSearchParams(search);
+
   const mesaMatch = /^\/mesa\/([a-zA-Z0-9_-]{3,64})$/.exec(pathname);
   if (mesaMatch?.[1]) {
-    const code = new URLSearchParams(search).get('code');
-    return { kind: 'live-mesa' as const, roomId: mesaMatch[1], joinCode: code };
+    return {
+      kind: 'live-mesa',
+      roomId: mesaMatch[1],
+      joinCode: params.get('code'),
+    };
   }
-  return { kind: 'home' as const };
+
+  const salaMatch = /^\/sala\/([a-zA-Z0-9_-]{3,64})$/.exec(pathname);
+  if (salaMatch?.[1]) {
+    return { kind: 'waiting-room', tableId: salaMatch[1] };
+  }
+
+  if (pathname === '/lobby' || pathname === '/unirse') {
+    return {
+      kind: 'lobby',
+      inviteOrCode: params.get('invite') ?? params.get('code'),
+    };
+  }
+
+  if (pathname === '/perfil') {
+    return { kind: 'profile' };
+  }
+
+  if (pathname === '/aprender') {
+    return { kind: 'learn' };
+  }
+
+  if (pathname === '/anotador') {
+    return { kind: 'scorer' };
+  }
+
+  if (
+    pathname === '/acceso' ||
+    pathname === '/login' ||
+    pathname === '/registro' ||
+    pathname === '/recuperar'
+  ) {
+    const rawTab = params.get('tab');
+    const inferredTab: AuthTab | undefined =
+      rawTab === 'login' || rawTab === 'register' || rawTab === 'promote' || rawTab === 'recover'
+        ? rawTab
+        : pathname === '/registro'
+          ? 'register'
+          : pathname === '/recuperar'
+            ? 'recover'
+            : pathname === '/login'
+              ? 'login'
+              : undefined;
+    const baseAuth: ParsedAppRoute = {
+      kind: 'auth',
+      resetToken: params.get('resetToken'),
+      verifyToken: params.get('verifyToken'),
+    };
+    return inferredTab ? { ...baseAuth, tab: inferredTab } : baseAuth;
+  }
+
+  return { kind: 'home' };
+}
+
+function RouteFallback() {
+  return (
+    <div
+      role="status"
+      className="rounded-2xl bg-surface border border-ivory/20 p-8 text-center text-sm text-muted"
+    >
+      {messagesEsAr.home.loadingSession}
+    </div>
+  );
 }
 
 export function App() {
-  const appName = (import.meta.env?.['VITE_APP_NAME'] as string | undefined) ?? DEFAULT_APP_NAME;
   const [locationState, setLocationState] = useState(() => ({
     pathname: typeof window !== 'undefined' ? window.location.pathname : '/',
     search: typeof window !== 'undefined' ? window.location.search : '',
   }));
 
   const [currentUser, setCurrentUser] = useState<AuthUserSummary | null>(null);
-  const [joinCodeInput, setJoinCodeInput] = useState<string>('');
-  const [busyAction, setBusyAction] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [sessionLoading, setSessionLoading] = useState<boolean>(true);
+  const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
+  const [onboardingBusy, setOnboardingBusy] = useState<boolean>(false);
+
+  useEffect(() => {
+    applyPreferencesToDocument(loadClientPreferences());
+  }, []);
 
   const navigate = useCallback((to: string) => {
     if (typeof window === 'undefined') return;
@@ -45,6 +157,7 @@ export function App() {
       pathname: window.location.pathname,
       search: window.location.search,
     });
+    window.scrollTo?.({ top: 0 });
   }, []);
 
   useEffect(() => {
@@ -59,22 +172,25 @@ export function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const route = parseRoute(locationState.pathname, locationState.search);
-
   useEffect(() => {
-    if (route.kind !== 'home') return;
     let active = true;
-    void ensureGuestOrActiveSession()
-      .then((user) => {
-        if (active) setCurrentUser(user);
+    void getMeRequest()
+      .then((me) => {
+        if (!active) return;
+        setCurrentUser(me.user);
       })
       .catch(() => {
-        // En tests unitarios sin backend corriendo se muestra estado limpio sin bloquear la UI
+        // Sin sesión previa activa: el jugador puede elegir invitado, login o registro libremente
+      })
+      .finally(() => {
+        if (active) setSessionLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [route.kind]);
+  }, []);
+
+  const route = parseRoute(locationState.pathname, locationState.search);
 
   if (route.kind === 'dev-mesa' && DevMesaLazy) {
     return (
@@ -86,137 +202,122 @@ export function App() {
 
   if (route.kind === 'live-mesa') {
     return (
-      <LiveMesaRoute
-        roomId={route.roomId}
-        joinCode={route.joinCode}
-        onNavigateHome={() => navigate('/')}
-      />
+      <Suspense fallback={<div className="min-h-screen bg-surface text-ivory p-6" />}>
+        <LiveMesaRouteLazy
+          roomId={route.roomId}
+          joinCode={route.joinCode}
+          onNavigateHome={() => navigate('/lobby')}
+        />
+      </Suspense>
     );
   }
 
-  const handleQuickCreate = async (mode: '1v1' | '2v2', targetScore: 15 | 30, flor: boolean) => {
-    setBusyAction(true);
-    setErrorMsg(null);
-    try {
-      const user = currentUser ?? (await ensureGuestOrActiveSession());
-      setCurrentUser(user);
-      const created = await createTableRequest({
-        mode,
-        visibility: 'PRIVATE',
-        targetScore,
-        flor,
-        turnTimeoutMs: 30_000,
-      });
-      const qs = created.joinCode ? `?code=${encodeURIComponent(created.joinCode)}` : '';
-      navigate(`/mesa/${encodeURIComponent(created.roomId)}${qs}`);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : messagesEsAr.launcher.sessionErrorFallback);
-    } finally {
-      setBusyAction(false);
-    }
-  };
+  if (route.kind === 'waiting-room') {
+    return (
+      <Suspense
+        fallback={
+          <AppShell activeSection="lobby" currentUser={currentUser} onNavigate={navigate}>
+            <RouteFallback />
+          </AppShell>
+        }
+      >
+        <WaitingRoomScreenLazy
+          tableId={route.tableId}
+          currentUser={currentUser}
+          onSessionChanged={(u) => setCurrentUser(u)}
+          onNavigate={navigate}
+        />
+      </Suspense>
+    );
+  }
 
-  const handleJoinByCode = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!joinCodeInput.trim()) return;
-    setBusyAction(true);
-    setErrorMsg(null);
-    try {
-      const user = currentUser ?? (await ensureGuestOrActiveSession());
-      setCurrentUser(user);
-      const joined = await joinTableByCodeRequest(joinCodeInput);
-      const qs = joined.joinCode ? `?code=${encodeURIComponent(joined.joinCode)}` : '';
-      navigate(`/mesa/${encodeURIComponent(joined.roomId)}${qs}`);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : messagesEsAr.launcher.sessionErrorFallback);
-    } finally {
-      setBusyAction(false);
-    }
-  };
+  const activeSection =
+    route.kind === 'lobby'
+      ? 'lobby'
+      : route.kind === 'learn'
+        ? 'learn'
+        : route.kind === 'scorer'
+          ? 'scorer'
+          : route.kind === 'profile'
+            ? 'profile'
+            : route.kind === 'auth'
+              ? 'auth'
+              : 'home';
 
   return (
-    <main className="min-h-screen bg-cloth text-ivory flex items-center justify-center p-4 tablet:p-8">
-      <section
-        aria-labelledby="app-heading"
-        className="max-w-xl w-full rounded-2xl bg-surface p-6 tablet:p-8 border border-gold/35 shadow-2xl space-y-5"
-      >
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <Badge variant="gold">{messagesEsAr.brand.stageTag}</Badge>
-          {currentUser && (
-            <Badge variant="success">
-              {messagesEsAr.launcher.guestReadyPrefix} {currentUser.nickname}
-            </Badge>
-          )}
-        </div>
+    <AppShell activeSection={activeSection} currentUser={currentUser} onNavigate={navigate}>
+      <Suspense fallback={<RouteFallback />}>
+        {route.kind === 'home' && (
+          <HomeScreen
+            currentUser={currentUser}
+            sessionLoading={sessionLoading}
+            onSessionChanged={(u) => setCurrentUser(u)}
+            onNavigate={navigate}
+            onOpenOnboarding={() => setOnboardingOpen(true)}
+          />
+        )}
 
-        <div className="space-y-1.5">
-          <h1 id="app-heading" className="font-display text-3xl font-bold text-ivory">
-            {appName}
-          </h1>
-          <p className="text-muted text-sm leading-relaxed">{messagesEsAr.brand.subtitle}</p>
-        </div>
+        {route.kind === 'lobby' && (
+          <LobbyScreenLazy
+            currentUser={currentUser}
+            initialInviteOrCode={route.inviteOrCode}
+            onSessionChanged={(u) => setCurrentUser(u)}
+            onNavigate={navigate}
+          />
+        )}
 
-        {errorMsg && <Toast message={errorMsg} tone="danger" onDismiss={() => setErrorMsg(null)} />}
+        {route.kind === 'profile' && (
+          <ProfileScreenLazy
+            currentUser={currentUser}
+            onSessionChanged={(u) => setCurrentUser(u)}
+            onNavigate={navigate}
+          />
+        )}
 
-        <div className="space-y-3 pt-1">
-          <h2 className="font-display text-lg font-bold text-gold">
-            {messagesEsAr.launcher.heading}
-          </h2>
+        {route.kind === 'learn' && <LearnScreenLazy />}
 
-          <div className="grid grid-cols-1 tablet:grid-cols-2 gap-3">
-            <CallButton
-              tone="truco"
-              subtitle={messagesEsAr.launcher.points15Label}
-              disabled={busyAction}
-              onClick={() => void handleQuickCreate('1v1', 15, false)}
-            >
-              {messagesEsAr.launcher.create1v1Title}
-            </CallButton>
+        {route.kind === 'scorer' && <ScorerScreenLazy />}
 
-            <CallButton
-              tone="flor"
-              subtitle={messagesEsAr.launcher.points30FlorLabel}
-              disabled={busyAction}
-              onClick={() => void handleQuickCreate('2v2', 30, true)}
-            >
-              {messagesEsAr.launcher.create2v2Title}
-            </CallButton>
-          </div>
+        {route.kind === 'auth' && (
+          <AuthScreenLazy
+            currentUser={currentUser}
+            {...(route.tab ? { initialTab: route.tab } : {})}
+            initialResetToken={route.resetToken}
+            initialVerifyToken={route.verifyToken}
+            onSessionChanged={(u) => setCurrentUser(u)}
+            onNavigate={navigate}
+          />
+        )}
+      </Suspense>
 
-          <form onSubmit={(e) => void handleJoinByCode(e)} className="flex gap-2 flex-wrap pt-1">
-            <input
-              type="text"
-              maxLength={6}
-              value={joinCodeInput}
-              onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-              placeholder={messagesEsAr.launcher.joinCodePlaceholder}
-              aria-label={messagesEsAr.launcher.joinCodeAriaLabel}
-              className="flex-1 min-w-[180px] min-h-[44px] rounded-xl bg-elevated border border-ivory/25 px-3.5 text-sm font-mono uppercase tracking-widest text-ivory placeholder:text-muted/60"
-            />
-            <CallButton
-              tone="envido"
-              disabled={busyAction || joinCodeInput.trim().length < 6}
-              onClick={() => {
-                if (joinCodeInput.trim().length === 6) {
-                  void handleJoinByCode({
-                    preventDefault: () => undefined,
-                  } as FormEvent);
-                }
-              }}
-            >
-              {messagesEsAr.launcher.joinCodeAction}
-            </CallButton>
-          </form>
-
-          {import.meta.env.DEV && (
-            <div className="pt-2 border-t border-ivory/10 flex justify-end">
-              <CallButton tone="neutral" onClick={() => navigate('/dev/mesa')}>
-                {messagesEsAr.launcher.devBotRouteCta}
-              </CallButton>
-            </div>
-          )}
-        </div>
-      </section>
-    </main>
+      <OnboardingModal
+        open={onboardingOpen}
+        busy={onboardingBusy}
+        onClose={() => {
+          markOnboardingSeen();
+          setOnboardingOpen(false);
+        }}
+        onGoToLogin={() => {
+          markOnboardingSeen();
+          setOnboardingOpen(false);
+          navigate('/acceso');
+        }}
+        onEnterAsGuest={() => {
+          setOnboardingBusy(true);
+          void createGuestSessionRequest()
+            .then((res) => {
+              markOnboardingSeen();
+              setCurrentUser(res.user);
+              setOnboardingOpen(false);
+              navigate('/lobby');
+            })
+            .catch(() => {
+              setOnboardingOpen(false);
+              navigate('/acceso');
+            })
+            .finally(() => setOnboardingBusy(false));
+        }}
+      />
+    </AppShell>
   );
 }

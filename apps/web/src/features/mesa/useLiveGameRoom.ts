@@ -60,6 +60,7 @@ export function useLiveGameRoom({
   const lastSeqRef = useRef<number>(0);
   const sessionIdRef = useRef<string | null>(null);
   const hasJoinedOnceRef = useRef<boolean>(false);
+  const myTeamRef = useRef<number | null>(null);
 
   const pushBubble = useCallback((seat: number, text: string) => {
     setSpeechBubblesBySeat((prev) => {
@@ -178,10 +179,14 @@ export function useLiveGameRoom({
               setEventFeed([]);
               setSeats((p['seats'] as RoomSeatInfo[]) ?? []);
               setSeedCommitment((p['seedCommitment'] as string | undefined) ?? null);
+              if (typeof p['yourSeat'] === 'number') {
+                myTeamRef.current = p['yourSeat'] % 2;
+              }
               break;
             }
             case 'game.dealt': {
               const nextView = p['view'] as unknown as ServerPlayerView;
+              myTeamRef.current = nextView.myTeam;
               setView(nextView);
               appendFeed(messagesEsAr.mesa.handCounter(nextView.hand.handNumber));
               break;
@@ -190,7 +195,9 @@ export function useLiveGameRoom({
               setTurnDeadlineMs((p['deadline'] as number | undefined) ?? null);
               setIsTurnWarning(Boolean(p['isWarning']));
               if (p['view']) {
-                setView(p['view'] as unknown as ServerPlayerView);
+                const nextView = p['view'] as unknown as ServerPlayerView;
+                myTeamRef.current = nextView.myTeam;
+                setView(nextView);
               }
               break;
             }
@@ -198,7 +205,9 @@ export function useLiveGameRoom({
               setSeedCommitment((p['seedCommitment'] as string | null) ?? null);
               setTurnDeadlineMs((p['turnDeadline'] as number | null) ?? null);
               if (p['view']) {
-                setView(p['view'] as unknown as ServerPlayerView);
+                const nextView = p['view'] as unknown as ServerPlayerView;
+                myTeamRef.current = nextView.myTeam;
+                setView(nextView);
               }
               break;
             }
@@ -222,6 +231,10 @@ export function useLiveGameRoom({
             }
             case 'game.signalSent': {
               const seat = Number(p['seat'] ?? 0);
+              const senderTeam = typeof p['team'] === 'number' ? p['team'] : seat % 2;
+              if (myTeamRef.current === null || senderTeam !== myTeamRef.current) {
+                break;
+              }
               const sigId = String(p['signalId'] ?? '');
               const sigLabel = messagesEsAr.calls.signals[sigId] ?? sigId;
               pushBubble(seat, sigLabel);
@@ -299,10 +312,30 @@ export function useLiveGameRoom({
       }
     };
 
+    const handleBrowserOffline = () => {
+      if (cancelled) return;
+      setConnectionStatus('reconnecting');
+      socket?.disconnect();
+    };
+
+    const handleBrowserOnline = () => {
+      if (cancelled) return;
+      socket?.connect();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('offline', handleBrowserOffline);
+      window.addEventListener('online', handleBrowserOnline);
+    }
+
     void boot();
 
     return () => {
       cancelled = true;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('offline', handleBrowserOffline);
+        window.removeEventListener('online', handleBrowserOnline);
+      }
       socket?.disconnect();
       socketRef.current = null;
     };

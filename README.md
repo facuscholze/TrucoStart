@@ -61,6 +61,10 @@ El seed de desarrollo (bloqueado automáticamente si `NODE_ENV=production`) crea
    - En la **Ventana 2**, entrá como invitado (o con `lucia@truco.local` / `TrucoDev2026!`) y unite con ese código.
    - Ambos jugadores se conectan al `game-server` solicitando un `ws-ticket` **single-use** nuevo en cada conexión y reconexión; al marcar **¡Listo!**, arranca la partida en tiempo real renderizando exclusivamente `viewFor` y las jugadas legales enviadas por el servidor.
 
+3. **Suite E2E automatizada multi-cliente (sin `pnpm dev:all`, todo efímero):**
+   - `pnpm --filter @truco/web build && pnpm --filter @truco/web test:e2e` levanta automáticamente `apps/api/scripts/e2e-stack.ts` (API `:3001` + `game-server` `:3002` con base de datos adaptativa) y `vite preview` en `http://localhost:4173`, ejecutando dos escenarios reales: **Desktop `1280x800`** (crear mesa, unirse por código, reconexión a mitad de mano con `game.rejoin`, partida completa, revancha y perfil con estadísticas reales) y **Mobile `360x800`** (mismo flujo con drawer de cantos y `/anotador` recargado sin red vía Service Worker).
+   - `pnpm --filter @truco/web screenshots:m5b` regenera las **14 capturas** (`360px` y `1200px`) de `docs/screenshots/` sembrando una partida y una mesa pública reales.
+
 ---
 
 ## Arquitectura del monorepo
@@ -93,6 +97,10 @@ pnpm typecheck     # Chequeo estricto TypeScript (strict + noUncheckedIndexedAcc
 pnpm format:check  # Verificación de formato Prettier
 pnpm test          # Suite completa de tests (Vitest + fast-check)
 pnpm build         # Compilación de todos los paquetes y aplicaciones
+
+# E2E y capturas de la PWA (apps/web)
+pnpm --filter @truco/web test:e2e        # Playwright multi-cliente (Desktop + Mobile)
+pnpm --filter @truco/web screenshots:m5b # Regenera docs/screenshots/m5b-*.png
 ```
 
 ---

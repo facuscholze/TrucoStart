@@ -10,7 +10,9 @@
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "screenshots:m5a": "node scripts/capture-m5a-screenshots.mjs"
+    "test:e2e": "playwright test",
+    "screenshots:m5a": "node scripts/capture-m5a-screenshots.mjs",
+    "screenshots:m5b": "node scripts/capture-m5b-screenshots.mjs"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.2.0",

@@ -1,8 +1,11 @@
+import { screenMessagesEsAr } from './messages-screens.es-AR.js';
+
 /**
  * Diccionario centralizado de copy en español rioplatense.
  * Regla de arquitectura M5: prohibido dejar textos de interfaz sueltos en los componentes.
  */
 export const messagesEsAr = {
+  ...screenMessagesEsAr,
   brand: {
     stageTag: 'Etapa 1 · Mesa en tiempo real',
     subtitle:

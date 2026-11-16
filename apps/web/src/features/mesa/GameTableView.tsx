@@ -11,6 +11,7 @@ import {
   Badge,
   CallButton,
   Hand,
+  Modal,
   PlayerSeat,
   QuickChat,
   ScoreBoard,
@@ -20,6 +21,8 @@ import {
 } from '@truco/ui';
 import { useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
+import { loadClientPreferences } from '../../lib/preferences.js';
+import { playTableSoundCue } from '../../lib/sound-fx.js';
 import { CallTray } from './CallTray.js';
 import { type MatchEndedSummary, MatchResultModal } from './MatchResultModal.js';
 import {
@@ -94,6 +97,9 @@ export function GameTableView({
 }: GameTableSessionProps) {
   const [callTrayOpen, setCallTrayOpen] = useState<boolean>(defaultCallTrayOpen);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+  const [pendingConfirmAction, setPendingConfirmAction] = useState<
+    { kind: 'FOLD' } | { kind: 'BID'; bid: WsCallBid } | null
+  >(null);
   const [clockMs, setClockMs] = useState<number>(() => nowMsOverride ?? Date.now());
   const [isDesktopViewport, setIsDesktopViewport] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 1200 : false,
@@ -137,6 +143,29 @@ export function GameTableView({
   const handCards = view ? projectHandCardsFromView(view, groupedCalls.playableCardIds) : [];
   const tableRounds = view ? projectRoundsForTable(view, nicknameBySeat) : [];
   const relSeats = resolveRelativeSeats(mySeatIndex, Math.max(2, seats.length));
+
+  const handleGuardedCallBid = (bid: WsCallBid) => {
+    if (bid === 'FALTA_ENVIDO' && loadClientPreferences().confirmCalls) {
+      setPendingConfirmAction({ kind: 'BID', bid });
+      return;
+    }
+    playTableSoundCue('call');
+    onCallBid(bid);
+  };
+
+  const handleGuardedFold = () => {
+    if (loadClientPreferences().confirmCalls) {
+      setPendingConfirmAction({ kind: 'FOLD' });
+      return;
+    }
+    playTableSoundCue('card');
+    onFoldHand();
+  };
+
+  const handleGuardedRespond = (family: WsCallFamily, answer: WsRespondAnswer) => {
+    playTableSoundCue('call');
+    onRespondCall(family, answer);
+  };
 
   const turnRemainingSec =
     turnDeadlineMs !== null ? Math.max(0, Math.ceil((turnDeadlineMs - clockMs) / 1000)) : null;
@@ -370,7 +399,11 @@ export function GameTableView({
               </CallButton>
             )}
 
-            <CallButton tone="decline" disabled={!groupedCalls.canFoldHand} onClick={onFoldHand}>
+            <CallButton
+              tone="decline"
+              disabled={!groupedCalls.canFoldHand}
+              onClick={handleGuardedFold}
+            >
               {messagesEsAr.mesa.foldHandCta}
             </CallButton>
           </div>
@@ -397,8 +430,8 @@ export function GameTableView({
       <CallTray
         inlineMode
         groupedCalls={groupedCalls}
-        onCallBid={onCallBid}
-        onRespondCall={onRespondCall}
+        onCallBid={handleGuardedCallBid}
+        onRespondCall={handleGuardedRespond}
         onSendSignal={onSendSignal}
       />
 
@@ -444,8 +477,8 @@ export function GameTableView({
       {callTrayOpen && !isDesktopViewport && (
         <CallTray
           groupedCalls={groupedCalls}
-          onCallBid={onCallBid}
-          onRespondCall={onRespondCall}
+          onCallBid={handleGuardedCallBid}
+          onRespondCall={handleGuardedRespond}
           onSendSignal={onSendSignal}
           onClose={() => setCallTrayOpen(false)}
         />
@@ -454,12 +487,49 @@ export function GameTableView({
       {callTrayOpen && isDesktopViewport && defaultCallTrayOpen && (
         <CallTray
           groupedCalls={groupedCalls}
-          onCallBid={onCallBid}
-          onRespondCall={onRespondCall}
+          onCallBid={handleGuardedCallBid}
+          onRespondCall={handleGuardedRespond}
           onSendSignal={onSendSignal}
           onClose={() => setCallTrayOpen(false)}
         />
       )}
+
+      <Modal
+        open={pendingConfirmAction !== null}
+        title={
+          pendingConfirmAction?.kind === 'FOLD'
+            ? messagesEsAr.mesa.foldHandCta
+            : messagesEsAr.calls.bids.FALTA_ENVIDO.label
+        }
+        onClose={() => setPendingConfirmAction(null)}
+        closeLabel={messagesEsAr.profile.deleteCancelCta}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted">{messagesEsAr.profile.confirmCallsToggleLabel}</p>
+          <div className="flex justify-end gap-2">
+            <CallButton tone="neutral" onClick={() => setPendingConfirmAction(null)}>
+              {messagesEsAr.profile.deleteCancelCta}
+            </CallButton>
+            <CallButton
+              tone="accept"
+              onClick={() => {
+                const act = pendingConfirmAction;
+                setPendingConfirmAction(null);
+                if (!act) return;
+                if (act.kind === 'FOLD') {
+                  playTableSoundCue('card');
+                  onFoldHand();
+                } else {
+                  playTableSoundCue('call');
+                  onCallBid(act.bid);
+                }
+              }}
+            >
+              {messagesEsAr.calls.decisions.QUIERO.label}
+            </CallButton>
+          </div>
+        </div>
+      </Modal>
 
       <MatchResultModal
         open={Boolean(matchEnded)}

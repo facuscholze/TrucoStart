@@ -11,7 +11,7 @@ import type {
   TableSeatVacatedLifecycleEvent,
   TableVisibility,
 } from '@truco/shared';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { type AppDatabase, DRIZZLE_DB } from '../../db/database.provider.js';
 import {
   matchEventsTable,
@@ -76,13 +76,40 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
         .where(eq(tablesTable.id, event.roomId))
         .for('update');
       const tableRow = locked[0];
-      if (!tableRow || tableRow.status !== 'WAITING') return null;
+      if (!tableRow || (tableRow.status !== 'WAITING' && tableRow.status !== 'FINISHED')) {
+        return null;
+      }
 
+      const isRematch = tableRow.status === 'FINISHED';
       const nextRows = await tx
         .update(tablesTable)
         .set({ status: 'IN_GAME', updatedAt: now })
         .where(eq(tablesTable.id, tableRow.id))
         .returning();
+
+      // Revancha en la misma sala (mismo roomId): reactivar los asientos ya persistidos
+      if (isRematch) {
+        const rematchUserIds = event.seats
+          .map((s) => s.userId)
+          .filter((userId) => UUID_REGEX.test(userId));
+        if (rematchUserIds.length > 0) {
+          await tx
+            .update(tableSeatsTable)
+            .set({ isActive: true })
+            .where(
+              and(
+                eq(tableSeatsTable.tableId, tableRow.id),
+                inArray(tableSeatsTable.userId, rematchUserIds),
+                sql`not exists (
+                  select 1 from ${tableSeatsTable} as other_seat
+                  where other_seat.user_id = ${tableSeatsTable.userId}
+                    and other_seat.is_active = true
+                    and other_seat.table_id <> ${tableRow.id}
+                )`,
+              ),
+            );
+        }
+      }
 
       const activeSeats = await tx
         .select()
@@ -290,7 +317,9 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
     });
 
     if (committed?.tableId && committed.tableVisibility) {
-      await this.provisioner.deleteRoom(committed.tableId).catch(() => undefined);
+      if (event.reason === 'ABANDON') {
+        await this.provisioner.deleteRoom(committed.tableId).catch(() => undefined);
+      }
       this.realtimeGateway.broadcastTableRemoved(committed.tableId, committed.tableVisibility);
     }
   }

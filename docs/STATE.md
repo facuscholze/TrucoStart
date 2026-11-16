@@ -26,15 +26,18 @@
 
 Todo elemento provisorio o pendiente de módulos posteriores está registrado aquí y referenciado explícitamente en el código con `// TODO(STATE-xx)`:
 
-| ID         | Ubicación principal                                                            | Descripción                                                                                                               | Módulo objetivo      |
-| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `STATE-03` | `apps/api` (auth, users, db)                                                   | Esquema Drizzle PostgreSQL 16, migraciones, sesiones HttpOnly rotativas, Argon2id, Google OAuth y `ConsoleEmailProvider`. | **M3**               |
-| `STATE-04` | `apps/api` (lobby), `docs/API.md`                                              | Endpoints REST `/v1/tables` y `/v1/matchmaking/queue`, códigos de mesa y sincronización WS de lobby.                      | **M4**               |
-| `STATE-05` | `apps/web`, `packages/ui`                                                      | Componentes completos del sistema de diseño, baraja española SVG original y pantallas MVP de la PWA.                      | **M5**               |
-| `STATE-06` | `apps/web`, `packages/truco-engine`                                            | Flujo completo contra IA local/servidor y tutorial interactivo paso a paso.                                               | **M6**               |
-| `STATE-07` | `apps/admin`, `apps/api` (moderation/admin)                                    | Reportes, sanciones con motivo obligatorio, 2FA administrativo, `audit_logs` y visor de replay.                           | **M7**               |
-| `STATE-08` | `infra/`, `apps/*`, `docs/PERF.md`, `docs/THREAT_MODEL.md`, `docs/RUNBOOKS.md` | OpenTelemetry, Sentry, `/v1/metrics` Prometheus, pruebas de carga k6 (100/1.000 usuarios) y runbooks operativos.          | **M8**               |
-| `STATE-09` | `docs/THREAT_MODEL.md`                                                         | Revisión legal formal de tratamiento, retención y supresión de datos personales bajo Ley 25.326 (República Argentina).    | **Pre-Prod / Legal** |
+| ID         | Ubicación principal                                                            | Descripción                                                                                                                | Módulo objetivo      |
+| ---------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `STATE-03` | `apps/api` (auth, users, db)                                                   | Esquema Drizzle PostgreSQL 16, migraciones, sesiones HttpOnly rotativas, Argon2id, Google OAuth y `ConsoleEmailProvider`.  | **M3**               |
+| `STATE-04` | `apps/api` (lobby), `docs/API.md`                                              | Endpoints REST `/v1/tables` y `/v1/matchmaking/queue`, códigos de mesa y sincronización WS de lobby.                       | **M4**               |
+| `STATE-05` | `apps/web`, `packages/ui`                                                      | Componentes completos del sistema de diseño, baraja española SVG original y pantallas MVP de la PWA.                       | **M5**               |
+| `STATE-06` | `apps/web`, `packages/truco-engine`                                            | Flujo completo contra IA local/servidor y tutorial interactivo paso a paso.                                                | **M6**               |
+| `STATE-07` | `apps/admin`, `apps/api` (moderation/admin)                                    | Reportes, sanciones con motivo obligatorio, 2FA administrativo, `audit_logs` y visor de replay.                            | **M7**               |
+| `STATE-08` | `infra/`, `apps/*`, `docs/PERF.md`, `docs/THREAT_MODEL.md`, `docs/RUNBOOKS.md` | OpenTelemetry, Sentry, `/v1/metrics` Prometheus, pruebas de carga k6 (100/1.000 usuarios) y runbooks operativos.           | **M8**               |
+| `STATE-09` | `docs/THREAT_MODEL.md`                                                         | Revisión legal formal de tratamiento, retención y supresión de datos personales bajo Ley 25.326 (República Argentina).     | **Pre-Prod / Legal** |
+| `STATE-10` | `apps/api/src/modules/auth/providers/email.provider.ts`                        | `ConsoleEmailProvider` simulado en dev/test; adaptador productivo (`Resend` / `SMTP`) pendiente de credenciales reales.    | **Pre-Prod / Infra** |
+| `STATE-11` | `apps/api/src/modules/auth/providers/google-oauth.verifier.ts`                 | `SimulatedGoogleOAuthVerifier` simulado en dev/test; verificación JWKS contra Google Identity pendiente de Client ID real. | **Pre-Prod / Infra** |
+| `STATE-12` | `apps/api/src/modules/auth/providers/captcha.verifier.ts`                      | `SimulatedCaptchaVerifier` simulado en dev/test; verificación HTTP contra Cloudflare Turnstile pendiente de claves reales. | **Pre-Prod / Infra** |
 
 ---
 

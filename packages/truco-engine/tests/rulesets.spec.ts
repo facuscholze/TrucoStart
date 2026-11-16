@@ -42,6 +42,13 @@ describe('RuleSets, Falta Envido modes & Signals catalog', () => {
         createRuleSetVariant(AR_STANDARD_V1, { signals: { maxSignalsPerHandPerPlayer: -1 } }),
       ).ok,
     ).toBe(false);
+    expect(
+      validateRuleSet(
+        createRuleSetVariant(AR_STANDARD_V1, {
+          system: { maxConsecutiveTimeoutsBeforeAbandon: 0 },
+        }),
+      ).ok,
+    ).toBe(false);
   });
 
   it('calculates Falta Envido points in both LEADER_REMAINING and MALAS_MATCH_BUENAS_LEADER modes', () => {

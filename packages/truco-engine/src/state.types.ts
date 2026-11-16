@@ -205,6 +205,7 @@ export interface GameState {
   readonly scoresByTeam: Readonly<Record<TeamId, number>>;
   readonly winnerTeam: TeamId | null;
   readonly abandonedBySeat: SeatId | null;
+  readonly consecutiveTimeoutsBySeat: Readonly<Record<SeatId, number>>;
   readonly hand: HandState;
   /** Estado interno serializable para repartir manos siguientes sin I/O; jamás expuesto en viewFor */
   readonly internalPrngState: PrngState;

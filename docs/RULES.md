@@ -156,31 +156,40 @@ Controlado por `ruleset.flor`:
 
 ---
 
-## 10. Acciones de Sistema (`SYSTEM_TIMEOUT` y `SYSTEM_ABANDON`)
+## 10. Acciones de Sistema (`SYSTEM_TIMEOUT`, Prevención de Demora y `SYSTEM_ABANDON`)
 
 Emitidas exclusivamente por el servidor autoritativo (`apps/game-server`), nunca por clientes:
 
-- **`SYSTEM_TIMEOUT`**:
-  - Si hay Flor pendiente para el equipo del asiento: ejecuta `RESPOND_FLOR('ACHICO')`.
-  - Si hay Envido pendiente para el equipo del asiento: ejecuta `RESPOND_ENVIDO('NO_QUIERO')`.
-  - Si hay Truco pendiente para el equipo del asiento: ejecuta `RESPOND_TRUCO('NO_QUIERO')`.
-  - Si es el turno normal de juego del asiento: ejecuta `FOLD_HAND` (`timeoutOnTurn = 'FOLD_HAND'`, por defecto) o juega automáticamente su carta de menor poder (`timeoutOnTurn = 'PLAY_LOWEST_CARD'`).
-- **`SYSTEM_ABANDON`**: tras agotarse la ventana de reconexión del jugador desconectado, adjudica inmediatamente la partida al equipo rival (`reason: 'ABANDON'`) completando su puntaje hasta `targetScore`.
+- **Temporizador de turno y aviso previo:** cada turno activo dispone de `TURN_TIMEOUT_MS` (`30 s` por defecto). Al cumplirse el 70 % de la ventana el servidor emite `game.turn` con `isWarning: true`; al alcanzar `deadline` sin acción válida del jugador activo, dispara `SYSTEM_TIMEOUT`.
+- **Resolución determinista de `SYSTEM_TIMEOUT` según fase de la mano:**
+  1. **Flor pendiente (`florStatus === 'PENDING'`):** responde automáticamente `RESPOND_FLOR('ACHICO')`, otorgando los puntos de Flor no aceptada al equipo cantador y reanudando el juego.
+  2. **Envido pendiente (`envidoStatus === 'PENDING'`):** responde automáticamente `RESPOND_ENVIDO('NO_QUIERO')`, otorgando los puntos acumulados previos al rechazo y reanudando el juego.
+  3. **Truco pendiente (`truco.pending !== null`):** responde automáticamente `RESPOND_TRUCO('NO_QUIERO')`, cerrando la mano a favor del equipo cantador por el puntaje vigente previo a la subida.
+  4. **Turno normal de carta (`seat === hand.turnSeat`):** aplica `ruleset.system.timeoutOnTurn`:
+     - `'FOLD_HAND'` (por defecto en los tres `RuleSet` oficiales): el jugador se va al mazo (`PLAYER_FOLDED`). En `1v1` esto cierra inmediatamente la mano a favor del rival; en `2v2` su compañero continúa jugando solo la mano si sigue activo, o termina la mano si ambos asientos del equipo se retiraron.
+     - `'PLAY_LOWEST_CARD'`: juega automáticamente la carta restante de menor jerarquía de Truco (`getTrucoPower`).
+- **Prevención de alargamiento abusivo por timeouts repetidos (`maxConsecutiveTimeoutsBeforeAbandon`):**
+  - Para impedir que un jugador conectado pero inactivo (_AFK_ o _griefing_) estire una partida a 15 o 30 puntos dejando vencer `30 s` mano tras mano sin desconectarse, `GameState` lleva el contador `consecutiveTimeoutsBySeat[seat]`.
+  - Cada `SYSTEM_TIMEOUT` incrementa `consecutiveTimeoutsBySeat[seat]` en `1`.
+  - Cualquier acción voluntaria válida del jugador (`PLAY_CARD`, `CALL_*`, `RESPOND_*`, `FOLD_HAND`, `SEND_SIGNAL`) restablece `consecutiveTimeoutsBySeat[seat] = 0`.
+  - Al alcanzar `ruleset.system.maxConsecutiveTimeoutsBeforeAbandon` (**`3` timeouts consecutivos** por defecto), el motor escala automáticamente el vencimiento a `SYSTEM_ABANDON` (`SYSTEM_ACTION_APPLIED` con `resolvedAs: 'ESCALATED_TO_ABANDON'`), dando por perdida la partida completa (`FORFEIT_MATCH`, `reason: 'ABANDON'`) a favor del equipo rival.
+- **`SYSTEM_ABANDON` por desconexión o salida:** tras agotarse la ventana de reconexión (`RECONNECT_GRACE_MS = 45 s`) del jugador desconectado o al abandonar voluntariamente una sala en juego (`table.leave`), adjudica inmediatamente la partida al equipo rival (`reason: 'ABANDON'`) completando su puntaje hasta `targetScore`.
 
 ---
 
 ## 11. Tabla Comparativa de los `RuleSet` Iniciales
 
-| Parámetro                                  |       `ar-standard-v1`       |     `ar-sin-flor-v1`      |     `ar-corto-15-v1`      |
-| :----------------------------------------- | :--------------------------: | :-----------------------: | :-----------------------: |
-| **Nombre**                                 |  Estándar (a 30, con Flor)   |      Sin Flor (a 30)      |  Corto (a 15, sin Flor)   |
-| **`targetScore`**                          |            **30**            |          **30**           |          **15**           |
-| **`malasScoreThreshold`**                  |            **15**            |          **15**           |   **0** _(todo buenas)_   |
-| **Respondedor (`responderSelectionMode`)** |        `NEXT_IN_TURN`        |      `NEXT_IN_TURN`       |      `NEXT_IN_TURN`       |
-| **Flor habilitada (`flor.enabled`)**       | **Sí** (`3 / 4 / 6 / Resto`) |          **No**           |          **No**           |
-| **Falta Envido (`faltaEnvidoMode`)**       |      `LEADER_REMAINING`      |    `LEADER_REMAINING`     |    `LEADER_REMAINING`     |
-| **"El envido está primero"**               |        `CANCEL_TRUCO`        |      `CANCEL_TRUCO`       |      `CANCEL_TRUCO`       |
-| **Mazo con envido pendiente**              |   `AWARD_DECLINED_POINTS`    |  `AWARD_DECLINED_POINTS`  |  `AWARD_DECLINED_POINTS`  |
-| **Mano de Once (`manoDeOnce.enabled`)**    |   `false` _(configurable)_   | `false` _(configurable)_  | `false` _(configurable)_  |
-| **Señas en equipos (`signals.enabled`)**   |  **Sí** (máx. 3/mano/jug.)   | **Sí** (máx. 3/mano/jug.) | **Sí** (máx. 3/mano/jug.) |
-| **Timeout en turno (`timeoutOnTurn`)**     |         `FOLD_HAND`          |        `FOLD_HAND`        |        `FOLD_HAND`        |
+| Parámetro                                             |       `ar-standard-v1`       |     `ar-sin-flor-v1`      |     `ar-corto-15-v1`      |
+| :---------------------------------------------------- | :--------------------------: | :-----------------------: | :-----------------------: |
+| **Nombre**                                            |  Estándar (a 30, con Flor)   |      Sin Flor (a 30)      |  Corto (a 15, sin Flor)   |
+| **`targetScore`**                                     |            **30**            |          **30**           |          **15**           |
+| **`malasScoreThreshold`**                             |            **15**            |          **15**           |   **0** _(todo buenas)_   |
+| **Respondedor (`responderSelectionMode`)**            |        `NEXT_IN_TURN`        |      `NEXT_IN_TURN`       |      `NEXT_IN_TURN`       |
+| **Flor habilitada (`flor.enabled`)**                  | **Sí** (`3 / 4 / 6 / Resto`) |          **No**           |          **No**           |
+| **Falta Envido (`faltaEnvidoMode`)**                  |      `LEADER_REMAINING`      |    `LEADER_REMAINING`     |    `LEADER_REMAINING`     |
+| **"El envido está primero"**                          |        `CANCEL_TRUCO`        |      `CANCEL_TRUCO`       |      `CANCEL_TRUCO`       |
+| **Mazo con envido pendiente**                         |   `AWARD_DECLINED_POINTS`    |  `AWARD_DECLINED_POINTS`  |  `AWARD_DECLINED_POINTS`  |
+| **Mano de Once (`manoDeOnce.enabled`)**               |   `false` _(configurable)_   | `false` _(configurable)_  | `false` _(configurable)_  |
+| **Señas en equipos (`signals.enabled`)**              |  **Sí** (máx. 3/mano/jug.)   | **Sí** (máx. 3/mano/jug.) | **Sí** (máx. 3/mano/jug.) |
+| **Timeout en turno (`timeoutOnTurn`)**                |         `FOLD_HAND`          |        `FOLD_HAND`        |        `FOLD_HAND`        |
+| **Máx. timeouts seguidos (`maxConsecutiveTimeouts`)** |            **3**             |           **3**           |           **3**           |

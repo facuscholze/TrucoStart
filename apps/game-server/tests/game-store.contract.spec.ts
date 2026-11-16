@@ -161,6 +161,17 @@ defineGameStoreContractSuite('InMemoryGameStore', async () => ({
 }));
 
 const redisUrl = process.env['REDIS_URL'];
+
+describe('CI environment guard for RedisGameStore', () => {
+  it('requires REDIS_URL to be defined when running in CI', () => {
+    if (process.env['CI'] === 'true') {
+      expect(Boolean(redisUrl)).toBe(true);
+    } else {
+      expect(typeof redisUrl === 'string' || redisUrl === undefined).toBe(true);
+    }
+  });
+});
+
 defineGameStoreContractSuite(
   'RedisGameStore (real Redis via REDIS_URL)',
   async () => {

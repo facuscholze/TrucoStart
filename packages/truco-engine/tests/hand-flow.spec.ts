@@ -452,4 +452,52 @@ describe('Complete N-seat hand flow: Pardas, Envido, Flor, Truco, Fold, Signals 
       ),
     ).toThrow();
   });
+
+  it('prevents match stalling by escalating consecutive SYSTEM_TIMEOUTs to SYSTEM_ABANDON and resets on voluntary action', () => {
+    const g = createGame(AR_SIN_FLOR_V1, SEATS_1V1, createSeededRng(77));
+    // Mano #1: seat 0 es mano y deja vencer el turno (1er timeout consecutivo)
+    const t1 = applyAction(g, { type: 'SYSTEM_TIMEOUT', seat: 0 });
+    expect(t1.ok).toBe(true);
+    if (!t1.ok) return;
+    expect(t1.value.state.consecutiveTimeoutsBySeat[0]).toBe(1);
+    expect(t1.value.state.status).toBe('IN_PROGRESS');
+
+    // Mano #2: seat 1 es mano y juega una carta; luego seat 0 actúa voluntariamente -> resetea su contador a 0
+    const s1Card = t1.value.state.hand.remainingHandsBySeat[1]![0]!.id;
+    const afterS1 = applyAction(t1.value.state, { type: 'PLAY_CARD', seat: 1, cardId: s1Card });
+    expect(afterS1.ok).toBe(true);
+    if (!afterS1.ok) return;
+
+    const afterVoluntaryFold = applyAction(afterS1.value.state, { type: 'FOLD_HAND', seat: 0 });
+    expect(afterVoluntaryFold.ok).toBe(true);
+    if (!afterVoluntaryFold.ok) return;
+    expect(afterVoluntaryFold.value.state.consecutiveTimeoutsBySeat[0]).toBe(0);
+
+    // Ahora seat 0 acumula 3 timeouts consecutivos -> al 3ro escala automáticamente a SYSTEM_ABANDON
+    const st = afterVoluntaryFold.value.state; // Mano #3: seat 0 vuelve a ser mano
+    const strike1 = applyAction(st, { type: 'SYSTEM_TIMEOUT', seat: 0 });
+    expect(strike1.ok && strike1.value.state.consecutiveTimeoutsBySeat[0]).toBe(1);
+    if (!strike1.ok) return;
+
+    // Mano #4: seat 1 canta TRUCO para darle acción a seat 0
+    const callT = applyAction(strike1.value.state, { type: 'CALL_TRUCO', seat: 1, bid: 'TRUCO' });
+    if (!callT.ok) return;
+    const strike2 = applyAction(callT.value.state, { type: 'SYSTEM_TIMEOUT', seat: 0 });
+    expect(strike2.ok && strike2.value.state.consecutiveTimeoutsBySeat[0]).toBe(2);
+    expect(strike2.ok && strike2.value.state.status).toBe('IN_PROGRESS');
+    if (!strike2.ok) return;
+
+    // Mano #5: seat 0 es mano y deja vencer por 3ra vez consecutiva -> FORFEIT_MATCH (SYSTEM_ABANDON)
+    const strike3 = applyAction(strike2.value.state, { type: 'SYSTEM_TIMEOUT', seat: 0 });
+    expect(strike3.ok).toBe(true);
+    if (!strike3.ok) return;
+    expect(strike3.value.state.status).toBe('FINISHED');
+    expect(strike3.value.state.winnerTeam).toBe(1);
+    expect(strike3.value.state.abandonedBySeat).toBe(0);
+    expect(
+      strike3.value.events.some(
+        (e) => e.type === 'SYSTEM_ACTION_APPLIED' && e.resolvedAs === 'ESCALATED_TO_ABANDON',
+      ),
+    ).toBe(true);
+  });
 });

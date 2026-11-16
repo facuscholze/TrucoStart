@@ -99,6 +99,10 @@ export function createGame(ruleset: RuleSet, players: PlayerSeat[], rng: Rng): G
   for (const team of teams) {
     scoresByTeam[team] = 0;
   }
+  const consecutiveTimeoutsBySeat: Record<SeatId, number> = {};
+  for (const s of seats) {
+    consecutiveTimeoutsBySeat[s.seat] = 0;
+  }
 
   return {
     status: 'IN_PROGRESS',
@@ -108,6 +112,7 @@ export function createGame(ruleset: RuleSet, players: PlayerSeat[], rng: Rng): G
     scoresByTeam,
     winnerTeam: null,
     abandonedBySeat: null,
+    consecutiveTimeoutsBySeat,
     hand: buildHandState(ruleset, seats, 1, manoSeat, initialHands),
     internalPrngState,
   };
@@ -149,6 +154,10 @@ export function createGameWithHands(init: CustomGameInit): GameState {
   for (const team of teams) {
     scoresByTeam[team] = init.scoresByTeam?.[team] ?? 0;
   }
+  const consecutiveTimeoutsBySeat: Record<SeatId, number> = {};
+  for (const s of seats) {
+    consecutiveTimeoutsBySeat[s.seat] = 0;
+  }
 
   return {
     status: 'IN_PROGRESS',
@@ -158,6 +167,7 @@ export function createGameWithHands(init: CustomGameInit): GameState {
     scoresByTeam,
     winnerTeam: null,
     abandonedBySeat: null,
+    consecutiveTimeoutsBySeat,
     hand: buildHandState(init.ruleset, seats, 1, manoSeat, init.handsBySeat),
     internalPrngState: seedPrngStateFromRng(init.rng),
   };
@@ -292,25 +302,36 @@ export function applyAction(
     return { ok: false, error: classifyIllegalActionError(state, action) };
   }
 
+  const stateWithResetTimeout =
+    (state.consecutiveTimeoutsBySeat[action.seat] ?? 0) > 0
+      ? {
+          ...state,
+          consecutiveTimeoutsBySeat: {
+            ...state.consecutiveTimeoutsBySeat,
+            [action.seat]: 0,
+          },
+        }
+      : state;
+
   switch (action.type) {
     case 'SEND_SIGNAL':
-      return handleSendSignal(state, action.seat, seatInfo.team, action.signalId);
+      return handleSendSignal(stateWithResetTimeout, action.seat, seatInfo.team, action.signalId);
     case 'PLAY_CARD':
-      return handlePlayCard(state, action.seat, seatInfo.team, action.cardId);
+      return handlePlayCard(stateWithResetTimeout, action.seat, seatInfo.team, action.cardId);
     case 'CALL_ENVIDO':
-      return handleCallEnvido(state, action.seat, seatInfo.team, action.bid);
+      return handleCallEnvido(stateWithResetTimeout, action.seat, seatInfo.team, action.bid);
     case 'RESPOND_ENVIDO':
-      return handleRespondEnvido(state, action.seat, action.decision);
+      return handleRespondEnvido(stateWithResetTimeout, action.seat, action.decision);
     case 'CALL_FLOR':
-      return handleCallFlor(state, action.seat, seatInfo.team, action.bid);
+      return handleCallFlor(stateWithResetTimeout, action.seat, seatInfo.team, action.bid);
     case 'RESPOND_FLOR':
-      return handleRespondFlor(state, action.decision);
+      return handleRespondFlor(stateWithResetTimeout, action.decision);
     case 'CALL_TRUCO':
-      return handleCallTruco(state, action.seat, seatInfo.team, action.bid);
+      return handleCallTruco(stateWithResetTimeout, action.seat, seatInfo.team, action.bid);
     case 'RESPOND_TRUCO':
-      return handleRespondTruco(state, action.seat, action.decision);
+      return handleRespondTruco(stateWithResetTimeout, action.seat, action.decision);
     case 'FOLD_HAND':
-      return handleFoldHand(state, action.seat, seatInfo.team);
+      return handleFoldHand(stateWithResetTimeout, action.seat, seatInfo.team);
   }
 }
 
@@ -357,11 +378,42 @@ function applySystemTimeout(
     return ruleError('NOT_YOUR_TURN', 'El asiento indicado no tiene acción pendiente para timeout');
   }
 
+  const nextTimeoutCount = (state.consecutiveTimeoutsBySeat[seat] ?? 0) + 1;
+  if (nextTimeoutCount >= ruleset.system.maxConsecutiveTimeoutsBeforeAbandon) {
+    const updatedCounterState: GameState = {
+      ...state,
+      consecutiveTimeoutsBySeat: {
+        ...state.consecutiveTimeoutsBySeat,
+        [seat]: nextTimeoutCount,
+      },
+    };
+    const abandonRes = applyAction(updatedCounterState, { type: 'SYSTEM_ABANDON', seat });
+    if (!abandonRes.ok) return abandonRes;
+    return ok({
+      state: abandonRes.value.state,
+      events: [
+        {
+          type: 'SYSTEM_ACTION_APPLIED',
+          seat,
+          actionKind: 'TIMEOUT',
+          resolvedAs: 'ESCALATED_TO_ABANDON',
+        },
+        ...abandonRes.value.events,
+      ],
+    });
+  }
+
   const res = applyAction(state, delegatedAction);
   if (!res.ok) return res;
 
   return ok({
-    state: res.value.state,
+    state: {
+      ...res.value.state,
+      consecutiveTimeoutsBySeat: {
+        ...res.value.state.consecutiveTimeoutsBySeat,
+        [seat]: nextTimeoutCount,
+      },
+    },
     events: [
       { type: 'SYSTEM_ACTION_APPLIED', seat, actionKind: 'TIMEOUT', resolvedAs },
       ...res.value.events,

@@ -49,6 +49,7 @@ export interface SignalRules {
 
 export interface SystemActionRules {
   readonly timeoutOnTurn: TimeoutOnTurnMode;
+  readonly maxConsecutiveTimeoutsBeforeAbandon: number;
 }
 
 export interface RuleSet {
@@ -107,6 +108,7 @@ export const AR_STANDARD_V1: RuleSet = Object.freeze<RuleSet>({
   },
   system: {
     timeoutOnTurn: 'FOLD_HAND',
+    maxConsecutiveTimeoutsBeforeAbandon: 3,
   },
 });
 
@@ -185,6 +187,9 @@ export function validateRuleSet(ruleset: RuleSet): Result<RuleSet, RuleError> {
   }
   if (ruleset.signals.maxSignalsPerHandPerPlayer < 0) {
     return ruleError('INVALID_RULESET', 'maxSignalsPerHandPerPlayer no puede ser negativo');
+  }
+  if (ruleset.system.maxConsecutiveTimeoutsBeforeAbandon < 1) {
+    return ruleError('INVALID_RULESET', 'maxConsecutiveTimeoutsBeforeAbandon debe ser al menos 1');
   }
   return ok(ruleset);
 }

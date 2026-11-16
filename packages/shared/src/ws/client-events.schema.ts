@@ -11,7 +11,12 @@ export const RoomIdSchema = z
 export const GameModeSchema = z.enum(['1v1', '2v2']);
 export type GameMode = z.infer<typeof GameModeSchema>;
 
-export const RulesetCodeSchema = z.enum(['ar-standard-v1', 'ar-sin-flor-v1', 'ar-corto-15-v1']);
+export const RulesetCodeSchema = z.enum([
+  'ar-standard-v1',
+  'ar-sin-flor-v1',
+  'ar-corto-15-v1',
+  'ar-corto-15-flor-v1',
+]);
 export type RulesetCode = z.infer<typeof RulesetCodeSchema>;
 
 export const WsCallBidSchema = z.enum([

@@ -132,6 +132,14 @@ export const AR_CORTO_15_V1: RuleSet = Object.freeze<RuleSet>({
   malasScoreThreshold: 0,
 });
 
+export const AR_CORTO_15_FLOR_V1: RuleSet = Object.freeze<RuleSet>({
+  ...AR_STANDARD_V1,
+  code: 'ar-corto-15-flor-v1',
+  name: 'Truco Argentino Corto con Flor (a 15, con Flor)',
+  targetScore: 15,
+  malasScoreThreshold: 0,
+});
+
 export const INITIAL_RULESETS: readonly RuleSet[] = Object.freeze([
   AR_STANDARD_V1,
   AR_SIN_FLOR_V1,
@@ -167,6 +175,7 @@ export function createRuleSetVariant(base: RuleSet, overrides: RuleSetOverrides)
 }
 
 export function getRuleSetByCode(code: string): RuleSet | undefined {
+  if (code === AR_CORTO_15_FLOR_V1.code) return AR_CORTO_15_FLOR_V1;
   return INITIAL_RULESETS.find((r) => r.code === code);
 }
 

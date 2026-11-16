@@ -1,5 +1,6 @@
 import {
   type Action,
+  AR_CORTO_15_FLOR_V1,
   AR_CORTO_15_V1,
   AR_SIN_FLOR_V1,
   AR_STANDARD_V1,
@@ -16,6 +17,8 @@ export function resolveRulesetByCode(code: RulesetCode): RuleSet {
       return AR_SIN_FLOR_V1;
     case 'ar-corto-15-v1':
       return AR_CORTO_15_V1;
+    case 'ar-corto-15-flor-v1':
+      return AR_CORTO_15_FLOR_V1;
   }
 }
 

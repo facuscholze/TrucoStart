@@ -267,3 +267,24 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
   - _Relajar las cookies a `SameSite=None; Secure`_: descartado porque expone todas las mutaciones autenticadas a envío automático cross-site y queda sujeto al bloqueo progresivo de cookies de terceros (3PCD / CHIPS) en Safari, Firefox y Chrome.
 - **Consecuencias:**
   - Protección CSRF nativa de `SameSite=Lax` intacta sin degradación por políticas de privacidad de navegadores, con requisito explícito de DNS/enrutamiento documentado para infraestructura.
+
+---
+
+## ADR-017: Contrato `apps/api` ↔ `apps/game-server` — Aprovisionamiento Autoritativo de Salas y Persistencia Transaccional Post-Partida vía BullMQ
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:** `apps/api` y `apps/game-server` corren como procesos separados (ADR-001). Para implementar Lobby, Mesas y Matchmaking (M4) sin acoplamiento a base de datos compartida ni deriva de reglas:
+  1. `apps/api` debe ser la única fuente de verdad relacional (`tables`, `table_seats`, `rulesets`, `matches`, `match_players`, `match_events` en PostgreSQL 16).
+  2. `apps/game-server` **jamás debe escribir ni conectarse a PostgreSQL**, pero necesita instanciar cada sala en tiempo real con exactamente los mismos parámetros elegidos en la mesa (modo `1v1`/`2v2`, `RuleSet` completo validado, puntaje objetivo `15`/`30`, `flor`, visibilidad `PUBLIC`/`PRIVATE` y `turnTimeoutMs`) sin duplicar lógica de derivación de reglas ni permitir que el cliente sobrescriba esos parámetros en `table.join`.
+  3. Al concluir una partida, el resultado, puntajes por jugador y log secuenciado auditable deben persistirse atómicamente en PostgreSQL.
+- **Decisión:**
+  1. **Aprovisionamiento unidireccional firmado (`apps/api -> apps/game-server`):** al crear una mesa (`POST /v1/tables` o matchmaking), `apps/api` construye y valida el `RuleSet` canónico de `@truco/engine`, persiste `tables` + `table_seats` en PostgreSQL e invoca el puerto `GameRoomProvisioner.provisionRoom(RoomProvisionSpec)`. En transporte HTTP (`POST /internal/rooms` y `DELETE /internal/rooms/:roomId`), el cuerpo viaja firmado con HMAC-SHA256 con separación de dominio (`internal-rpc-v1:<SECRET>`). `game-server` valida `RoomProvisionSpecSchema` + `validateRuleSet`, reclama el lease en `GameStore` e hidrata el `PersistedRoomSnapshot` usando `roomId === tables.id` y el objeto `RuleSet` recibido directamente (en producción `allowAdHocRooms = false`, impidiendo salas huérfanas fuera del lobby).
+  2. **Eventos asíncronos de ciclo de vida y cierre (`apps/game-server -> BullMQ -> apps/api`):** `game-server` publica eventos tipados `MatchLifecycleEventSchema` (`match.started`, `table.seatVacated` y `match.completed`) a través del puerto `MatchLifecyclePublisher` (`BullMqMatchLifecyclePublisher` sobre la cola `truco-match-lifecycle` en Redis 7 con `jobId` determinístico por `matchId`, e `InMemoryMatchLifecycleBus` para tests sin Redis).
+  3. **Persistencia transaccional idempotente en `apps/api`:** `MatchPersistenceService` consume `match.completed` y ejecuta **una única transacción PostgreSQL (`db.transaction`)** que verifica idempotencia sobre `matches.id`, actualiza `tables.status = 'FINISHED'`, libera asientos activos e inserta `matches`, `match_players` y `match_events`.
+- **Alternativas consideradas:**
+  - _Compartir credenciales de PostgreSQL en `apps/game-server`_: descartado porque rompe fronteras de dominio, acopla migraciones entre despliegues y mete latencia SQL en el bucle de eventos de partidas en vivo.
+  - _Reconstruir reglas en `game-server` a partir de flags sueltos enviados por clientes WS_: descartado porque duplica lógica de negocio y abre vectores donde un cliente manipula `rulesetCode` o `turnTimeoutMs` al hacer `table.join`.
+- **Consecuencias:**
+  - Cero duplicación de estado o reglas: `tables.id === roomId` y el `RuleSet` nace una sola vez en `apps/api`.
+  - Escritura ACID garantizada de `matches` + `match_players` + `match_events` con tolerancia a reintentos (at-least-once) de BullMQ.

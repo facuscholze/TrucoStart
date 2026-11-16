@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { createGame, type GameState, type PlayerSeat, viewFor } from '@truco/engine';
+import { randomBytes } from 'node:crypto';
+import { createGame, type GameState, type PlayerSeat, type RuleSet, viewFor } from '@truco/engine';
 import type { RoomSeatInfo, RulesetCode } from '@truco/shared';
 import {
   createRngFromSeedHex,
@@ -10,9 +10,25 @@ import type { PersistedSequencedEvent } from '../store/game-store.interface.js';
 import { resolveRulesetByCode } from './action-mapper.js';
 import { buildSequencedEvent } from './event-projector.js';
 
+function generateMatchUuidV7(nowMs: number): string {
+  const bytes = randomBytes(16);
+  const ts = BigInt(Math.max(0, Math.floor(nowMs)));
+  bytes[0] = Number((ts >> 40n) & 0xffn);
+  bytes[1] = Number((ts >> 32n) & 0xffn);
+  bytes[2] = Number((ts >> 24n) & 0xffn);
+  bytes[3] = Number((ts >> 16n) & 0xffn);
+  bytes[4] = Number((ts >> 8n) & 0xffn);
+  bytes[5] = Number(ts & 0xffn);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export interface StartMatchParams {
   readonly roomId: string;
   readonly rulesetCode: RulesetCode;
+  readonly ruleset?: RuleSet;
   readonly publicSeats: readonly RoomSeatInfo[];
   readonly seedEncryptionKey: string;
   readonly turnDeadline: number;
@@ -45,14 +61,14 @@ export function createMatchStartBundle(params: StartMatchParams): StartedMatchBu
   } = params;
 
   const { seedHex, seedCommitment } = generateCommitRevealSeed();
-  const ruleset = resolveRulesetByCode(rulesetCode);
+  const ruleset = params.ruleset ?? resolveRulesetByCode(rulesetCode);
   const enginePlayers: PlayerSeat[] = publicSeats.map((s) => ({
     seat: s.seat,
     team: s.team,
     playerId: s.userId!,
   }));
 
-  const matchId = randomUUID();
+  const matchId = generateMatchUuidV7(nowMs);
   const encryptedSeed = encryptSeedForStore(seedHex, seedEncryptionKey);
   const gameState = createGame(ruleset, enginePlayers, createRngFromSeedHex(seedHex));
 

@@ -1,5 +1,11 @@
-import type { GameState } from '@truco/engine';
-import type { GameMode, RulesetCode, ServerEventType, TableStatus } from '@truco/shared';
+import type { GameState, RuleSet } from '@truco/engine';
+import type {
+  GameMode,
+  RulesetCode,
+  ServerEventType,
+  TableStatus,
+  TableVisibility,
+} from '@truco/shared';
 
 export interface PersistedSeatBinding {
   readonly seat: number;
@@ -31,10 +37,13 @@ export interface PersistedRoomSnapshot {
   readonly roomId: string;
   readonly status: TableStatus;
   readonly mode: GameMode;
+  readonly visibility?: TableVisibility;
   readonly rulesetCode: RulesetCode;
+  readonly ruleset?: RuleSet;
   readonly turnTimeoutMs: number;
   readonly seats: readonly PersistedSeatBinding[];
   readonly matchId: string | null;
+  readonly matchStartedAtMs?: number | null;
   readonly seedCommitment: string | null;
   readonly encryptedSeed: string | null;
   readonly revealedSeed: string | null;

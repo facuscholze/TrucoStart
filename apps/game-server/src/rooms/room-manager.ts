@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { ClientMessage, ErrorCode, WsAuthTicketClaims, WsEnvelope } from '@truco/shared';
+import { type RuleSet, validateRuleSet } from '@truco/engine';
+import type {
+  ClientMessage,
+  ErrorCode,
+  RoomProvisionSpec,
+  WsAuthTicketClaims,
+  WsEnvelope,
+} from '@truco/shared';
 import type { Socket } from 'socket.io';
 import type { GameStore } from '../store/game-store.interface.js';
 import { RoomActor, type RoomActorDeps } from './room-actor.js';
@@ -9,6 +16,7 @@ const DEFAULT_OWNER_LEASE_TTL_MS = 60_000;
 export interface RoomManagerOptions extends RoomActorDeps {
   readonly serverId?: string;
   readonly ownerLeaseTtlMs?: number;
+  readonly allowAdHocRooms?: boolean;
 }
 
 export class RoomManager {
@@ -16,6 +24,7 @@ export class RoomManager {
   private readonly store: GameStore;
   private readonly actorDeps: RoomActorDeps;
   private readonly ownerLeaseTtlMs: number;
+  private readonly allowAdHocRooms: boolean;
   private readonly rooms = new Map<string, RoomActor>();
   private readonly recovering = new Map<string, Promise<RoomActor | null>>();
   private readonly socketToRooms = new Map<string, { userId: string; rooms: Set<string> }>();
@@ -25,7 +34,67 @@ export class RoomManager {
     this.serverId = options.serverId ?? `gs-${randomUUID().slice(0, 8)}`;
     this.store = options.store;
     this.ownerLeaseTtlMs = options.ownerLeaseTtlMs ?? DEFAULT_OWNER_LEASE_TTL_MS;
+    this.allowAdHocRooms = options.allowAdHocRooms ?? true;
     this.actorDeps = options;
+  }
+
+  async provisionRoom(spec: RoomProvisionSpec): Promise<void> {
+    if (this.draining) {
+      throw new Error('Servidor en proceso de drenaje');
+    }
+    const candidateRuleset = spec.ruleset as unknown as RuleSet;
+    const validation = validateRuleSet(candidateRuleset);
+    if (!validation.ok) {
+      throw new Error(`RuleSet inválido al aprovisionar sala: ${validation.error.message}`);
+    }
+
+    const claimed = await this.store.claimRoomOwner(
+      spec.roomId,
+      this.serverId,
+      this.ownerLeaseTtlMs,
+    );
+    if (!claimed) {
+      throw new Error(`La sala ${spec.roomId} ya está asignada a otro servidor`);
+    }
+
+    const existing = this.rooms.get(spec.roomId);
+    if (existing) {
+      return;
+    }
+
+    const fresh = RoomActor.createFresh(
+      {
+        roomId: spec.roomId,
+        mode: spec.mode,
+        visibility: spec.visibility,
+        rulesetCode: spec.rulesetCode,
+        ruleset: validation.value,
+        turnTimeoutMs: spec.turnTimeoutMs,
+      },
+      this.actorDeps,
+    );
+    await fresh.persistInitialSnapshot();
+    this.rooms.set(spec.roomId, fresh);
+  }
+
+  async closeProvisionedRoom(roomId: string): Promise<void> {
+    const actor = this.rooms.get(roomId);
+    if (actor) {
+      actor.dispose();
+      await actor.clearAllSeatedUsers();
+      this.rooms.delete(roomId);
+    } else {
+      const snap = await this.store.loadRoomSnapshot(roomId);
+      if (snap) {
+        for (const s of snap.seats) {
+          if (s.userId) {
+            await this.store.clearUserActiveRoom(s.userId, roomId);
+          }
+        }
+      }
+    }
+    await this.store.deleteRoom(roomId);
+    await this.store.releaseRoomOwner(roomId, this.serverId);
   }
 
   private sendError(socket: Socket, code: ErrorCode, message: string, refEventId?: string): void {
@@ -72,7 +141,7 @@ export class RoomManager {
         return recovered;
       }
 
-      if (createIfMissing) {
+      if (createIfMissing && this.allowAdHocRooms) {
         const fresh = RoomActor.createFresh(
           {
             roomId,

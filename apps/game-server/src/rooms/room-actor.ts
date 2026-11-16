@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type Action, applyAction, type GameState, viewFor } from '@truco/engine';
+import { type Action, applyAction, type GameState, type RuleSet, viewFor } from '@truco/engine';
 import {
   type ClientMessage,
   DEFAULT_RECONNECT_GRACE_MS,
@@ -10,10 +10,15 @@ import {
   type RoomSeatInfo,
   type RulesetCode,
   type TableStatus,
+  type TableVisibility,
   type WsAuthTicketClaims,
   type WsEnvelope,
 } from '@truco/shared';
 import type { Socket } from 'socket.io';
+import {
+  type MatchLifecyclePublisher,
+  NoopMatchLifecyclePublisher,
+} from '../events/match-lifecycle-publisher.js';
 import { decryptSeedFromStore } from '../security/commit-reveal.js';
 import type {
   GameStore,
@@ -27,6 +32,11 @@ import {
   isEventVisibleToSeat,
   projectEngineStepToWsEvents,
 } from './event-projector.js';
+import {
+  emitMatchCompletedLifecycle,
+  emitMatchStartedLifecycle,
+  emitSeatVacatedLifecycle,
+} from './room-lifecycle-notifier.js';
 import { createMatchStartBundle } from './room-match-starter.js';
 import { deliverRejoinDeltaOrResync } from './room-rejoin-helper.js';
 import {
@@ -47,6 +57,7 @@ const MAX_PROCESSED_EVENT_IDS = 256;
 export interface RoomActorDeps {
   readonly store: GameStore;
   readonly seedEncryptionKey: string;
+  readonly lifecyclePublisher?: MatchLifecyclePublisher;
   readonly defaultTurnTimeoutMs?: number;
   readonly reconnectGraceMs?: number;
   readonly nowFn?: () => number;
@@ -55,7 +66,9 @@ export interface RoomActorDeps {
 export interface RoomCreateParams {
   readonly roomId: string;
   readonly mode: GameMode;
+  readonly visibility?: TableVisibility;
   readonly rulesetCode: RulesetCode;
+  readonly ruleset?: RuleSet;
   readonly turnTimeoutMs?: number;
 }
 
@@ -63,11 +76,14 @@ export class RoomActor {
   readonly roomId: string;
   private status: TableStatus;
   private readonly mode: GameMode;
+  private readonly visibility: TableVisibility | undefined;
   private readonly rulesetCode: RulesetCode;
+  private readonly ruleset: RuleSet | undefined;
   private readonly turnTimeoutMs: number;
   private readonly reconnectGraceMs: number;
   private readonly seats: PersistedSeatBinding[];
   private matchId: string | null;
+  private matchStartedAtMs: number | null;
   private seedCommitment: string | null;
   private encryptedSeed: string | null;
   private seedHexInMemory: string | null;
@@ -87,11 +103,14 @@ export class RoomActor {
     this.roomId = snapshot.roomId;
     this.status = snapshot.status;
     this.mode = snapshot.mode;
+    this.visibility = snapshot.visibility;
     this.rulesetCode = snapshot.rulesetCode;
+    this.ruleset = snapshot.ruleset;
     this.turnTimeoutMs = snapshot.turnTimeoutMs;
     this.reconnectGraceMs = deps.reconnectGraceMs ?? DEFAULT_RECONNECT_GRACE_MS;
     this.seats = snapshot.seats.map((s) => ({ ...s }));
     this.matchId = snapshot.matchId;
+    this.matchStartedAtMs = snapshot.matchStartedAtMs ?? null;
     this.seedCommitment = snapshot.seedCommitment;
     this.encryptedSeed = snapshot.encryptedSeed;
     this.seedHexInMemory = snapshot.encryptedSeed
@@ -106,6 +125,7 @@ export class RoomActor {
     this.deps = {
       store: deps.store,
       seedEncryptionKey: deps.seedEncryptionKey,
+      lifecyclePublisher: deps.lifecyclePublisher ?? new NoopMatchLifecyclePublisher(),
       defaultTurnTimeoutMs: deps.defaultTurnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
       reconnectGraceMs: this.reconnectGraceMs,
       nowFn: deps.nowFn ?? Date.now,
@@ -151,6 +171,18 @@ export class RoomActor {
     this.socketsBySeat.clear();
   }
 
+  async persistInitialSnapshot(): Promise<void> {
+    await this.deps.store.saveRoomStateAndEvents(this.buildSnapshot(this.deps.nowFn()), []);
+  }
+
+  async clearAllSeatedUsers(): Promise<void> {
+    for (const s of this.seats) {
+      if (s.userId) {
+        await this.deps.store.clearUserActiveRoom(s.userId, this.roomId);
+      }
+    }
+  }
+
   private allocateSeq = (): number => ++this.seq;
 
   private recordEventId(eventId: string): boolean {
@@ -176,10 +208,13 @@ export class RoomActor {
       roomId: this.roomId,
       status: this.status,
       mode: this.mode,
+      ...(this.visibility !== undefined ? { visibility: this.visibility } : {}),
       rulesetCode: this.rulesetCode,
+      ...(this.ruleset !== undefined ? { ruleset: this.ruleset } : {}),
       turnTimeoutMs: this.turnTimeoutMs,
       seats: this.seats.map((s) => ({ ...s })),
       matchId: this.matchId,
+      matchStartedAtMs: this.matchStartedAtMs,
       seedCommitment: this.seedCommitment,
       encryptedSeed: this.encryptedSeed,
       revealedSeed: this.revealedSeed,
@@ -325,6 +360,15 @@ export class RoomActor {
     const now = this.deps.nowFn();
     this.seats[seatIdx] = createEmptySeatBinding(seatIdx);
     await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
+    if (seatObj.userId) {
+      await emitSeatVacatedLifecycle({
+        publisher: this.deps.lifecyclePublisher,
+        roomId: this.roomId,
+        userId: seatObj.userId,
+        seat: seatIdx,
+        vacatedAtMs: now,
+      });
+    }
   }
 
   private async onTableReady(seatIdx: number, ready: boolean): Promise<void> {
@@ -344,6 +388,7 @@ export class RoomActor {
     const started = createMatchStartBundle({
       roomId: this.roomId,
       rulesetCode: this.rulesetCode,
+      ...(this.ruleset !== undefined ? { ruleset: this.ruleset } : {}),
       publicSeats: this.toPublicSeats(),
       seedEncryptionKey: this.deps.seedEncryptionKey,
       turnDeadline: this.turnDeadline,
@@ -354,6 +399,7 @@ export class RoomActor {
     });
 
     this.matchId = started.matchId;
+    this.matchStartedAtMs = now;
     this.seedHexInMemory = started.seedHex;
     this.seedCommitment = started.seedCommitment;
     this.encryptedSeed = started.encryptedSeed;
@@ -361,6 +407,13 @@ export class RoomActor {
     this.gameState = started.gameState;
     this.refreshTurnTimers(now);
     await this.persistAndEmit(now, started.events);
+    await emitMatchStartedLifecycle({
+      publisher: this.deps.lifecyclePublisher,
+      roomId: this.roomId,
+      matchId: started.matchId,
+      startedAtMs: now,
+      seats: this.seats,
+    });
   }
 
   private async onChatQuick(seatIdx: number, phraseId: string): Promise<void> {
@@ -425,7 +478,10 @@ export class RoomActor {
 
     const now = this.deps.nowFn();
     this.gameState = res.value.state;
-    if (this.gameState.status === 'FINISHED') {
+    const matchJustFinished = this.gameState.status === 'FINISHED';
+    const snapshotSeatsAtEnd = this.seats.map((s) => ({ ...s }));
+
+    if (matchJustFinished) {
       this.timers.clearAll();
       this.status = 'FINISHED';
       this.turnDeadline = null;
@@ -454,6 +510,24 @@ export class RoomActor {
       allocateSeq: this.allocateSeq,
     });
     await this.persistAndEmit(now, outbound);
+
+    if (matchJustFinished && this.matchId && this.seedCommitment && this.revealedSeed) {
+      await emitMatchCompletedLifecycle({
+        publisher: this.deps.lifecyclePublisher,
+        store: this.deps.store,
+        roomId: this.roomId,
+        matchId: this.matchId,
+        mode: this.mode,
+        rulesetCode: this.rulesetCode,
+        seedCommitment: this.seedCommitment,
+        seedReveal: this.revealedSeed,
+        startedAtMs: this.matchStartedAtMs ?? now,
+        endedAtMs: now,
+        finalState: this.gameState,
+        triggeringAction: action,
+        seats: snapshotSeatsAtEnd,
+      });
+    }
   }
 
   async handleDisconnect(socket: Socket, userId: string): Promise<void> {

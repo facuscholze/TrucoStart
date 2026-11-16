@@ -5,12 +5,18 @@ import {
   ClientMessageSchema,
   DEFAULT_APP_NAME,
   type HealthResponse,
+  type RoomProvisionSpec,
   verifyWsAuthTicket,
   type WsAuthTicketClaims,
   type WsEnvelope,
   WsEnvelopeSchema,
 } from '@truco/shared';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
+import {
+  type MatchLifecyclePublisher,
+  NoopMatchLifecyclePublisher,
+} from './events/match-lifecycle-publisher.js';
+import { tryHandleInternalProvisioningRoute } from './http/internal-provisioning-handler.js';
 import { RoomManager } from './rooms/room-manager.js';
 import { WsConnectionRateLimiter, type WsRateLimiterConfig } from './security/rate-limiter.js';
 import type { GameStore } from './store/game-store.interface.js';
@@ -23,8 +29,11 @@ export interface GameServerOptions {
   readonly corsOrigins?: string[];
   readonly serverId?: string;
   readonly store?: GameStore;
+  readonly lifecyclePublisher?: MatchLifecyclePublisher;
   readonly sessionSecret?: string;
+  readonly internalSecret?: string;
   readonly seedEncryptionKey?: string;
+  readonly allowAdHocRooms?: boolean;
   readonly defaultTurnTimeoutMs?: number;
   readonly reconnectGraceMs?: number;
   readonly ownerLeaseTtlMs?: number;
@@ -42,6 +51,8 @@ export interface GameServerInstance {
   >;
   readonly roomManager: RoomManager;
   readonly store: GameStore;
+  provisionRoom(spec: RoomProvisionSpec): Promise<void>;
+  deleteRoom(roomId: string): Promise<void>;
   listen(port: number, host?: string): Promise<number>;
   close(opts?: { simulateCrash?: boolean }): Promise<void>;
 }
@@ -73,14 +84,18 @@ function extractHandshakeToken(socket: Socket): string | null {
 export function createGameServer(options: GameServerOptions = {}): GameServerInstance {
   const appName = options.appName ?? DEFAULT_APP_NAME;
   const sessionSecret = options.sessionSecret ?? DEFAULT_DEV_SECRET;
+  const internalSecret = options.internalSecret ?? sessionSecret;
   const seedEncryptionKey = options.seedEncryptionKey ?? DEFAULT_DEV_SECRET;
   const store = options.store ?? new InMemoryGameStore(options.nowFn);
+  const lifecyclePublisher = options.lifecyclePublisher ?? new NoopMatchLifecyclePublisher();
   const nowFn = options.nowFn ?? Date.now;
 
   const roomManager = new RoomManager({
     store,
     seedEncryptionKey,
+    lifecyclePublisher,
     ...(options.serverId !== undefined ? { serverId: options.serverId } : {}),
+    ...(options.allowAdHocRooms !== undefined ? { allowAdHocRooms: options.allowAdHocRooms } : {}),
     ...(options.defaultTurnTimeoutMs !== undefined
       ? { defaultTurnTimeoutMs: options.defaultTurnTimeoutMs }
       : {}),
@@ -106,8 +121,17 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       return;
     }
 
-    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Ruta no encontrada' } }));
+    void tryHandleInternalProvisioningRoute({
+      req,
+      res,
+      internalSecret,
+      roomManager,
+    }).then((handled) => {
+      if (!handled) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Ruta no encontrada' } }));
+      }
+    });
   });
 
   const io = new SocketIOServer<
@@ -154,16 +178,12 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
     socket.on('envelope', (rawMessage: unknown) => {
       const baseParsed = WsEnvelopeSchema.safeParse(rawMessage);
       if (!baseParsed.success) {
-        const errorEnvelope: WsEnvelope = {
+        socket.emit('envelope', {
           eventId: randomUUID(),
           ts: nowFn(),
           type: 'error',
-          payload: {
-            code: 'VALIDATION_ERROR',
-            message: 'Envelope WebSocket inválido',
-          },
-        };
-        socket.emit('envelope', errorEnvelope);
+          payload: { code: 'VALIDATION_ERROR', message: 'Envelope WebSocket inválido' },
+        } satisfies WsEnvelope);
         return;
       }
 
@@ -225,6 +245,12 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
     io,
     roomManager,
     store,
+    provisionRoom(spec: RoomProvisionSpec): Promise<void> {
+      return roomManager.provisionRoom(spec);
+    },
+    deleteRoom(roomId: string): Promise<void> {
+      return roomManager.closeProvisionedRoom(roomId);
+    },
     listen(port: number, host = '0.0.0.0'): Promise<number> {
       return new Promise((resolve, reject) => {
         httpServer.once('error', reject);
@@ -238,8 +264,8 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
     async close(opts?: { simulateCrash?: boolean }): Promise<void> {
       if (!opts?.simulateCrash) {
         await roomManager.shutdown();
+        await lifecyclePublisher.close();
       } else {
-        // Simula caída abrupta del proceso: limpia handles locales sin liberar snapshots ni leases en el store
         roomManager.disposeLocalTimersOnly();
         for (const sock of io.sockets.sockets.values()) {
           sock.disconnect(true);

@@ -1,5 +1,6 @@
 import { parseServerEnv } from '@truco/shared';
 import pino from 'pino';
+import { BullMqMatchLifecyclePublisher } from './events/match-lifecycle-publisher.js';
 import { createGameServer } from './server.js';
 import { RedisGameStore } from './store/redis-game-store.js';
 
@@ -7,11 +8,14 @@ async function main(): Promise<void> {
   const logger = pino({ name: 'truco-game-server' });
   const env = parseServerEnv(process.env);
   const store = new RedisGameStore(env.REDIS_URL);
+  const lifecyclePublisher = new BullMqMatchLifecyclePublisher(env.REDIS_URL);
 
   const server = createGameServer({
     appName: env.APP_NAME,
     corsOrigins: env.CORS_ORIGINS,
     store,
+    lifecyclePublisher,
+    allowAdHocRooms: false,
     sessionSecret: env.SESSION_SECRET,
     seedEncryptionKey: env.SEED_ENCRYPTION_KEY,
     defaultTurnTimeoutMs: env.TURN_TIMEOUT_MS,

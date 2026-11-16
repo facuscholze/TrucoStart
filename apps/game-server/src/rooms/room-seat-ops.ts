@@ -1,8 +1,10 @@
+import type { RuleSet } from '@truco/engine';
 import type {
   ErrorCode,
   GameMode,
   RulesetCode,
   TableStatus,
+  TableVisibility,
   WsAuthTicketClaims,
 } from '@truco/shared';
 import type { PersistedRoomSnapshot, PersistedSeatBinding } from '../store/game-store.interface.js';
@@ -24,7 +26,9 @@ export function createEmptySeatBinding(seat: number): PersistedSeatBinding {
 export function buildEmptyRoomSnapshot(params: {
   readonly roomId: string;
   readonly mode: GameMode;
+  readonly visibility?: TableVisibility;
   readonly rulesetCode: RulesetCode;
+  readonly ruleset?: RuleSet;
   readonly turnTimeoutMs: number;
   readonly nowMs: number;
 }): PersistedRoomSnapshot {
@@ -33,10 +37,13 @@ export function buildEmptyRoomSnapshot(params: {
     roomId: params.roomId,
     status: 'WAITING',
     mode: params.mode,
+    ...(params.visibility !== undefined ? { visibility: params.visibility } : {}),
     rulesetCode: params.rulesetCode,
+    ...(params.ruleset !== undefined ? { ruleset: params.ruleset } : {}),
     turnTimeoutMs: params.turnTimeoutMs,
     seats: Array.from({ length: numSeats }, (_, idx) => createEmptySeatBinding(idx)),
     matchId: null,
+    matchStartedAtMs: null,
     seedCommitment: null,
     encryptedSeed: null,
     revealedSeed: null,

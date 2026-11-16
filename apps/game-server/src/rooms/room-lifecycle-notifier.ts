@@ -1,0 +1,133 @@
+import type { Action, GameState } from '@truco/engine';
+import type { GameMode, MatchOutcome, RulesetCode } from '@truco/shared';
+import type { MatchLifecyclePublisher } from '../events/match-lifecycle-publisher.js';
+import type { GameStore, PersistedSeatBinding } from '../store/game-store.interface.js';
+
+export async function emitMatchStartedLifecycle(params: {
+  readonly publisher: MatchLifecyclePublisher;
+  readonly roomId: string;
+  readonly matchId: string;
+  readonly startedAtMs: number;
+  readonly seats: readonly PersistedSeatBinding[];
+}): Promise<void> {
+  await params.publisher.publish({
+    kind: 'match.started',
+    roomId: params.roomId,
+    matchId: params.matchId,
+    startedAtMs: params.startedAtMs,
+    seats: params.seats
+      .filter((s): s is PersistedSeatBinding & { userId: string } => s.userId !== null)
+      .map((s) => ({
+        seat: s.seat,
+        team: s.team,
+        userId: s.userId,
+      })),
+  });
+}
+
+export async function emitSeatVacatedLifecycle(params: {
+  readonly publisher: MatchLifecyclePublisher;
+  readonly roomId: string;
+  readonly userId: string;
+  readonly seat: number;
+  readonly vacatedAtMs: number;
+}): Promise<void> {
+  await params.publisher.publish({
+    kind: 'table.seatVacated',
+    roomId: params.roomId,
+    userId: params.userId,
+    seat: params.seat,
+    vacatedAtMs: params.vacatedAtMs,
+  });
+}
+
+export async function emitMatchCompletedLifecycle(params: {
+  readonly publisher: MatchLifecyclePublisher;
+  readonly store: GameStore;
+  readonly roomId: string;
+  readonly matchId: string;
+  readonly mode: GameMode;
+  readonly rulesetCode: RulesetCode;
+  readonly seedCommitment: string;
+  readonly seedReveal: string;
+  readonly startedAtMs: number;
+  readonly endedAtMs: number;
+  readonly finalState: GameState;
+  readonly triggeringAction: Action;
+  readonly seats: readonly PersistedSeatBinding[];
+}): Promise<void> {
+  const {
+    publisher,
+    store,
+    roomId,
+    matchId,
+    mode,
+    rulesetCode,
+    seedCommitment,
+    seedReveal,
+    startedAtMs,
+    endedAtMs,
+    finalState,
+    triggeringAction,
+    seats,
+  } = params;
+
+  const winnerTeam = finalState.winnerTeam ?? 0;
+  const abandonedSeat = triggeringAction.type === 'SYSTEM_ABANDON' ? triggeringAction.seat : null;
+  const reason = abandonedSeat !== null ? 'ABANDON' : 'TARGET_SCORE';
+
+  const scoresByTeam: Record<string, number> = {};
+  for (const [teamKey, pts] of Object.entries(finalState.scoresByTeam)) {
+    scoresByTeam[teamKey] = pts;
+  }
+
+  const players = seats
+    .filter((s): s is PersistedSeatBinding & { userId: string } => s.userId !== null)
+    .map((s) => {
+      let outcome: MatchOutcome;
+      if (abandonedSeat !== null && s.seat === abandonedSeat) {
+        outcome = 'ABANDON';
+      } else if (s.team === winnerTeam) {
+        outcome = 'WIN';
+      } else {
+        outcome = 'LOSS';
+      }
+      return {
+        seat: s.seat,
+        userId: s.userId,
+        nickname: s.nickname ?? `Jugador ${s.seat}`,
+        team: s.team,
+        score: finalState.scoresByTeam[s.team] ?? 0,
+        outcome,
+      };
+    });
+
+  const storedEvents = await store.loadRoomEventsAfter(roomId, 0);
+  const startIdx = storedEvents.findIndex(
+    (ev) => ev.type === 'game.started' && ev.payload['matchId'] === matchId,
+  );
+  const matchSlice = startIdx >= 0 ? storedEvents.slice(startIdx) : storedEvents;
+  const events = matchSlice.map((ev) => ({
+    seq: ev.seq,
+    type: ev.type,
+    ts: ev.ts,
+    payload: ev.payload,
+  }));
+
+  await publisher.publish({
+    kind: 'match.completed',
+    matchId,
+    roomId,
+    mode,
+    rulesetCode,
+    seedCommitment,
+    seedReveal,
+    startedAtMs,
+    endedAtMs,
+    winnerTeam,
+    scoresByTeam,
+    reason,
+    players,
+    events,
+  });
+}

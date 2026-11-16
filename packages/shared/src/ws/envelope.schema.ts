@@ -21,12 +21,14 @@ export const ServerEventTypeSchema = z.enum([
   'game.cardPlayed',
   'game.callMade',
   'game.callResolved',
+  'game.signalSent',
   'game.handEnded',
   'game.scoreUpdated',
   'game.ended',
   'player.disconnected',
   'player.reconnected',
   'game.resync',
+  'chat.quickMessage',
   'error',
 ]);
 

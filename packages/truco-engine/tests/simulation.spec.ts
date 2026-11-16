@@ -31,7 +31,7 @@ describe('Property-based invariants (fast-check) & Massive Multi-Seat Simulation
             const snapshotBefore = structuredClone(stateA);
             const activeSeat = stateA.hand.activeSeat;
 
-            // Invariante estricto: para TODO asiento s, toda acción en legalActions(stateA, s) es aceptada por applyAction
+            // Invariante estricto: para cada asiento s, toda acción en legalActions(stateA, s) es aceptada por applyAction
             for (const s of seats) {
               const seatActions = legalActions(stateA, s.seat);
               for (const candidate of seatActions) {

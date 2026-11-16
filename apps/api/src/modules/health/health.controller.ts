@@ -12,7 +12,7 @@ export class HealthController {
   }
 
   @Get('ready')
-  ready(): HealthResponse {
+  async ready(): Promise<HealthResponse> {
     return this.healthService.getReadiness(process.env['APP_NAME']);
   }
 }

@@ -4,6 +4,27 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.7.0-m5b] — 2026-11-13 (Sub-etapa M5b — Lobby en Vivo, Auth/Perfil, Aprender, Anotador Offline, PWA y E2E Multi-Cliente)
+
+### Agregado
+
+- **Base transversal de `@truco/web`:** copy `es-AR` centralizado y tipado (`src/i18n/messages.es-AR.ts` + `messages-screens.es-AR.ts`), cliente REST tipado (`src/lib/api-client.ts`) con manejo de `ProblemDetails`, preferencias persistentes en `localStorage` (`src/lib/preferences.ts`), sintetizador Web Audio sin assets (`src/lib/sound-fx.ts`) y `VitePWA` (`generateSW`) con manifiesto e iconos propios que precachea 35 entradas (`dist/sw.js`, `dist/manifest.webmanifest`).
+- **Shell, onboarding y autenticación:** `AppShell` responsive (navegación inferior en `360px`, lateral a partir de `tablet`, `aria-current` y `>= 44px` de área táctil), `OnboardingModal` accesible y `AuthScreen` completo (login, registro, promoción in-place de invitado, recuperación/verificación de correo y sesión activa).
+- **Home, Lobby en vivo, matchmaking y Sala de espera:** hero con naipes SVG, partida rápida `1v1`/`2v2`, mesa privada con código de 6 caracteres y unión por código/enlace; `/lobby` con namespace WS `/lobby` (`useLobbyRealtime`: alta/baja/actualización de mesas, filtros por modo/puntos/Flor/estado, cola de matchmaking y cancelación); `/sala/:tableId` con código copiable, invitación HMAC, lista de asientos sincronizada por WebSocket, ready-check y transición en caliente a `/mesa/:roomId` **sin** cerrar el socket (`useLiveGameRoom`).
+- **Perfil, tutorial y anotador:** `/perfil` con estadísticas e historial reales de PostgreSQL (`/v1/me`, `/v1/me/stats`, `/v1/me/matches`), edición de apodo/presentación, preferencias de sonido/animaciones/contraste/tipografía, sesiones activas, exportación JSON y eliminación de cuenta; `/aprender` con reglas, jerarquía de las 40 cartas, señas oficiales y tutorial guiado; `/anotador` 100% offline con fósforos de a 5 (Malas/Buenas), historial y persistencia local; router con `React.lazy` por ruta.
+- **E2E multi-cliente real y cobertura de regresión:**
+  - Stack E2E real (`apps/api/scripts/e2e-stack.ts`) que levanta `createAdaptiveTestDatabase` + `createGameServer` (`:3002`) + `createApiApp` (`:3001`) con `HttpGameRoomProvisioner`, `InMemoryMatchLifecycleConsumer` y límites de rate alto para loopback; Playwright (`apps/web/playwright.config.ts`) lo arranca junto a `vite preview :4173` (`localhost` para cookies `Domain=localhost` y Service Worker en contexto seguro).
+  - `apps/web/e2e/m5b-multiclient.spec.ts` (2/2 en verde): **Desktop `1280x800`** invitado -> crear mesa privada a 15 -> unirse por código -> ready-check -> primera carta -> **corte de red y reconexión** (`game.rejoin`, ticket efímero nuevo) -> partida completa -> modal de resultado -> **revancha en la misma sala** -> `/perfil` con estadísticas reales; **Mobile `360x800`** flujo completo con drawer de cantos, revancha y **`/anotador` recargado 100% sin red** vía Service Worker.
+  - Correcciones de producto detectadas por los E2E: el estado `offline` del navegador ahora corta/reanuda el socket de mesa (`useLiveGameRoom`) mostrando el banner de reconexión; la revancha conserva la sala en `game-server` (`match-persistence.service.ts` solo destruye la sala en `reason === 'ABANDON'`) y reactiva los asientos persistidos al iniciar el segundo `match.started`; el badge de puntaje del `/anotador` ya no desborda en `360px`.
+  - Scripts `test:e2e` y `screenshots:m5b` en `apps/web/package.json` y generador `apps/web/scripts/capture-m5b-screenshots.mjs` que siembra una partida real y una mesa pública para capturar **14 screenshots** (`360px` y `1200px` de Home, Lobby, Sala de espera, Perfil, Aprender, Anotador y Login) en `docs/screenshots/`.
+
+### Métricas
+
+- Entrada de producción `dist/assets/index-DILv7qVp.js`: **`330.54 KB`** (`101.09 KB` gzip) — dentro del presupuesto `< 200 KB` gzip; suma de entrada + 11 chunks lazy: `146.64 KB` gzip; CSS `4.66 KB` gzip.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test` (12 tareas, 38 tests API + 11 tests web) y `pnpm build` (7 tareas) en verde; E2E Playwright `2/2` (Desktop + Mobile) en ~20 s.
+
+---
+
 ## [0.6.0-m5a] — 2026-11-13 (Ajustes Pre-M5 y Sub-etapa M5a — Sistema de Diseño `@truco/ui`, Baraja Española SVG y Mesa Responsive en `@truco/web`)
 
 ### Agregado

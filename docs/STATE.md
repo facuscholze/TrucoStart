@@ -2,7 +2,7 @@
 
 - **Última actualización:** 2026-11-13
 - **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M5a** (Completado y en pausa ⏸ en el cierre de **M5a** esperando confirmación visual y funcional antes de iniciar **M5b**)
+- **Módulo actual:** **M5b** (Completado y en pausa ⏸ en el cierre de **M5b** esperando confirmación visual y funcional antes de iniciar **M6**)
 
 ---
 
@@ -16,7 +16,7 @@
 | **M3**  | Auth y usuarios en `apps/api` + Drizzle ORM (invitado, Argon2id, sesiones rotativas, Google OAuth, recuperación, OpenAPI) | ⏸    | **Verificado** | Verificado en CI contra PostgreSQL 16 + Redis 7 reales (`4087eb1`), `RateLimitStore` (`InMemory` + `Redis`), lockout `(cuenta + IP)` + Captcha (`ADR-015`), `ws-ticket` single-use (`jti`), rutas propias exclusivas `/v1/me` y `SameSite=Lax` (`ADR-016`).         |
 | **M4**  | Lobby y mesas (REST + `/lobby` WS), códigos de 6 caracteres sin ambigüedad, matchmaking (`1v1`/`2v2`), persistencia SQL   | —    | **Verificado** | CI en verde (`43911636535`), Pre-M5 completado (`73dbfed`..`1dcdcb6`: seed idempotente `ar-corto-15-flor-v1`, DLQ BullMQ, `main.ts` completo en `apps/game-server`, y `pnpm dev:all` documentado en `README.md`).                                                   |
 | **M5a** | `packages/ui` (design system + baraja española SVG propia) + mesa responsive en `apps/web` (`/mesa/:roomId`, `/dev/mesa`) | ⏸    | **Completado** | Tokens WCAG AA, 40 cartas SVG originales + dorso, 12 componentes accesibles (`>=44px`), mesa WS autoritativa (`ws-ticket` single-use por conexión + `game.rejoin`), `/dev/mesa` excluida en prod (`109.4 KB` gzip < `200 KB`) y 12 capturas en `docs/screenshots/`. |
-| **M5b** | Pantallas restantes de `apps/web`: Lobby en vivo, Auth/Perfil, `/aprender`, `/anotador`, PWA offline y E2E Playwright     | ⏸    | Pendiente      | Bloqueado esperando confirmación del usuario tras revisión visual y técnica del cierre de **M5a**.                                                                                                                                                                  |
+| **M5b** | Pantallas restantes de `apps/web`: Lobby en vivo, Auth/Perfil, `/aprender`, `/anotador`, PWA offline y E2E Playwright     | ⏸    | **Completado** | `es-AR` centralizado, `AppShell` responsive (4/5/6 cols), onboarding, Auth (login/registro/promoción invitado/recuperación), Home, Lobby `/lobby` WS, Sala de espera `/sala/:tableId`, Perfil con estadísticas e historial reales, `/aprender`, `/anotador` offline y PWA instalable; E2E Playwright multi-cliente 2/2 en verde (Desktop `1280x800` + Mobile `360x800`) y 14 capturas en `docs/screenshots/`. Entrada `101.09 KB` gzip (< `200 KB`). |
 | **M6**  | Partida contra IA, entrenamiento y tutorial interactivo                                                                   | —    | Pendiente      | —                                                                                                                                                                                                                                                                   |
 | **M7**  | Moderación (reportes, sanciones) y `apps/admin` mínimo con RBAC, 2FA y replay auditable                                   | —    | Pendiente      | —                                                                                                                                                                                                                                                                   |
 | **M8**  | Observabilidad, endurecimiento de seguridad, carga k6 (100 y 1.000), staging, `PERF.md`, `THREAT_MODEL.md`, `RUNBOOKS.md` | ⏸    | Pendiente      | —                                                                                                                                                                                                                                                                   |
@@ -29,7 +29,6 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 | ID         | Ubicación principal                                                            | Descripción                                                                                                                 | Módulo objetivo      |
 | ---------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `STATE-05` | `apps/web`                                                                     | Pantallas completas de Lobby público/privado en vivo (`/lobby` WS), Auth/Perfil, `/aprender`, `/anotador` y E2E en **M5b**. | **M5b**              |
 | `STATE-06` | `apps/web`, `packages/truco-engine`                                            | Flujo completo contra IA local/servidor y tutorial interactivo paso a paso.                                                 | **M6**               |
 | `STATE-07` | `apps/admin`, `apps/api` (moderation/admin)                                    | Reportes, sanciones con motivo obligatorio, 2FA administrativo, `audit_logs` y visor de replay.                             | **M7**               |
 | `STATE-08` | `infra/`, `apps/*`, `docs/PERF.md`, `docs/THREAT_MODEL.md`, `docs/RUNBOOKS.md` | OpenTelemetry, Sentry, `/v1/metrics` Prometheus, pruebas de carga k6 (100/1.000 usuarios) y runbooks operativos.            | **M8**               |
@@ -51,10 +50,11 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 | `STATE-03`  | `apps/api` Auth y Usuarios endurecidos con `RateLimitStore`, lockout `(cuenta + IP)` + Captcha (`ADR-015`), `ws-ticket` single-use (`jti`), `/v1/me` exclusivo y OpenAPI 3.1 (`ADR-016`).     | **M3**         |
 | `STATE-04`  | Lobby REST (`/v1/tables/*`), namespace WS aislado `/lobby` sin fugas, códigos de 6 chars + invitaciones HMAC, matchmaking `1v1`/`2v2` y persistencia transaccional de partidas (`ADR-017`).   | **M4**         |
 | `STATE-05a` | Sistema de diseño `@truco/ui` con baraja española SVG original (40 cartas + dorso) y mesa en vivo responsive en `@truco/web` (`/mesa/:roomId`, `/dev/mesa` solo dev y capturas 360/768/1200). | **M5a**        |
+| `STATE-05b` | Pantallas completas de Lobby público/privado en vivo (`/lobby` WS), Auth/Perfil con datos reales, `/aprender`, `/anotador` offline, PWA instalable y suite E2E Playwright multi-cliente (Desktop + Mobile) con capturas 360/1200. | **M5b**        |
 
 ---
 
 ## Próximos pasos inmediatos
 
-1. Recibir confirmación del usuario tras revisar **M5a** (componentes de `packages/ui`, mesa en vivo y las 12 capturas en `docs/screenshots/`).
-2. Iniciar **M5b** (hito con pausa ⏸): implementar el Lobby público/privado completo y matchmaking en vivo (`/lobby` WS), pantallas de Auth/promoción de invitado/perfil, `/aprender` (reglas + escala de cartas + señas), `/anotador` standalone offline-ready y suite E2E Playwright multi-ventana.
+1. Recibir confirmación del usuario tras revisar **M5b** (7 pantallas en `360px` y `1200px` en `docs/screenshots/`, suite E2E Playwright y métricas de bundle).
+2. Iniciar **M6** (hito con pausa ⏸): partida contra IA local/servidor, entrenamiento progresivo y tutorial interactivo paso a paso (ver `STATE-06`).

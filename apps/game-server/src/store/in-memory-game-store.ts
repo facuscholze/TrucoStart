@@ -15,6 +15,7 @@ export class InMemoryGameStore implements GameStore {
   private readonly owners = new Map<string, OwnerLease>();
   private readonly userActiveRooms = new Map<string, string>();
   private readonly consumedTicketJtis = new Map<string, number>();
+  private readonly consumedInternalNonces = new Map<string, number>();
   private readonly nowFn: () => number;
 
   constructor(nowFn: () => number = Date.now) {
@@ -100,6 +101,19 @@ export class InMemoryGameStore implements GameStore {
       return false;
     }
     this.consumedTicketJtis.set(jti, now + Math.max(1, ttlMs));
+    return true;
+  }
+
+  async consumeInternalRpcNonce(nonce: string, ttlMs: number): Promise<boolean> {
+    const now = this.nowFn();
+    for (const [key, exp] of this.consumedInternalNonces.entries()) {
+      if (exp <= now) this.consumedInternalNonces.delete(key);
+    }
+    const existingExp = this.consumedInternalNonces.get(nonce);
+    if (existingExp !== undefined && existingExp > now) {
+      return false;
+    }
+    this.consumedInternalNonces.set(nonce, now + Math.max(1, ttlMs));
     return true;
   }
 

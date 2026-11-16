@@ -63,6 +63,10 @@ export class RedisGameStore implements GameStore {
     return `${this.prefix}ws_ticket:used:${jti}`;
   }
 
+  private consumedInternalNonceKey(nonce: string): string {
+    return `${this.prefix}internal_rpc:nonce:${nonce}`;
+  }
+
   async saveRoomStateAndEvents(
     snapshot: PersistedRoomSnapshot,
     newEvents: readonly PersistedSequencedEvent[],
@@ -144,6 +148,18 @@ export class RedisGameStore implements GameStore {
   async consumeWsTicket(jti: string, ttlMs: number): Promise<boolean> {
     const safeTtlMs = Math.max(1, Math.ceil(ttlMs));
     const res = await this.redis.set(this.consumedWsTicketKey(jti), '1', 'PX', safeTtlMs, 'NX');
+    return res === 'OK';
+  }
+
+  async consumeInternalRpcNonce(nonce: string, ttlMs: number): Promise<boolean> {
+    const safeTtlMs = Math.max(1, Math.ceil(ttlMs));
+    const res = await this.redis.set(
+      this.consumedInternalNonceKey(nonce),
+      '1',
+      'PX',
+      safeTtlMs,
+      'NX',
+    );
     return res === 'OK';
   }
 

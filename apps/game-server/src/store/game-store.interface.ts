@@ -77,5 +77,11 @@ export interface GameStore {
    */
   consumeWsTicket(jti: string, ttlMs: number): Promise<boolean>;
 
+  /**
+   * Consume atómicamente el `nonce` de una llamada RPC interna `api -> game-server` con `ttlMs`.
+   * Devuelve `true` en el primer uso y `false` ante cualquier intento de replay dentro del TTL.
+   */
+  consumeInternalRpcNonce(nonce: string, ttlMs: number): Promise<boolean>;
+
   close(): Promise<void>;
 }

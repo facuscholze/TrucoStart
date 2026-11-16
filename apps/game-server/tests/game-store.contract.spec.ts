@@ -158,6 +158,12 @@ function defineGameStoreContractSuite(
       await new Promise((resolve) => setTimeout(resolve, 160));
       expect(await store.consumeWsTicket('jti-contract-01', 120)).toBe(true);
 
+      // Consumo atómico single-use de nonce anti-replay RPC interno (nonce + TTL)
+      expect(await store.consumeInternalRpcNonce('nonce_contract_anti_replay_01', 120)).toBe(true);
+      expect(await store.consumeInternalRpcNonce('nonce_contract_anti_replay_01', 120)).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      expect(await store.consumeInternalRpcNonce('nonce_contract_anti_replay_01', 120)).toBe(true);
+
       await store.close();
     });
   });

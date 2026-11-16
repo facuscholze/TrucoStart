@@ -37,6 +37,7 @@ export interface GameServerOptions {
   readonly defaultTurnTimeoutMs?: number;
   readonly reconnectGraceMs?: number;
   readonly ownerLeaseTtlMs?: number;
+  readonly internalRpcMaxSkewMs?: number;
   readonly rateLimiter?: WsRateLimiterConfig;
   readonly nowFn?: () => number;
 }
@@ -126,6 +127,11 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       res,
       internalSecret,
       roomManager,
+      store,
+      nowFn,
+      ...(options.internalRpcMaxSkewMs !== undefined
+        ? { maxSkewMs: options.internalRpcMaxSkewMs }
+        : {}),
     }).then((handled) => {
       if (!handled) {
         res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });

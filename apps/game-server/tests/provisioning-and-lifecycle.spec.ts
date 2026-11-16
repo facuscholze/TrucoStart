@@ -1,11 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { AR_CORTO_15_FLOR_V1, chooseBotAction } from '@truco/engine';
 import {
+  buildSignedInternalRpcHeaders,
   MATCH_LIFECYCLE_QUEUE_NAME,
   type MatchCompletedLifecycleEvent,
   type MatchLifecycleEvent,
   MatchLifecycleEventSchema,
   type RoomProvisionSpec,
-  signInternalServicePayload,
 } from '@truco/shared';
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
@@ -118,7 +119,7 @@ describe('M4 Room Provisioning Contract & Match Lifecycle Publisher (Memory + Bu
     };
     const rawBody = JSON.stringify(spec);
 
-    // 1. Sin firma válida -> 401 UNAUTHORIZED
+    // 1. Sin firma ni cabeceras anti-replay -> 401 UNAUTHORIZED
     const badRes = await fetch(`${baseUrl}/internal/rooms`, {
       method: 'POST',
       headers: {
@@ -129,35 +130,123 @@ describe('M4 Room Provisioning Contract & Match Lifecycle Publisher (Memory + Bu
     });
     expect(badRes.status).toBe(401);
 
-    // 2. Con firma HMAC interna válida -> 201 Created
+    // 2. Con timestamp firmado dentro de ventana + nonce único -> 201 Created
+    const validHeaders = buildSignedInternalRpcHeaders(
+      {
+        method: 'POST',
+        path: '/internal/rooms',
+        timestampMs: Date.now(),
+        nonce: randomBytes(16).toString('base64url'),
+        rawBody,
+      },
+      SECRET,
+    );
     const okRes = await fetch(`${baseUrl}/internal/rooms`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-internal-signature': signInternalServicePayload(rawBody, SECRET),
+        ...validHeaders,
       },
       body: rawBody,
     });
     expect(okRes.status).toBe(201);
 
-    // 3. Probar también DELETE /internal/rooms/:id sobre una sala temporal
+    // 2b. REPLAY EXACTO (mismas cabeceras firmadas y mismo nonce dentro del TTL) -> 401 UNAUTHORIZED
+    const replayRes = await fetch(`${baseUrl}/internal/rooms`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...validHeaders,
+      },
+      body: rawBody,
+    });
+    expect(replayRes.status).toBe(401);
+
+    // 2c. TIMESTAMP EXPIRADO (fuera de ventana corta de 30 s, aun con nonce fresco y firma válida) -> 401 UNAUTHORIZED
+    const expiredHeaders = buildSignedInternalRpcHeaders(
+      {
+        method: 'POST',
+        path: '/internal/rooms',
+        timestampMs: Date.now() - 45_000,
+        nonce: randomBytes(16).toString('base64url'),
+        rawBody,
+      },
+      SECRET,
+    );
+    const expiredRes = await fetch(`${baseUrl}/internal/rooms`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...expiredHeaders,
+      },
+      body: rawBody,
+    });
+    expect(expiredRes.status).toBe(401);
+
+    // 2d. TIMESTAMP FUTURO DESFASADO (+45 s fuera de ventana) -> 401 UNAUTHORIZED
+    const futureHeaders = buildSignedInternalRpcHeaders(
+      {
+        method: 'POST',
+        path: '/internal/rooms',
+        timestampMs: Date.now() + 45_000,
+        nonce: randomBytes(16).toString('base64url'),
+        rawBody,
+      },
+      SECRET,
+    );
+    const futureRes = await fetch(`${baseUrl}/internal/rooms`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...futureHeaders,
+      },
+      body: rawBody,
+    });
+    expect(futureRes.status).toBe(401);
+
+    // 3. Probar también DELETE /internal/rooms/:id con anti-replay sobre una sala temporal
     const disposableRoomId = '019a7e40-0000-7000-8000-000000000778';
     const dispBody = JSON.stringify({ ...spec, roomId: disposableRoomId });
     await fetch(`${baseUrl}/internal/rooms`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-internal-signature': signInternalServicePayload(dispBody, SECRET),
+        ...buildSignedInternalRpcHeaders(
+          {
+            method: 'POST',
+            path: '/internal/rooms',
+            timestampMs: Date.now(),
+            nonce: randomBytes(16).toString('base64url'),
+            rawBody: dispBody,
+          },
+          SECRET,
+        ),
       },
       body: dispBody,
     });
-    const delRes = await fetch(`${baseUrl}/internal/rooms/${disposableRoomId}`, {
-      method: 'DELETE',
-      headers: {
-        'x-internal-signature': signInternalServicePayload(`DELETE:${disposableRoomId}`, SECRET),
+    const delPath = `/internal/rooms/${disposableRoomId}`;
+    const delHeaders = buildSignedInternalRpcHeaders(
+      {
+        method: 'DELETE',
+        path: delPath,
+        timestampMs: Date.now(),
+        nonce: randomBytes(16).toString('base64url'),
+        rawBody: '',
       },
+      SECRET,
+    );
+    const delRes = await fetch(`${baseUrl}${delPath}`, {
+      method: 'DELETE',
+      headers: delHeaders,
     });
     expect(delRes.status).toBe(200);
+
+    // Replay de DELETE también es rechazado con 401
+    const delReplayRes = await fetch(`${baseUrl}${delPath}`, {
+      method: 'DELETE',
+      headers: delHeaders,
+    });
+    expect(delReplayRes.status).toBe(401);
 
     const c0 = new TestWsClient({
       port,

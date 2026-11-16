@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { RoomProvisionSpecSchema, verifyInternalServicePayload } from '@truco/shared';
+import {
+  DEFAULT_INTERNAL_RPC_MAX_SKEW_MS,
+  RoomProvisionSpecSchema,
+  verifyInternalRpcSignatureAndWindow,
+} from '@truco/shared';
 import type { RoomManager } from '../rooms/room-manager.js';
+import type { GameStore } from '../store/game-store.interface.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -27,21 +32,73 @@ function writeJson(res: ServerResponse, statusCode: number, body: unknown): void
   res.end(JSON.stringify(body));
 }
 
+function readSingleHeader(req: IncomingMessage, name: string): string {
+  const val = req.headers[name];
+  return typeof val === 'string' ? val : '';
+}
+
+async function authenticateAntiReplayRpc(params: {
+  readonly req: IncomingMessage;
+  readonly res: ServerResponse;
+  readonly method: string;
+  readonly path: string;
+  readonly rawBody: string;
+  readonly internalSecret: string;
+  readonly store: GameStore;
+  readonly nowFn: () => number;
+  readonly maxSkewMs: number;
+}): Promise<boolean> {
+  const verified = verifyInternalRpcSignatureAndWindow({
+    method: params.method,
+    path: params.path,
+    timestampHeader: readSingleHeader(params.req, 'x-internal-timestamp'),
+    nonceHeader: readSingleHeader(params.req, 'x-internal-nonce'),
+    signatureHeader: readSingleHeader(params.req, 'x-internal-signature'),
+    rawBody: params.rawBody,
+    secret: params.internalSecret,
+    nowMs: params.nowFn(),
+    maxSkewMs: params.maxSkewMs,
+  });
+
+  if (!verified.valid) {
+    const message =
+      verified.reason === 'TIMESTAMP_EXPIRED'
+        ? 'Timestamp RPC fuera de la ventana de validez permitida'
+        : 'Firma o cabeceras anti-replay internas inválidas';
+    writeJson(params.res, 401, { error: { code: 'UNAUTHORIZED', message } });
+    return false;
+  }
+
+  // El TTL del nonce cubre al menos el doble de la ventana de reloj permitida (+ margen)
+  const nonceTtlMs = params.maxSkewMs * 2 + 5_000;
+  const freshNonce = await params.store.consumeInternalRpcNonce(verified.nonce, nonceTtlMs);
+  if (!freshNonce) {
+    writeJson(params.res, 401, {
+      error: { code: 'UNAUTHORIZED', message: 'Replay detectado: nonce interno ya utilizado' },
+    });
+    return false;
+  }
+
+  return true;
+}
+
 export async function tryHandleInternalProvisioningRoute(params: {
   readonly req: IncomingMessage;
   readonly res: ServerResponse;
   readonly internalSecret: string;
   readonly roomManager: RoomManager;
+  readonly store: GameStore;
+  readonly nowFn?: () => number;
+  readonly maxSkewMs?: number;
 }): Promise<boolean> {
-  const { req, res, internalSecret, roomManager } = params;
+  const { req, res, internalSecret, roomManager, store } = params;
+  const nowFn = params.nowFn ?? Date.now;
+  const maxSkewMs = params.maxSkewMs ?? DEFAULT_INTERNAL_RPC_MAX_SKEW_MS;
   const url = req.url ?? '';
 
   if (!url.startsWith('/internal/rooms')) {
     return false;
   }
-
-  const signature = req.headers['x-internal-signature'];
-  const sigHeader = typeof signature === 'string' ? signature : '';
 
   if (req.method === 'POST' && url === '/internal/rooms') {
     let rawBody: string;
@@ -54,10 +111,18 @@ export async function tryHandleInternalProvisioningRoute(params: {
       return true;
     }
 
-    if (!verifyInternalServicePayload(rawBody, sigHeader, internalSecret)) {
-      writeJson(res, 401, { error: { code: 'UNAUTHORIZED', message: 'Firma interna inválida' } });
-      return true;
-    }
+    const okAuth = await authenticateAntiReplayRpc({
+      req,
+      res,
+      method: 'POST',
+      path: '/internal/rooms',
+      rawBody,
+      internalSecret,
+      store,
+      nowFn,
+      maxSkewMs,
+    });
+    if (!okAuth) return true;
 
     let parsedJson: unknown;
     try {
@@ -91,12 +156,20 @@ export async function tryHandleInternalProvisioningRoute(params: {
 
   const deletePrefix = '/internal/rooms/';
   if (req.method === 'DELETE' && url.startsWith(deletePrefix)) {
+    const okAuth = await authenticateAntiReplayRpc({
+      req,
+      res,
+      method: 'DELETE',
+      path: url,
+      rawBody: '',
+      internalSecret,
+      store,
+      nowFn,
+      maxSkewMs,
+    });
+    if (!okAuth) return true;
+
     const roomId = decodeURIComponent(url.slice(deletePrefix.length));
-    const canonicalPayload = `DELETE:${roomId}`;
-    if (!verifyInternalServicePayload(canonicalPayload, sigHeader, internalSecret)) {
-      writeJson(res, 401, { error: { code: 'UNAUTHORIZED', message: 'Firma interna inválida' } });
-      return true;
-    }
     await roomManager.closeProvisionedRoom(roomId);
     writeJson(res, 200, { deleted: true, roomId });
     return true;

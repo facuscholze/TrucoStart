@@ -234,3 +234,4 @@ El tráfico en tiempo real del lobby corre en un namespace Socket.IO **estrictam
 1. `match.started`: marca `tables.status = 'IN_GAME'` y actualiza `/lobby` si la mesa es pública.
 2. `table.seatVacated`: libera asiento inactivo en `WAITING` (transfiriendo propiedad o cerrando mesa huérfana).
 3. `match.completed`: ejecuta una **única transacción PostgreSQL** idempotente por `matchId` que inserta `matches`, `match_players` y `match_events`, marca `tables.status = 'FINISHED'` y desactiva `table_seats.is_active` para liberar a todos los participantes.
+4. `room.expired`: el `game-server` destruyó la sala por inactividad (`IDLE_ROOM_TTL_MS`, `10 min` por defecto, barrido cada `IDLE_ROOM_SWEEP_MS`). `apps/api` deja la fila consistente: `WAITING`/`IN_GAME` -> `CLOSED` y `FINISHED` se conserva, ambos con `closedReason = 'IDLE_TIMEOUT'`, desactivando además todos los asientos y removiendo la mesa del `/lobby`. Una sala con al menos un socket conectado nunca se barre.

@@ -4,6 +4,7 @@ import type {
   ClientMessage,
   ErrorCode,
   RoomProvisionSpec,
+  TableStatus,
   WsAuthTicketClaims,
   WsEnvelope,
 } from '@truco/shared';
@@ -12,11 +13,26 @@ import type { GameStore } from '../store/game-store.interface.js';
 import { RoomActor, type RoomActorDeps } from './room-actor.js';
 
 const DEFAULT_OWNER_LEASE_TTL_MS = 60_000;
+/** TTL por defecto de una sala sin conexiones activas (10 minutos). */
+export const DEFAULT_IDLE_ROOM_TTL_MS = 10 * 60_000;
 
 export interface RoomManagerOptions extends RoomActorDeps {
   readonly serverId?: string;
   readonly ownerLeaseTtlMs?: number;
   readonly allowAdHocRooms?: boolean;
+  /** TTL de inactividad (sin conexiones) tras el cual la sala se destruye. */
+  readonly idleRoomTtlMs?: number;
+}
+
+export interface ExpiredRoomInfo {
+  readonly roomId: string;
+  readonly tableStatus: TableStatus;
+  readonly reason: 'IDLE_TIMEOUT' | 'FINISHED_TTL';
+  readonly expiredAtMs: number;
+}
+
+export interface RoomManagerSweepResult {
+  readonly expiredRooms: readonly ExpiredRoomInfo[];
 }
 
 export class RoomManager {
@@ -26,6 +42,8 @@ export class RoomManager {
   private readonly ownerLeaseTtlMs: number;
   private readonly allowAdHocRooms: boolean;
   private readonly rooms = new Map<string, RoomActor>();
+  private readonly idleSinceByRoom = new Map<string, number>();
+  private readonly idleRoomTtlMs: number;
   private readonly recovering = new Map<string, Promise<RoomActor | null>>();
   private readonly socketToRooms = new Map<string, { userId: string; rooms: Set<string> }>();
   private draining = false;
@@ -35,6 +53,7 @@ export class RoomManager {
     this.store = options.store;
     this.ownerLeaseTtlMs = options.ownerLeaseTtlMs ?? DEFAULT_OWNER_LEASE_TTL_MS;
     this.allowAdHocRooms = options.allowAdHocRooms ?? true;
+    this.idleRoomTtlMs = options.idleRoomTtlMs ?? DEFAULT_IDLE_ROOM_TTL_MS;
     this.actorDeps = options;
   }
 
@@ -75,6 +94,7 @@ export class RoomManager {
     );
     await fresh.persistInitialSnapshot();
     this.rooms.set(spec.roomId, fresh);
+    this.idleSinceByRoom.set(spec.roomId, this.now());
   }
 
   async closeProvisionedRoom(roomId: string): Promise<void> {
@@ -138,6 +158,9 @@ export class RoomManager {
       if (snap) {
         const recovered = RoomActor.recoverFromSnapshot(snap, this.actorDeps);
         this.rooms.set(roomId, recovered);
+        if (!this.idleSinceByRoom.has(roomId)) {
+          this.idleSinceByRoom.set(roomId, this.now());
+        }
         return recovered;
       }
 
@@ -154,6 +177,7 @@ export class RoomManager {
           this.actorDeps,
         );
         this.rooms.set(roomId, fresh);
+        this.idleSinceByRoom.set(roomId, this.now());
         return fresh;
       }
 
@@ -214,6 +238,7 @@ export class RoomManager {
     }
 
     this.trackSocketRoom(socket, claims.userId, roomId);
+    this.idleSinceByRoom.delete(roomId);
     await roomResult.handleMessage(socket, claims, msg);
   }
 
@@ -227,7 +252,58 @@ export class RoomManager {
       if (actor) {
         await actor.handleDisconnect(socket, tracked.userId);
       }
+      if (!this.hasConnectedSockets(roomId)) {
+        this.idleSinceByRoom.set(roomId, this.now());
+      }
     }
+  }
+
+  private now(): number {
+    return (this.actorDeps.nowFn ?? Date.now)();
+  }
+
+  private hasConnectedSockets(roomId: string): boolean {
+    for (const tracked of this.socketToRooms.values()) {
+      if (tracked.rooms.has(roomId)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Barrido de inactividad: destruye las salas sin conexiones activas que superaron el TTL
+   * configurado (10 minutos por defecto) y devuelve la información para publicar `room.expired`.
+   * Es idempotente y seguro de invocar en cada tick del servidor.
+   */
+  async sweepIdleRooms(nowMs = this.now()): Promise<RoomManagerSweepResult> {
+    const expiredRooms: ExpiredRoomInfo[] = [];
+
+    for (const [roomId, actor] of [...this.rooms.entries()]) {
+      if (this.hasConnectedSockets(roomId) || actor.countConnectedSeats() > 0) {
+        this.idleSinceByRoom.delete(roomId);
+        continue;
+      }
+
+      const idleSince = this.idleSinceByRoom.get(roomId);
+      if (idleSince === undefined) {
+        this.idleSinceByRoom.set(roomId, nowMs);
+        continue;
+      }
+      if (nowMs - idleSince < this.idleRoomTtlMs) {
+        continue;
+      }
+
+      const tableStatus = actor.getTableStatus();
+      await this.closeProvisionedRoom(roomId);
+      this.idleSinceByRoom.delete(roomId);
+      expiredRooms.push({
+        roomId,
+        tableStatus,
+        reason: tableStatus === 'FINISHED' ? 'FINISHED_TTL' : 'IDLE_TIMEOUT',
+        expiredAtMs: nowMs,
+      });
+    }
+
+    return { expiredRooms };
   }
 
   setDraining(enabled = true): void {
@@ -244,6 +320,7 @@ export class RoomManager {
     }
     this.rooms.clear();
     this.socketToRooms.clear();
+    this.idleSinceByRoom.clear();
   }
 
   async shutdown(): Promise<void> {
@@ -253,5 +330,6 @@ export class RoomManager {
     }
     this.rooms.clear();
     this.socketToRooms.clear();
+    this.idleSinceByRoom.clear();
   }
 }

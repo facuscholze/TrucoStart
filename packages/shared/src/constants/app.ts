@@ -40,3 +40,8 @@ export const LOCKOUT_DURATIONS_MS = Object.freeze([
   900_000, // 7mo intento fallido -> 15 min
   3_600_000, // 8vo+ intento fallido -> 60 min
 ]);
+
+/** TTL por defecto (10 minutos) de una sala sin conexiones activas en `apps/game-server`. */
+export const DEFAULT_IDLE_ROOM_TTL_MS = 10 * 60_000;
+/** Frecuencia por defecto del barrido de salas inactivas (60 s). */
+export const DEFAULT_IDLE_ROOM_SWEEP_MS = 60_000;

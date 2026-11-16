@@ -8,6 +8,7 @@ import type {
   MatchCompletedLifecycleEvent,
   MatchLifecycleEvent,
   MatchStartedLifecycleEvent,
+  RoomExpiredLifecycleEvent,
   TableSeatVacatedLifecycleEvent,
   TableVisibility,
 } from '@truco/shared';
@@ -60,6 +61,10 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
     }
     if (event.kind === 'table.seatVacated') {
       await this.handleSeatVacated(event);
+      return;
+    }
+    if (event.kind === 'room.expired') {
+      await this.handleRoomExpired(event);
       return;
     }
     await this.handleMatchCompleted(event);
@@ -189,6 +194,52 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       outcome.aggregate.row.visibility as TableVisibility,
       toPublicTableSummary(outcome.aggregate),
     );
+  }
+
+  /**
+   * El `game-server` destruyó la sala por inactividad: se deja la fila de la mesa consistente.
+   * - `WAITING`/`IN_GAME` sin conexiones -> `CLOSED` con `closedReason = 'IDLE_TIMEOUT'`.
+   * - `FINISHED` -> permanece `FINISHED` (historial) con `closedReason = 'IDLE_TIMEOUT'`.
+   * En ambos casos se liberan los asientos activos para permitir nuevas mesas.
+   */
+  private async handleRoomExpired(event: RoomExpiredLifecycleEvent): Promise<void> {
+    if (!UUID_REGEX.test(event.roomId)) return;
+
+    const outcome = await this.db.transaction(async (tx) => {
+      const locked = await tx
+        .select()
+        .from(tablesTable)
+        .where(eq(tablesTable.id, event.roomId))
+        .for('update');
+      const tableRow = locked[0];
+      if (!tableRow) return null;
+
+      const nextStatus =
+        tableRow.status === 'FINISHED' || tableRow.status === 'CLOSED' ? tableRow.status : 'CLOSED';
+
+      const updated = await tx
+        .update(tablesTable)
+        .set({
+          status: nextStatus,
+          closedReason: 'IDLE_TIMEOUT',
+          updatedAt: new Date(event.expiredAtMs),
+        })
+        .where(eq(tablesTable.id, tableRow.id))
+        .returning();
+
+      await tx
+        .update(tableSeatsTable)
+        .set({ isActive: false })
+        .where(eq(tableSeatsTable.tableId, tableRow.id));
+
+      return {
+        row: updated[0]!,
+        visibility: tableRow.visibility as TableVisibility,
+      };
+    });
+
+    if (!outcome) return;
+    this.realtimeGateway.broadcastTableRemoved(outcome.row.id, outcome.visibility);
   }
 
   private async handleMatchCompleted(event: MatchCompletedLifecycleEvent): Promise<void> {

@@ -314,13 +314,27 @@ export const MatchCompletedLifecycleEventSchema = z.object({
   events: z.array(MatchCompletedSequencedEventSchema).min(1),
 });
 
+/**
+ * Sala destruida por inactividad en `apps/game-server` (TTL sin conexiones activas).
+ * Permite a `apps/api` dejar la fila de la mesa en un estado consistente.
+ */
+export const RoomExpiredLifecycleEventSchema = z.object({
+  kind: z.literal('room.expired'),
+  roomId: z.string().min(3).max(64),
+  tableStatus: PersistedTableStatusSchema,
+  reason: z.enum(['IDLE_TIMEOUT', 'FINISHED_TTL']),
+  expiredAtMs: z.number().int().positive(),
+});
+
 export const MatchLifecycleEventSchema = z.discriminatedUnion('kind', [
   MatchStartedLifecycleEventSchema,
   TableSeatVacatedLifecycleEventSchema,
   MatchCompletedLifecycleEventSchema,
+  RoomExpiredLifecycleEventSchema,
 ]);
 
 export type MatchStartedLifecycleEvent = z.infer<typeof MatchStartedLifecycleEventSchema>;
 export type TableSeatVacatedLifecycleEvent = z.infer<typeof TableSeatVacatedLifecycleEventSchema>;
 export type MatchCompletedLifecycleEvent = z.infer<typeof MatchCompletedLifecycleEventSchema>;
+export type RoomExpiredLifecycleEvent = z.infer<typeof RoomExpiredLifecycleEventSchema>;
 export type MatchLifecycleEvent = z.infer<typeof MatchLifecycleEventSchema>;

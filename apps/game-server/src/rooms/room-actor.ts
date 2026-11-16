@@ -99,6 +99,16 @@ export class RoomActor {
   private readonly socketsBySeat = new Map<number, Socket>();
   private writeChain: Promise<void> = Promise.resolve();
 
+  /** Estado público de la mesa (sin datos de juego), usado por el barrido de inactividad. */
+  getTableStatus(): TableStatus {
+    return this.status;
+  }
+
+  /** Cantidad de asientos con socket conectado en este momento. */
+  countConnectedSeats(): number {
+    return this.socketsBySeat.size;
+  }
+
   private constructor(snapshot: PersistedRoomSnapshot, deps: RoomActorDeps) {
     this.roomId = snapshot.roomId;
     this.status = snapshot.status;

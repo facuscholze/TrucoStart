@@ -21,6 +21,8 @@ async function main(): Promise<void> {
     seedEncryptionKey: env.SEED_ENCRYPTION_KEY,
     defaultTurnTimeoutMs: env.TURN_TIMEOUT_MS,
     reconnectGraceMs: env.RECONNECT_GRACE_MS,
+    idleRoomTtlMs: env.IDLE_ROOM_TTL_MS,
+    idleSweepIntervalMs: env.IDLE_ROOM_SWEEP_MS,
     rateLimiter: {
       actionMax: env.RATE_LIMIT_WS_ACTION_MAX,
       chatMax: env.RATE_LIMIT_WS_CHAT_MAX,

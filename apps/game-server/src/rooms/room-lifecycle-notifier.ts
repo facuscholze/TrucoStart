@@ -1,7 +1,27 @@
 import type { Action, GameState } from '@truco/engine';
-import type { GameMode, MatchOutcome, RulesetCode } from '@truco/shared';
+import type { GameMode, MatchOutcome, RulesetCode, TableStatus } from '@truco/shared';
 import type { MatchLifecyclePublisher } from '../events/match-lifecycle-publisher.js';
 import type { GameStore, PersistedSeatBinding } from '../store/game-store.interface.js';
+
+/**
+ * Publica la destrucción de una sala por inactividad para que `apps/api` deje la fila
+ * de la mesa en un estado consistente (`CLOSED`/`FINISHED` + `closedReason`).
+ */
+export async function emitRoomExpiredLifecycle(params: {
+  readonly publisher: MatchLifecyclePublisher;
+  readonly roomId: string;
+  readonly tableStatus: TableStatus;
+  readonly reason: 'IDLE_TIMEOUT' | 'FINISHED_TTL';
+  readonly expiredAtMs: number;
+}): Promise<void> {
+  await params.publisher.publish({
+    kind: 'room.expired',
+    roomId: params.roomId,
+    tableStatus: params.tableStatus,
+    reason: params.reason,
+    expiredAtMs: params.expiredAtMs,
+  });
+}
 
 export async function emitMatchStartedLifecycle(params: {
   readonly publisher: MatchLifecyclePublisher;

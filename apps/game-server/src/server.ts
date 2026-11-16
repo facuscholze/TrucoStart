@@ -17,6 +17,7 @@ import {
   NoopMatchLifecyclePublisher,
 } from './events/match-lifecycle-publisher.js';
 import { tryHandleInternalProvisioningRoute } from './http/internal-provisioning-handler.js';
+import { emitRoomExpiredLifecycle } from './rooms/room-lifecycle-notifier.js';
 import { RoomManager } from './rooms/room-manager.js';
 import { WsConnectionRateLimiter, type WsRateLimiterConfig } from './security/rate-limiter.js';
 import type { GameStore } from './store/game-store.interface.js';
@@ -37,6 +38,10 @@ export interface GameServerOptions {
   readonly defaultTurnTimeoutMs?: number;
   readonly reconnectGraceMs?: number;
   readonly ownerLeaseTtlMs?: number;
+  /** TTL sin conexiones tras el cual la sala se destruye (10 minutos por defecto). */
+  readonly idleRoomTtlMs?: number;
+  /** Frecuencia del barrido de inactividad (60 s por defecto). `0` lo desactiva. */
+  readonly idleSweepIntervalMs?: number;
   readonly internalRpcMaxSkewMs?: number;
   readonly rateLimiter?: WsRateLimiterConfig;
   readonly nowFn?: () => number;
@@ -104,10 +109,35 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       ? { reconnectGraceMs: options.reconnectGraceMs }
       : {}),
     ...(options.ownerLeaseTtlMs !== undefined ? { ownerLeaseTtlMs: options.ownerLeaseTtlMs } : {}),
+    ...(options.idleRoomTtlMs !== undefined ? { idleRoomTtlMs: options.idleRoomTtlMs } : {}),
     nowFn,
   });
 
   const rateLimiter = new WsConnectionRateLimiter(options.rateLimiter);
+
+  // Barrido de inactividad: destruye salas sin conexiones tras `idleRoomTtlMs`
+  // y notifica a `apps/api` con `room.expired` para dejar la mesa consistente.
+  const idleSweepIntervalMs = options.idleSweepIntervalMs ?? 60_000;
+  const idleSweepTimer =
+    idleSweepIntervalMs > 0
+      ? setInterval(() => {
+          void roomManager
+            .sweepIdleRooms(nowFn())
+            .then(async ({ expiredRooms }) => {
+              for (const expired of expiredRooms) {
+                await emitRoomExpiredLifecycle({
+                  publisher: lifecyclePublisher,
+                  roomId: expired.roomId,
+                  tableStatus: expired.tableStatus,
+                  reason: expired.reason,
+                  expiredAtMs: expired.expiredAtMs,
+                }).catch(() => undefined);
+              }
+            })
+            .catch(() => undefined);
+        }, idleSweepIntervalMs)
+      : null;
+  idleSweepTimer?.unref?.();
 
   const httpServer = createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
@@ -268,6 +298,9 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       });
     },
     async close(opts?: { simulateCrash?: boolean }): Promise<void> {
+      if (idleSweepTimer) {
+        clearInterval(idleSweepTimer);
+      }
       if (!opts?.simulateCrash) {
         await roomManager.shutdown();
         await lifecyclePublisher.close();

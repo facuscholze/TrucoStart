@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   DEFAULT_APP_NAME,
+  DEFAULT_IDLE_ROOM_SWEEP_MS,
+  DEFAULT_IDLE_ROOM_TTL_MS,
   DEFAULT_RECONNECT_GRACE_MS,
   DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
   DEFAULT_TURN_TIMEOUT_MS,
@@ -86,6 +88,10 @@ export const ServerEnvSchema = z
 
     TURN_TIMEOUT_MS: PositiveIntFromEnv.default(DEFAULT_TURN_TIMEOUT_MS),
     RECONNECT_GRACE_MS: PositiveIntFromEnv.default(DEFAULT_RECONNECT_GRACE_MS),
+    /** TTL sin conexiones tras el cual el game-server destruye la sala (10 min por defecto). */
+    IDLE_ROOM_TTL_MS: PositiveIntFromEnv.default(DEFAULT_IDLE_ROOM_TTL_MS),
+    /** Frecuencia del barrido de inactividad del game-server (60 s por defecto). */
+    IDLE_ROOM_SWEEP_MS: PositiveIntFromEnv.default(DEFAULT_IDLE_ROOM_SWEEP_MS),
 
     SENTRY_DSN: z.string().optional().default(''),
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().default(''),

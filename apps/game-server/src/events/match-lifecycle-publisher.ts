@@ -70,6 +70,8 @@ function buildDeterministicJobId(event: MatchLifecycleEvent): string {
       return `match-started-${event.matchId}`;
     case 'table.seatVacated':
       return `seat-vacated-${event.roomId}-${event.seat}-${event.vacatedAtMs}`;
+    case 'room.expired':
+      return `room-expired-${event.roomId}-${event.expiredAtMs}`;
   }
 }
 

@@ -58,6 +58,8 @@ export class InMemoryMatchLifecycleBus implements MatchLifecyclePublisher {
 export interface BullMqMatchLifecyclePublisherOptions {
   readonly queueName?: string;
   readonly prefix?: string;
+  readonly attempts?: number;
+  readonly backoffDelayMs?: number;
 }
 
 function buildDeterministicJobId(event: MatchLifecycleEvent): string {
@@ -87,8 +89,8 @@ export class BullMqMatchLifecyclePublisher implements MatchLifecyclePublisher {
       connection: this.connection as any,
       ...(options.prefix ? { prefix: options.prefix } : {}),
       defaultJobOptions: {
-        attempts: 5,
-        backoff: { type: 'exponential', delay: 500 },
+        attempts: options.attempts ?? 5,
+        backoff: { type: 'exponential', delay: options.backoffDelayMs ?? 500 },
         removeOnComplete: 500,
         removeOnFail: 1000,
       },

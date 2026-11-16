@@ -23,6 +23,9 @@ export const DEFAULT_PASSWORD_RESET_TTL_MS = 1_800_000; // 30 min
 
 export const LOBBY_WS_NAMESPACE = '/lobby';
 export const MATCH_LIFECYCLE_QUEUE_NAME = 'truco-match-lifecycle';
+export const MATCH_LIFECYCLE_DLQ_NAME = 'truco-match-lifecycle-dlq';
+export const DEFAULT_PUBLIC_TABLES_LIMIT = 25;
+export const MAX_PUBLIC_TABLES_RESULTS = 50;
 export const DEFAULT_TABLE_IDLE_TTL_MS = 600_000; // 10 min para mesas vacías o sin iniciar
 export const DEFAULT_ABANDONED_TABLE_TTL_MS = 3_600_000; // 60 min para partidas huérfanas
 export const DEFAULT_TABLE_INVITE_TTL_MS = 900_000; // 15 min para enlaces de invitación firmados

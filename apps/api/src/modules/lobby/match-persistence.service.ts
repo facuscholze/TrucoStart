@@ -201,24 +201,33 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       const team0Score = Number(event.scoresByTeam['0'] ?? 0);
       const team1Score = Number(event.scoresByTeam['1'] ?? 0);
 
-      await tx.insert(matchesTable).values({
-        id: event.matchId,
-        tableId,
-        mode: event.mode,
-        rulesetId: effectiveRulesetId,
-        rulesetCode: event.rulesetCode,
-        seedCommitment: event.seedCommitment,
-        startedAt: new Date(event.startedAtMs),
-        endedAt: new Date(event.endedAtMs),
-        result: {
-          winnerTeam: event.winnerTeam,
-          team0Score,
-          team1Score,
-          scoresByTeam: event.scoresByTeam,
-          reason: event.reason,
-          seedReveal: event.seedReveal,
-        },
-      });
+      // Inserción atómica idempotente por clave primaria matchId (segura ante duplicados secuenciales y concurrentes)
+      const insertedMatch = await tx
+        .insert(matchesTable)
+        .values({
+          id: event.matchId,
+          tableId,
+          mode: event.mode,
+          rulesetId: effectiveRulesetId,
+          rulesetCode: event.rulesetCode,
+          seedCommitment: event.seedCommitment,
+          startedAt: new Date(event.startedAtMs),
+          endedAt: new Date(event.endedAtMs),
+          result: {
+            winnerTeam: event.winnerTeam,
+            team0Score,
+            team1Score,
+            scoresByTeam: event.scoresByTeam,
+            reason: event.reason,
+            seedReveal: event.seedReveal,
+          },
+        })
+        .onConflictDoNothing({ target: matchesTable.id })
+        .returning({ id: matchesTable.id });
+
+      if (!insertedMatch[0]) {
+        return null;
+      }
 
       const candidateUserIds = event.players
         .map((p) => p.userId)

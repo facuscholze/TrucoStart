@@ -7,6 +7,7 @@ import {
   type WsTicketResponse,
 } from '@truco/shared';
 import { DomainApiException } from '../../common/api-exception.js';
+import { generateUuidV7 } from '../../common/uuidv7.js';
 import type { UserRow } from '../../db/schema/index.js';
 import { AuditRepository } from '../audit/audit.repository.js';
 import {
@@ -261,6 +262,7 @@ export class AuthSessionService {
     const expiresAt = nowMs + this.config.wsTicketTtlMs;
     const ticket = signWsAuthTicket(
       {
+        jti: generateUuidV7(),
         userId: principal.userId,
         sessionId: principal.sessionId,
         nickname: principal.nickname,

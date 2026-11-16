@@ -127,6 +127,7 @@ describe('M3 Cross-Service Integration: apps/api POST /v1/auth/ws-ticket <-> app
     // 5. Ticket expirado -> rechazado
     const expiredTicket = signWsAuthTicket(
       {
+        jti: randomUUID(),
         userId: registeredUser.id,
         sessionId: reg.json().sessionId,
         nickname: registeredUser.nickname,
@@ -175,5 +176,8 @@ describe('M3 Cross-Service Integration: apps/api POST /v1/auth/ws-ticket <-> app
     } finally {
       socket.close();
     }
+
+    // 7. Reutilizar el mismo ws-ticket (single-use jti guardado en store con TTL) -> rechazado
+    expect(await connectExpectingError(gameServerUrl, ticket)).toBe('UNAUTHORIZED');
   });
 });

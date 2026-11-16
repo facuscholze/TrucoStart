@@ -60,6 +60,7 @@ describe('@truco/game-server handshake auth, Zod validation & WS rate limit', ()
   it('validates Zod envelopes/payloads and enforces per-category WS rate limits', async () => {
     const token = signWsAuthTicket(
       {
+        jti: 'jti-val-single-use-01',
         userId: 'user-val-1',
         sessionId: 'sess-val-123456',
         nickname: 'Validador',
@@ -130,6 +131,59 @@ describe('@truco/game-server handshake auth, Zod validation & WS rate limit', ()
       expect(rLimited.payload['code']).toBe('RATE_LIMITED');
     } finally {
       client.disconnect();
+    }
+  });
+
+  it('enforces single-use WS tickets by rejecting any second handshake with the same jti', async () => {
+    const singleUseToken = signWsAuthTicket(
+      {
+        jti: 'jti-single-use-replay-test-01',
+        userId: 'user-replay-1',
+        sessionId: 'sess-replay-123456',
+        nickname: 'JugadorUnUso',
+        exp: Date.now() + 60_000,
+      },
+      TEST_SECRET,
+    );
+
+    const firstClient = createClient(`http://127.0.0.1:${port}`, {
+      transports: ['websocket'],
+      forceNew: true,
+      reconnection: false,
+      auth: { token: singleUseToken },
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        firstClient.once('connect', () => resolve());
+        firstClient.once('connect_error', reject);
+      });
+    } finally {
+      firstClient.disconnect();
+    }
+
+    const replayClient = createClient(`http://127.0.0.1:${port}`, {
+      transports: ['websocket'],
+      forceNew: true,
+      reconnection: false,
+      auth: { token: singleUseToken },
+    });
+
+    try {
+      const err = await new Promise<Error>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Esperaba rechazo por replay')), 3_000);
+        replayClient.once('connect_error', (e) => {
+          clearTimeout(timer);
+          resolve(e);
+        });
+        replayClient.once('connect', () => {
+          clearTimeout(timer);
+          reject(new Error('No debía permitir reutilizar un ticket WS ya consumido'));
+        });
+      });
+      expect(err.message).toBe('UNAUTHORIZED');
+    } finally {
+      replayClient.disconnect();
     }
   });
 });

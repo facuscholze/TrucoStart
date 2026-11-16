@@ -152,6 +152,12 @@ function defineGameStoreContractSuite(
       await store.clearUserActiveRoom('user-99', 'room-lease');
       expect(await store.getUserActiveRoom('user-99')).toBeNull();
 
+      // Consumo atómico single-use de WS ticket (jti + TTL)
+      expect(await store.consumeWsTicket('jti-contract-01', 120)).toBe(true);
+      expect(await store.consumeWsTicket('jti-contract-01', 120)).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      expect(await store.consumeWsTicket('jti-contract-01', 120)).toBe(true);
+
       await store.close();
     });
   });

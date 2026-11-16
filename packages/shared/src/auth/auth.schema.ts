@@ -62,6 +62,7 @@ export const LoginRequestSchema = z
   .object({
     email: EmailInputSchema,
     password: z.string().min(1).max(128),
+    captchaToken: z.string().trim().min(1).max(2048).optional(),
     deviceName: z.string().trim().min(1).max(80).optional(),
   })
   .strict();

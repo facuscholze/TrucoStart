@@ -48,6 +48,7 @@ export class TestWsClient {
   async connectToPort(port: number): Promise<void> {
     const token = signWsAuthTicket(
       {
+        jti: randomUUID(),
         userId: this.userId,
         sessionId: this.sessionId,
         nickname: this.nickname,

@@ -14,6 +14,7 @@ export class InMemoryGameStore implements GameStore {
   private readonly eventLogs = new Map<string, PersistedSequencedEvent[]>();
   private readonly owners = new Map<string, OwnerLease>();
   private readonly userActiveRooms = new Map<string, string>();
+  private readonly consumedTicketJtis = new Map<string, number>();
   private readonly nowFn: () => number;
 
   constructor(nowFn: () => number = Date.now) {
@@ -87,6 +88,19 @@ export class InMemoryGameStore implements GameStore {
     if (this.userActiveRooms.get(userId) === roomId) {
       this.userActiveRooms.delete(userId);
     }
+  }
+
+  async consumeWsTicket(jti: string, ttlMs: number): Promise<boolean> {
+    const now = this.nowFn();
+    for (const [key, exp] of this.consumedTicketJtis.entries()) {
+      if (exp <= now) this.consumedTicketJtis.delete(key);
+    }
+    const existingExp = this.consumedTicketJtis.get(jti);
+    if (existingExp !== undefined && existingExp > now) {
+      return false;
+    }
+    this.consumedTicketJtis.set(jti, now + Math.max(1, ttlMs));
+    return true;
   }
 
   async close(): Promise<void> {

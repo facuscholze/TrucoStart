@@ -62,5 +62,11 @@ export interface GameStore {
   setUserActiveRoom(userId: string, roomId: string): Promise<void>;
   clearUserActiveRoom(userId: string, roomId: string): Promise<void>;
 
+  /**
+   * Consume atómicamente el identificador único (`jti`) de un ticket WS guardándolo con `ttlMs`.
+   * Devuelve `true` en el primer uso y `false` si ya fue consumido dentro de su ventana de validez.
+   */
+  consumeWsTicket(jti: string, ttlMs: number): Promise<boolean>;
+
   close(): Promise<void>;
 }

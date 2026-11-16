@@ -104,6 +104,7 @@ describe('Shared REST & WebSocket contracts', () => {
     const now = 1_800_000_000_000;
     const token = signWsAuthTicket(
       {
+        jti: 'jti-ticket-0001',
         userId: 'user-1',
         sessionId: 'sess-12345678',
         nickname: 'Facu',
@@ -114,6 +115,7 @@ describe('Shared REST & WebSocket contracts', () => {
 
     const verified = verifyWsAuthTicket(token, TEST_SECRET, now);
     expect(verified).toEqual({
+      jti: 'jti-ticket-0001',
       userId: 'user-1',
       sessionId: 'sess-12345678',
       nickname: 'Facu',
@@ -129,7 +131,13 @@ describe('Shared REST & WebSocket contracts', () => {
 
     const longSecret = 'clave-larga-mayor-a-64-bytes-para-verificar-bloque-rfc2104-sha256-exacto!!';
     const longToken = signWsAuthTicket(
-      { userId: 'u2', sessionId: 'sess-87654321', nickname: 'Nico', exp: now + 60_000 },
+      {
+        jti: 'jti-ticket-0002',
+        userId: 'u2',
+        sessionId: 'sess-87654321',
+        nickname: 'Nico',
+        exp: now + 60_000,
+      },
       longSecret,
     );
     const [longP, longS] = longToken.split('.');

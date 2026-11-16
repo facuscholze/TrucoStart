@@ -128,13 +128,26 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       next(new Error('UNAUTHORIZED'));
       return;
     }
-    const claims = verifyWsAuthTicket(token, sessionSecret, nowFn());
+    const now = nowFn();
+    const claims = verifyWsAuthTicket(token, sessionSecret, now);
     if (!claims) {
       next(new Error('UNAUTHORIZED'));
       return;
     }
-    socket.data.claims = claims;
-    next();
+    const remainingTtlMs = Math.max(1, claims.exp - now);
+    void store
+      .consumeWsTicket(claims.jti, remainingTtlMs)
+      .then((consumed) => {
+        if (!consumed) {
+          next(new Error('UNAUTHORIZED'));
+          return;
+        }
+        socket.data.claims = claims;
+        next();
+      })
+      .catch(() => {
+        next(new Error('UNAUTHORIZED'));
+      });
   });
 
   io.on('connection', (socket) => {

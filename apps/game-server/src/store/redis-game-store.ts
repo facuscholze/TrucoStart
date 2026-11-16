@@ -59,6 +59,10 @@ export class RedisGameStore implements GameStore {
     return `${this.prefix}user:${userId}:activeRoom`;
   }
 
+  private consumedWsTicketKey(jti: string): string {
+    return `${this.prefix}ws_ticket:used:${jti}`;
+  }
+
   async saveRoomStateAndEvents(
     snapshot: PersistedRoomSnapshot,
     newEvents: readonly PersistedSequencedEvent[],
@@ -135,6 +139,12 @@ export class RedisGameStore implements GameStore {
 
   async clearUserActiveRoom(userId: string, roomId: string): Promise<void> {
     await this.redis.eval(COMPARE_AND_DELETE_LUA, 1, this.userRoomKey(userId), roomId);
+  }
+
+  async consumeWsTicket(jti: string, ttlMs: number): Promise<boolean> {
+    const safeTtlMs = Math.max(1, Math.ceil(ttlMs));
+    const res = await this.redis.set(this.consumedWsTicketKey(jti), '1', 'PX', safeTtlMs, 'NX');
+    return res === 'OK';
   }
 
   async close(): Promise<void> {

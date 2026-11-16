@@ -22,6 +22,8 @@ export const DEFAULT_EMAIL_VERIFY_TTL_MS = 86_400_000; // 24 h
 export const DEFAULT_PASSWORD_RESET_TTL_MS = 1_800_000; // 30 min
 
 export const LOCKOUT_THRESHOLD_ATTEMPTS = 5;
+export const LOGIN_ACCOUNT_CAPTCHA_THRESHOLD = 3;
+export const LOGIN_FAILURE_WINDOW_MS = 900_000; // 15 min
 export const LOCKOUT_DURATIONS_MS = Object.freeze([
   60_000, // 5to intento fallido -> 1 min
   300_000, // 6to intento fallido -> 5 min

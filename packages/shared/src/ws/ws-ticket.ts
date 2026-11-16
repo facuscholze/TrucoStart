@@ -10,6 +10,7 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 export const WsAuthTicketClaimsSchema = z.object({
+  jti: z.string().min(8).max(64),
   userId: z.string().min(1).max(128),
   sessionId: z.string().min(8).max(128),
   nickname: z.string().trim().min(1).max(32),

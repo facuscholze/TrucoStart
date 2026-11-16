@@ -11,6 +11,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "dev:all": "node scripts/dev-all.mjs",
+    "db:migrate": "pnpm --filter @truco/api run db:migrate",
+    "db:seed:dev": "pnpm --filter @truco/api run db:seed:dev",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

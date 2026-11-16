@@ -7,6 +7,8 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed:dev": "tsx src/db/seed-dev.ts",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

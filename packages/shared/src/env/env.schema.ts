@@ -21,6 +21,7 @@ export const ServerEnvSchema = z
     API_PORT: PositiveIntFromEnv.max(65535).default(3001),
     GAME_SERVER_HOST: z.string().trim().min(1).default('0.0.0.0'),
     GAME_SERVER_PORT: PositiveIntFromEnv.max(65535).default(3002),
+    GAME_SERVER_INTERNAL_URL: z.string().url().optional().default('http://127.0.0.1:3002'),
 
     DATABASE_URL: z
       .string()
@@ -38,6 +39,7 @@ export const ServerEnvSchema = z
       ),
 
     SESSION_SECRET: z.string().min(32, 'SESSION_SECRET debe tener al menos 32 caracteres'),
+    INTERNAL_RPC_SECRET: z.string().optional().default(''),
     REFRESH_TOKEN_TTL: PositiveIntFromEnv.default(DEFAULT_REFRESH_TOKEN_TTL_SECONDS),
     COOKIE_DOMAIN: z.string().trim().min(1).default('localhost'),
     CORS_ORIGINS: z

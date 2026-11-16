@@ -29,6 +29,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
       },
+      '/lobby-socket.io': {
+        target: 'http://127.0.0.1:3001',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/lobby-socket\.io/, '/socket.io'),
+      },
       '/socket.io': {
         target: 'http://127.0.0.1:3002',
         ws: true,

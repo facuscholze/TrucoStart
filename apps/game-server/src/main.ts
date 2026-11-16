@@ -17,6 +17,7 @@ async function main(): Promise<void> {
     lifecyclePublisher,
     allowAdHocRooms: false,
     sessionSecret: env.SESSION_SECRET,
+    internalSecret: env.INTERNAL_RPC_SECRET || env.SESSION_SECRET,
     seedEncryptionKey: env.SEED_ENCRYPTION_KEY,
     defaultTurnTimeoutMs: env.TURN_TIMEOUT_MS,
     reconnectGraceMs: env.RECONNECT_GRACE_MS,

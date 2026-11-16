@@ -1,0 +1,367 @@
+import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '@truco/shared';
+import { OPENAPI_COMPONENTS_SCHEMAS } from './openapi.schemas.js';
+
+export interface OpenApiDocument {
+  readonly openapi: '3.1.0';
+  readonly info: {
+    readonly title: string;
+    readonly version: string;
+    readonly description: string;
+  };
+  readonly servers: ReadonlyArray<{ readonly url: string; readonly description: string }>;
+  readonly components: Record<string, unknown>;
+  readonly paths: Record<string, unknown>;
+}
+
+const ERR_RES = (description: string) => ({
+  description,
+  content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiErrorResponse' } } },
+});
+const JSON_BODY = (schemaRef: string, required = true) => ({
+  required,
+  content: { 'application/json': { schema: { $ref: schemaRef } } },
+});
+const JSON_RES = (description: string, schemaRef: string) => ({
+  description,
+  content: { 'application/json': { schema: { $ref: schemaRef } } },
+});
+
+export function buildOpenApiV1Document(): OpenApiDocument {
+  return {
+    openapi: '3.1.0',
+    info: {
+      title: 'Mesa de Truco — HTTP API v1',
+      version: '0.3.0',
+      description:
+        'API HTTP v1 para autenticación segura (Argon2id, cookies HttpOnly, rotación de refresh tokens con revocación de familia), emisión de tickets efímeros WebSocket y gestión de cuentas/perfiles (sin dinero real).',
+    },
+    servers: [{ url: '/v1', description: 'API v1' }],
+    components: {
+      securitySchemes: {
+        accessCookie: {
+          type: 'apiKey',
+          in: 'cookie',
+          name: ACCESS_COOKIE_NAME,
+          description: 'Cookie HttpOnly; Secure; SameSite=Lax de acceso corto (15 min).',
+        },
+        refreshCookie: {
+          type: 'apiKey',
+          in: 'cookie',
+          name: REFRESH_COOKIE_NAME,
+          description: 'Cookie HttpOnly; Secure; SameSite=Lax rotativa en /v1/auth (30 días).',
+        },
+      },
+      schemas: OPENAPI_COMPONENTS_SCHEMAS,
+    },
+    paths: {
+      '/health': {
+        get: {
+          tags: ['Health'],
+          summary: 'Liveness probe',
+          responses: { 200: JSON_RES('Servicio vivo', '#/components/schemas/HealthResponse') },
+        },
+      },
+      '/ready': {
+        get: {
+          tags: ['Health'],
+          summary: 'Readiness probe (verifica conectividad activa con PostgreSQL/PGlite)',
+          responses: {
+            200: JSON_RES('Servicio listo', '#/components/schemas/HealthResponse'),
+            503: ERR_RES('Dependencia no disponible'),
+          },
+        },
+      },
+      '/auth/guest': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Crear cuenta invitada efímera con apodo criollo autogenerado',
+          requestBody: JSON_BODY('#/components/schemas/GuestCreateRequest', false),
+          responses: {
+            201: JSON_RES('Sesión invitada creada', '#/components/schemas/AuthSessionResponse'),
+            429: ERR_RES('Rate limit superado'),
+          },
+        },
+      },
+      '/auth/promote-guest': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Vincular cuenta invitada preservando user.id, progreso e historial',
+          security: [{ accessCookie: [] }],
+          requestBody: JSON_BODY('#/components/schemas/PromoteGuestRequest'),
+          responses: {
+            200: JSON_RES('Cuenta promovida', '#/components/schemas/AuthSessionResponse'),
+            400: ERR_RES('Datos inválidos o apodo bloqueado'),
+            401: ERR_RES('No autenticado'),
+            409: ERR_RES('Email/apodo ocupado o cuenta no invitada'),
+          },
+        },
+      },
+      '/auth/register': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Registrar nueva cuenta con contraseña Argon2id y verificación de correo',
+          requestBody: JSON_BODY('#/components/schemas/RegisterRequest'),
+          responses: {
+            201: JSON_RES('Cuenta creada', '#/components/schemas/AuthSessionResponse'),
+            400: ERR_RES('Datos inválidos, apodo bloqueado o captcha fallido'),
+            409: ERR_RES('Email o apodo ya en uso'),
+            429: ERR_RES('Rate limit superado'),
+          },
+        },
+      },
+      '/auth/login': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Iniciar sesión con bloqueo progresivo por fuerza bruta',
+          requestBody: JSON_BODY('#/components/schemas/LoginRequest'),
+          responses: {
+            200: JSON_RES('Sesión iniciada', '#/components/schemas/AuthSessionResponse'),
+            401: ERR_RES('Credenciales inválidas'),
+            423: ERR_RES('Cuenta bloqueada temporalmente'),
+            429: ERR_RES('Rate limit por IP o por cuenta'),
+          },
+        },
+      },
+      '/auth/google': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Iniciar sesión o vincular cuenta mediante Google ID Token',
+          requestBody: JSON_BODY('#/components/schemas/GoogleAuthRequest'),
+          responses: {
+            200: JSON_RES('Sesión iniciada con Google', '#/components/schemas/AuthSessionResponse'),
+            401: ERR_RES('ID Token inválido'),
+          },
+        },
+      },
+      '/auth/refresh': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Rotar refresh token; ante reutilización revoca toda la familia de sesiones',
+          security: [{ refreshCookie: [] }],
+          responses: {
+            200: JSON_RES('Cookies rotadas', '#/components/schemas/AuthSessionResponse'),
+            401: ERR_RES('Refresh ausente, expirado o reutilización detectada'),
+          },
+        },
+      },
+      '/auth/logout': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Cerrar sesión actual o global y limpiar cookies',
+          requestBody: JSON_BODY('#/components/schemas/LogoutRequest', false),
+          responses: {
+            200: JSON_RES('Sesión cerrada', '#/components/schemas/NonEnumeratingAckResponse'),
+          },
+        },
+      },
+      '/auth/sessions': {
+        get: {
+          tags: ['Auth'],
+          summary: 'Listar sesiones/dispositivos activos propios',
+          security: [{ accessCookie: [] }],
+          responses: {
+            200: JSON_RES('Sesiones activas', '#/components/schemas/SessionListResponse'),
+            401: ERR_RES('No autenticado'),
+          },
+        },
+      },
+      '/auth/sessions/{sessionId}': {
+        delete: {
+          tags: ['Auth'],
+          summary: 'Revocar una sesión específica propia',
+          security: [{ accessCookie: [] }],
+          parameters: [
+            {
+              name: 'sessionId',
+              in: 'path',
+              required: true,
+              schema: { type: 'string', format: 'uuid' },
+            },
+          ],
+          responses: {
+            200: JSON_RES('Sesión revocada', '#/components/schemas/NonEnumeratingAckResponse'),
+            403: ERR_RES('La sesión pertenece a otro usuario'),
+            404: ERR_RES('Sesión inexistente'),
+          },
+        },
+      },
+      '/auth/forgot': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Solicitar recuperación de contraseña (respuesta uniforme anti-enumeración)',
+          requestBody: JSON_BODY('#/components/schemas/EmailOnlyRequest'),
+          responses: {
+            200: JSON_RES('Solicitud aceptada', '#/components/schemas/NonEnumeratingAckResponse'),
+          },
+        },
+      },
+      '/auth/reset': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Restablecer contraseña mediante token de un solo uso',
+          requestBody: JSON_BODY('#/components/schemas/ResetPasswordRequest'),
+          responses: {
+            200: JSON_RES(
+              'Contraseña actualizada',
+              '#/components/schemas/NonEnumeratingAckResponse',
+            ),
+            400: ERR_RES('Token inválido o vencido'),
+          },
+        },
+      },
+      '/auth/verify-email': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Confirmar dirección de correo electrónico',
+          requestBody: JSON_BODY('#/components/schemas/VerifyEmailRequest'),
+          responses: {
+            200: JSON_RES('Email verificado', '#/components/schemas/NonEnumeratingAckResponse'),
+            400: ERR_RES('Token inválido o vencido'),
+          },
+        },
+      },
+      '/auth/resend-verification': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Reenviar correo de verificación (anti-enumeración)',
+          requestBody: JSON_BODY('#/components/schemas/EmailOnlyRequest'),
+          responses: {
+            200: JSON_RES('Solicitud aceptada', '#/components/schemas/NonEnumeratingAckResponse'),
+          },
+        },
+      },
+      '/auth/ws-ticket': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Emitir ticket firmado efímero (60 s) para Socket.IO contra game-server',
+          security: [{ accessCookie: [] }],
+          responses: {
+            200: JSON_RES('Ticket WS emitido', '#/components/schemas/WsTicketResponse'),
+            401: ERR_RES('Sesión inválida o expirada'),
+          },
+        },
+      },
+      '/me': {
+        get: {
+          tags: ['Users'],
+          summary: 'Obtener cuenta y perfil privados del usuario autenticado',
+          security: [{ accessCookie: [] }],
+          responses: { 200: JSON_RES('Datos propios', '#/components/schemas/MeResponse') },
+        },
+        patch: {
+          tags: ['Users'],
+          summary: 'Actualizar apodo, avatar, bio o preferencias propias',
+          security: [{ accessCookie: [] }],
+          requestBody: JSON_BODY('#/components/schemas/PatchMeRequest'),
+          responses: { 200: JSON_RES('Perfil actualizado', '#/components/schemas/MeResponse') },
+        },
+        delete: {
+          tags: ['Users'],
+          summary: 'Eliminar cuenta propia y anonimizar datos personales (Ley 25.326)',
+          security: [{ accessCookie: [] }],
+          requestBody: JSON_BODY('#/components/schemas/DeleteAccountRequest', false),
+          responses: {
+            200: JSON_RES('Cuenta eliminada', '#/components/schemas/DeleteAccountResponse'),
+          },
+        },
+      },
+      '/me/export': {
+        get: {
+          tags: ['Users'],
+          summary: 'Exportar copia portátil de datos personales, estadísticas y partidas recientes',
+          security: [{ accessCookie: [] }],
+          responses: {
+            200: JSON_RES('Exportación JSON', '#/components/schemas/AccountExportResponse'),
+          },
+        },
+      },
+      '/users/{id}': {
+        get: {
+          tags: ['Users'],
+          summary: 'Obtener perfil estrictamente público de un jugador (sin PII)',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            200: JSON_RES('Perfil público', '#/components/schemas/PublicUserProfile'),
+            404: ERR_RES('Jugador no encontrado'),
+          },
+        },
+        patch: {
+          tags: ['Users'],
+          summary:
+            'Actualizar perfil por ID (exige titularidad estricta; 403 si id != usuario actual)',
+          security: [{ accessCookie: [] }],
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          requestBody: JSON_BODY('#/components/schemas/PatchMeRequest'),
+          responses: {
+            200: JSON_RES('Perfil actualizado', '#/components/schemas/MeResponse'),
+            403: ERR_RES('Acceso denegado sobre recurso ajeno'),
+          },
+        },
+        delete: {
+          tags: ['Users'],
+          summary:
+            'Eliminar cuenta por ID (exige titularidad estricta; 403 si id != usuario actual)',
+          security: [{ accessCookie: [] }],
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          requestBody: JSON_BODY('#/components/schemas/DeleteAccountRequest', false),
+          responses: {
+            200: JSON_RES('Cuenta eliminada', '#/components/schemas/DeleteAccountResponse'),
+            403: ERR_RES('Acceso denegado sobre recurso ajeno'),
+          },
+        },
+      },
+      '/users/{id}/stats': {
+        get: {
+          tags: ['Users'],
+          summary: 'Obtener estadísticas agregadas públicas de partidas de un jugador',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            200: JSON_RES('Estadísticas públicas', '#/components/schemas/UserStatsResponse'),
+          },
+        },
+      },
+      '/users/{id}/matches': {
+        get: {
+          tags: ['Users'],
+          summary: 'Listar historial público de partidas paginado por cursor',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'cursor', in: 'query', required: false, schema: { type: 'string' } },
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+            },
+          ],
+          responses: {
+            200: JSON_RES('Página de partidas', '#/components/schemas/UserMatchesResponse'),
+          },
+        },
+      },
+      '/users/{id}/export': {
+        get: {
+          tags: ['Users'],
+          summary:
+            'Exportar datos de cuenta por ID (exige titularidad estricta; 403 si id != usuario actual)',
+          security: [{ accessCookie: [] }],
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            200: JSON_RES('Exportación JSON', '#/components/schemas/AccountExportResponse'),
+            403: ERR_RES('Acceso denegado sobre datos privados ajenos'),
+          },
+        },
+      },
+    },
+  };
+}

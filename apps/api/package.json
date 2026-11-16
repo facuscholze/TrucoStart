@@ -31,10 +31,12 @@
     "@electric-sql/pglite": "^0.5.16",
     "@nestjs/testing": "^11.2.4",
     "@truco/config": "workspace:*",
+    "@truco/game-server": "workspace:^",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.17.0",
+    "socket.io-client": "^4.8.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

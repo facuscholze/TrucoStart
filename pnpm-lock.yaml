@@ -160,6 +160,9 @@ importers:
       '@truco/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@truco/game-server':
+        specifier: workspace:^
+        version: link:../game-server
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.5
@@ -172,6 +175,9 @@ importers:
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.6.1)
+      socket.io-client:
+        specifier: ^4.8.1
+        version: 4.8.4
       tsx:
         specifier: ^4.19.2
         version: 4.23.15

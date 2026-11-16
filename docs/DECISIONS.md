@@ -200,3 +200,34 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
   - _Filtrar campos sensibles manualmente en el controlador Socket.IO_: descartado por propensión a errores; centralizar la proyección en `event-projector.ts` sobre `viewFor` + `projectEventsForSeat` hace imposible emitir el `GameState` crudo.
 - **Consecuencias:**
   - Auditoría matemática de baraja reproducible extremo a extremo por cualquier cliente y verificación automatizada sobre el 100 % de los sobres en partidas 1v1 y 2v2 con cero fugas de información.
+
+---
+
+## ADR-013: Motor Dual PostgreSQL 16 (`pg.Pool`) + PGlite (`@electric-sql/pglite`) con Migraciones SQL Idénticas
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:** `apps/api` requiere persistencia relacional real con `UUIDv7`, `jsonb`, claves foráneas `ON DELETE CASCADE` e índices únicos (`nickname_lower`, `email`, `refresh_hash`) mediante Drizzle ORM. En el entorno sandbox local no existe demonio Docker (`ISSUE-001`), mientras que en CI (GitHub Actions) y producción se dispone de PostgreSQL 16 real.
+- **Decisión:**
+  1. Generar las migraciones SQL oficiales con `drizzle-kit generate` en `apps/api/drizzle/*.sql`.
+  2. Implementar un proveedor adaptativo (`database.provider.ts`) que ejecuta **exactamente las mismas migraciones SQL**:
+     - Cuando `DATABASE_URL` está definido (producción y GitHub Actions CI): conecta vía `pg.Pool` contra PostgreSQL 16 real. En suites de pruebas paralelas crea un esquema efímero aislado (`CREATE SCHEMA test_<id>` + `search_path`) y lo elimina al cerrar.
+     - Cuando `DATABASE_URL` no está definido (desarrollo en sandbox sin Docker): carga dinámicamente `@electric-sql/pglite` (PostgreSQL real compilado a WASM en memoria), evitando que `PGlite` sea siquiera importado en despliegues productivos.
+  3. Añadir aserción explícita en Vitest garantizando que cuando `CI=true` jamás se omita `DATABASE_URL`.
+- **Consecuencias:**
+  - Paridad SQL real entre sandbox local y PostgreSQL 16 en CI sin mocks frágiles ni repositorios falsos ad-hoc.
+
+---
+
+## ADR-014: Cookies Duales `HttpOnly`, Familia de Refresh Rotativos y Separación de Dominio para `ws-ticket`
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:** La plataforma necesita sesiones web resistentes a XSS/CSRF, detección inmediata de robo de refresh tokens, promoción transparente de cuentas invitadas sin perder historial y autenticación ligera para handshakes Socket.IO en `apps/game-server`.
+- **Decisión:**
+  1. **Cookies `HttpOnly; Secure; SameSite=Lax`:** `truco_access` (`Path=/`, 15 min) firmada con HMAC-SHA256 bajo prefijo de dominio `access-v1:` y validada contra estado vivo de sesión/usuario en DB (revocación instantánea); `truco_refresh` (`Path=/v1/auth`, 30 días) opaca CSPRNG de 256 bits almacenando únicamente `SHA-256(token)` en `sessions.refresh_hash`.
+  2. **Familias de sesión y detección de reúso:** cada login inaugura un `family_id`. Rotar un refresh token marca el eslabón previo con `revoked_reason = 'ROTATED'`. Si un token ya rotado vuelve a presentarse, el servidor revoca de inmediato **todos los miembros activos de ese `family_id`** (`REUSE_DETECTED`) y registra la intrusión en `audit_logs`.
+  3. **Separación criptográfica HTTP vs WS:** `POST /v1/auth/ws-ticket` emite un ticket firmado de 60 s compatible con `verifyWsAuthTicket` de `@truco/game-server`. Al usar claves/prefijos distintos al de `truco_access`, una cookie HTTP jamás puede reutilizarse directamente como ticket WebSocket ni viceversa.
+  4. **Promoción in-place de invitados:** `POST /v1/auth/promote-guest` actualiza la fila existente en `users` conservando intacto `users.id`, `profiles` (nivel/XP/ajustes) y `match_players`.
+- **Consecuencias:**
+  - Mitigación robusta frente a robo de tokens, enumeración de cuentas y fuerza bruta progresiva (`60s -> 300s -> 900s -> 3600s`), verificada end-to-end contra `apps/game-server`.

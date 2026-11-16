@@ -4,6 +4,18 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.4.0-m3] — 2026-11-13 (Pre-M3 y Módulo M3 — Autenticación, Sesiones y Usuarios en `@truco/api`)
+
+### Agregado
+
+- **Ajustes Pre-M3:** PR #1 abierto hacia `main` (`M0 + M1 + M2`) con GitHub Actions CI en verde sobre `arena/*` contra PostgreSQL 16 y Redis 7 reales (`RedisGameStore`), aclaración de alcance de commit-reveal en `docs/THREAT_MODEL.md`, y protección anti-bloqueo `maxConsecutiveTimeoutsBeforeAbandon = 3` en `@truco/engine` documentada en `docs/RULES.md`.
+- **Esquema relacional Drizzle ORM y motor dual PGlite / PostgreSQL 16:** 12 tablas con `UUIDv7` (`users`, `profiles`, `sessions`, `auth_tokens`, `rulesets`, `tables`, `matches`, `match_players`, `match_events`, `reports`, `sanctions`, `audit_logs`), migraciones SQL generadas en `apps/api/drizzle/` y adaptador `createAdaptiveTestDatabase` que ejecuta las mismas migraciones sobre PGlite en local y PostgreSQL 16 aislado por esquema en CI (`ADR-013`).
+- **Autenticación y seguridad de sesiones (`AuthModule`):** cuentas invitadas efímeras y promoción in-place (`POST /v1/auth/promote-guest`) conservando `user.id`/progreso, registro/login con Argon2id constante en tiempo, cookies `HttpOnly; Secure; SameSite=Lax`, rotación de refresh tokens con revocación completa de familia ante reúso (`REUSE_DETECTED`), bloqueo progresivo por fuerza bruta (`60s -> 300s -> 900s -> 3600s`), respuestas anti-enumeración, gestión/revocación de sesiones por dispositivo, Google OAuth, verificación de email, recuperación de clave, rate limiting por IP y por cuenta, y `POST /v1/auth/ws-ticket` probado en vivo contra `apps/game-server` (`ADR-014`).
+- **Usuarios, autorización por recurso y privacidad (`UsersModule`):** `/v1/me` y `/v1/users/:id` con verificación estricta de titularidad (`403 FORBIDDEN`), perfiles públicos sin PII, estadísticas, historial paginado por cursor, exportación portátil JSON (`GET /v1/me/export`) y eliminación/anonimización de cuenta (`DELETE /v1/me`).
+- **Especificación OpenAPI 3.1 y documentación:** `GET /v1/openapi.json` en paridad exacta con `docs/openapi.v1.json`, `docs/API.md`, `docs/ISSUES.md` y registro de proveedores simulados (`STATE-10`, `STATE-11`, `STATE-12`) en `docs/STATE.md`.
+
+---
+
 ## [0.3.0-m2] — 2026-11-13 (Ajustes Pre-M2 y Módulo M2 — Game Server Autoritativo `@truco/game-server`)
 
 ### Agregado

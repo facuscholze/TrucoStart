@@ -81,10 +81,12 @@ export async function createPostgresDatabase(
     await seedInitialRulesets(db);
   }
 
+  let closed = false;
   return {
     kind: 'postgres',
     db,
     async checkReady(): Promise<boolean> {
+      if (closed) return false;
       try {
         await db.execute(sql`SELECT 1`);
         return true;
@@ -93,6 +95,8 @@ export async function createPostgresDatabase(
       }
     },
     async close(): Promise<void> {
+      if (closed) return;
+      closed = true;
       if (schemaName) {
         try {
           await pool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
@@ -120,10 +124,12 @@ export async function createPgliteDatabase(
   const db = rawDb as unknown as AppDatabase;
   await seedInitialRulesets(db);
 
+  let closed = false;
   return {
     kind: 'pglite',
     db,
     async checkReady(): Promise<boolean> {
+      if (closed) return false;
       try {
         await db.execute(sql`SELECT 1`);
         return true;
@@ -132,6 +138,8 @@ export async function createPgliteDatabase(
       }
     },
     async close(): Promise<void> {
+      if (closed) return;
+      closed = true;
       await pglite.close();
     },
   };

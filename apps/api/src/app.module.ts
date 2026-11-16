@@ -4,6 +4,7 @@ import type { DatabaseConnectionHandle } from './db/database.provider.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule, type AuthModuleOptions } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { OpenApiModule } from './modules/openapi/openapi.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 export interface CreateAppModuleOptions {
@@ -29,6 +30,7 @@ export class AppModule {
         AuthModule.register(options.authOptions),
         UsersModule,
         HealthModule,
+        OpenApiModule,
       ],
     };
   }

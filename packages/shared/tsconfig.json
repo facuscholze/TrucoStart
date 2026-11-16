@@ -1,0 +1,7 @@
+{
+  "extends": "@truco/config/tsconfig/library",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "tsup.config.ts", "vitest.config.ts"]
+}

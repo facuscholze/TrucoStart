@@ -1,0 +1,8 @@
+{
+  "extends": "@truco/config/tsconfig/node",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+}

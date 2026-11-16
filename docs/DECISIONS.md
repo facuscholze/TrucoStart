@@ -166,3 +166,37 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
   - _Codificar lógica separada para 1v1 y 2v2_: descartado por duplicar reglas y dificultar 3v3 (_pica-pica_ en Etapa 2).
 - **Consecuencias:**
   - Determinismo matemático exacto en replays, cobertura del motor `97.93%` líneas / `100%` funciones y simulaciones de miles de partidas completas en pocos segundos sin fugas de información.
+
+---
+
+## ADR-011: Persistencia Dual `GameStore` (`InMemory` + `Redis`) y Salas _Single-Writer_ con Lease
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:** `apps/game-server` requiere persistencia efímera tras cada acción (snapshot + log secuenciado de eventos), bloqueo de una única sala activa por usuario y recuperación transparente ante caída del proceso. Además, el entorno local/sandbox no dispone de demonio Docker (`ISS-001`), mientras que CI y producción cuentan con Redis 7 real.
+- **Decisión:**
+  1. Definir el puerto explícito `GameStore` con operaciones atómicas (`claimRoomOwner`, `releaseRoomOwner`, `saveRoomStateAndEvents`, `loadRoomSnapshot`, `loadRoomEventsAfter`, `getUserActiveRoom`, `setUserActiveRoom`, `clearUserActiveRoom`).
+  2. Proveer dos adaptadores verificados por la misma suite contractual (`game-store.contract.spec.ts`): `InMemoryGameStore` (desarrollo/tests sin Docker) y `RedisGameStore` con `ioredis` (`SET NX PX` para lease de propietario, scripts Lua para renovación/liberación segura y `MULTI/EXEC` para persistencia atómica de snapshot + eventos con TTL de 24 h), activado automáticamente en tests cuando `REDIS_URL` está definido (p. ej. GitHub Actions CI).
+  3. Implementar `RoomActor` con cola de ejecución serie (`enqueue`) garantizando un único escritor por sala (_single-writer_) sin condiciones de carrera entre comandos de socket y temporizadores de turno/abandono.
+- **Alternativas consideradas:**
+  - _Mocks ad-hoc de `ioredis` en tests_: descartado por ocultar divergencias de semántica atómica y violar la regla de diseño de interfaces explícitas.
+  - _Locks distribuidos por cada mensaje individual_: descartado por latencia innecesaria frente a afinidad de sala en memoria respaldada por lease renovable (`claimRoomOwner`) y recuperación perezosa desde `PersistedRoomSnapshot`.
+- **Consecuencias:**
+  - Cero condiciones de carrera intra-sala, recuperación exacta ante caída abrupta del proceso (`simulateCrash`) cuando vence el lease del nodo caído y paridad contractual verificada entre memoria y Redis 7.
+
+---
+
+## ADR-012: Commit-Reveal Criptográfico, Semilla Cifrada en Reposo y Frontera WebSocket sin Fugas
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:** Un servidor de Truco competitivo debe demostrar a los jugadores que el mazo no fue manipulado durante la partida (_fair play_), impedir que un volcado de Redis exponga la semilla activa antes del cierre de la partida y garantizar que ningún mensaje WebSocket filtre cartas o señas privadas.
+- **Decisión:**
+  1. **Commit-Reveal verificable:** al iniciar la partida (`game.started`), el servidor genera 32 bytes CSPRNG (`seedHex` de 256 bits) y publica `seedCommitment = SHA-256("truco-v1:" + seedHex)`. El `Rng` inyectado a `createGame` deriva flotantes uniformes de 53 bits vía `HMAC-SHA256(seedHex, counter_be64)`. Recién al emitir `game.ended` se publica `seedReveal = seedHex`.
+  2. **Cifrado autenticado en reposo:** mientras la partida está `IN_GAME`, `PersistedRoomSnapshot` guarda únicamente `encryptedSeed` cifrado con **AES-256-GCM** (IV aleatorio de 96 bits + auth tag de 128 bits derivado de `SEED_ENCRYPTION_KEY`) y mantiene `revealedSeed: null`, permitiendo que otro nodo recupere y revele la semilla tras un crash sin exponerla en texto plano en Redis.
+  3. **Proyección obligatoria y audiencia tipada:** cada evento persistido declara su `EventAudience` (`ALL`, `SEAT`, `TEAM`); todas las vistas salen exclusivamente de `viewFor(state, seat)` y las señas se validan con `projectEventsForSeat`, tanto en emisión en vivo como en reenvío incremental (`game.rejoin` con `lastSeq`) y resincronización completa (`game.resync`).
+- **Alternativas consideradas:**
+  - _Persistir `seedHex` en claro en Redis hasta el final de la partida_: descartado porque cualquier lectura operativa de claves activas comprometería el mazo futuro.
+  - _Filtrar campos sensibles manualmente en el controlador Socket.IO_: descartado por propensión a errores; centralizar la proyección en `event-projector.ts` sobre `viewFor` + `projectEventsForSeat` hace imposible emitir el `GameState` crudo.
+- **Consecuencias:**
+  - Auditoría matemática de baraja reproducible extremo a extremo por cualquier cliente y verificación automatizada sobre el 100 % de los sobres en partidas 1v1 y 2v2 con cero fugas de información.

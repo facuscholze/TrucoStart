@@ -35,6 +35,11 @@ import {
   evaluateSeatJoin,
   prepareRecoveredSnapshot,
 } from './room-seat-ops.js';
+import {
+  armTurnTimers,
+  rearmTimersAfterCrashRecovery,
+  scheduleDisconnectAbandonTimer,
+} from './room-timer-coordinator.js';
 import { computeTurnTimingWindow, RoomTimerController } from './room-timers.js';
 
 const MAX_PROCESSED_EVENT_IDS = 256;
@@ -118,7 +123,17 @@ export class RoomActor {
     const nowMs = (deps.nowFn ?? Date.now)();
     const graceMs = deps.reconnectGraceMs ?? DEFAULT_RECONNECT_GRACE_MS;
     const actor = new RoomActor(prepareRecoveredSnapshot(snapshot, nowMs, graceMs), deps);
-    actor.rearmRecoveredTimers();
+    rearmTimersAfterCrashRecovery({
+      nowMs,
+      turnDeadline: actor.turnDeadline,
+      turnTimeoutMs: actor.turnTimeoutMs,
+      seats: actor.seats,
+      timers: actor.timers,
+      getState: () => ({ status: actor.status, gameState: actor.gameState }),
+      isSeatDisconnected: (seat) => actor.status === 'IN_GAME' && !actor.seats[seat]?.connected,
+      enqueue: (t) => actor.enqueue(t),
+      applySystemAction: (a) => actor.applyEngineActionInternal(a),
+    });
     return actor;
   }
 
@@ -136,10 +151,7 @@ export class RoomActor {
     this.socketsBySeat.clear();
   }
 
-  private allocateSeq = (): number => {
-    this.seq += 1;
-    return this.seq;
-  };
+  private allocateSeq = (): number => ++this.seq;
 
   private recordEventId(eventId: string): boolean {
     if (this.processedEventIds.includes(eventId)) return false;
@@ -232,105 +244,23 @@ export class RoomActor {
     );
   }
 
-  private armTurnTimersForCurrentState(nowMs: number): void {
-    if (this.status !== 'IN_GAME' || !this.gameState || this.gameState.status !== 'IN_PROGRESS') {
-      this.timers.clearTurnTimers();
-      this.turnDeadline = null;
-      this.turnWarningAt = null;
-      return;
-    }
-    const timing = computeTurnTimingWindow(nowMs, this.turnTimeoutMs);
-    this.turnDeadline = timing.deadline;
-    this.turnWarningAt = timing.warningAt;
-    const expectedHand = this.gameState.hand.handNumber;
-    const expectedActive = this.gameState.hand.activeSeat;
-
-    this.timers.scheduleTurnTimers(
-      timing.warningDelayMs,
-      timing.timeoutDelayMs,
-      () => {
-        void this.enqueue(async () => {
-          if (
-            this.status !== 'IN_GAME' ||
-            this.gameState?.hand.handNumber !== expectedHand ||
-            this.gameState.hand.activeSeat !== expectedActive
-          ) {
-            return;
-          }
-          const ts = this.deps.nowFn();
-          await this.persistAndEmit(ts, [
-            buildSequencedEvent(
-              this.allocateSeq,
-              ts,
-              'game.turn',
-              {
-                roomId: this.roomId,
-                handNumber: this.gameState.hand.handNumber,
-                seat: this.gameState.hand.activeSeat,
-                responderTeam: this.gameState.hand.responderTeam,
-                deadline: this.turnDeadline!,
-                warningAt: this.turnWarningAt!,
-                isWarning: true,
-              },
-              { kind: 'ALL' },
-            ),
-          ]);
-        });
+  private refreshTurnTimers(nowMs: number): void {
+    const window = armTurnTimers(
+      {
+        roomId: this.roomId,
+        turnTimeoutMs: this.turnTimeoutMs,
+        timers: this.timers,
+        getNow: this.deps.nowFn,
+        getState: () => ({ status: this.status, gameState: this.gameState }),
+        allocateSeq: this.allocateSeq,
+        persistAndEmit: (ts, evs) => this.persistAndEmit(ts, evs),
+        applySystemAction: (a) => this.applyEngineActionInternal(a),
+        enqueue: (t) => this.enqueue(t),
       },
-      () => {
-        void this.enqueue(async () => {
-          if (
-            this.status === 'IN_GAME' &&
-            this.gameState?.hand.handNumber === expectedHand &&
-            this.gameState.hand.activeSeat === expectedActive
-          ) {
-            await this.applyEngineActionInternal({ type: 'SYSTEM_TIMEOUT', seat: expectedActive });
-          }
-        });
-      },
+      nowMs,
     );
-  }
-
-  private rearmRecoveredTimers(): void {
-    const now = this.deps.nowFn();
-    if (this.status !== 'IN_GAME' || this.gameState?.status !== 'IN_PROGRESS') return;
-
-    const remainingTurn = this.turnDeadline
-      ? Math.max(50, this.turnDeadline - now)
-      : this.turnTimeoutMs;
-    const expectedHand = this.gameState.hand.handNumber;
-    const expectedActive = this.gameState.hand.activeSeat;
-    this.timers.scheduleTurnTimers(
-      Math.max(20, Math.floor(remainingTurn * 0.7)),
-      remainingTurn,
-      () => undefined,
-      () => {
-        void this.enqueue(async () => {
-          if (
-            this.status === 'IN_GAME' &&
-            this.gameState?.hand.handNumber === expectedHand &&
-            this.gameState.hand.activeSeat === expectedActive
-          ) {
-            await this.applyEngineActionInternal({ type: 'SYSTEM_TIMEOUT', seat: expectedActive });
-          }
-        });
-      },
-    );
-    for (const s of this.seats) {
-      if (s.userId !== null && !s.connected && s.graceDeadline !== null) {
-        this.scheduleGraceAbandon(s.seat, Math.max(50, s.graceDeadline - now));
-      }
-    }
-  }
-
-  private scheduleGraceAbandon(seat: number, delayMs: number): void {
-    this.timers.scheduleDisconnectGrace(seat, delayMs, () => {
-      void this.enqueue(async () => {
-        if (this.status === 'IN_GAME' && this.seats[seat] && !this.seats[seat]!.connected) {
-          await this.applyEngineActionInternal({ type: 'SYSTEM_ABANDON', seat });
-        }
-      });
-    });
+    this.turnDeadline = window.deadline;
+    this.turnWarningAt = window.warningAt;
   }
 
   async handleMessage(
@@ -379,9 +309,7 @@ export class RoomActor {
     }
 
     this.socketsBySeat.set(outcome.seatIdx, socket);
-    if (!outcome.alreadySeated) {
-      await this.deps.store.setUserActiveRoom(claims.userId, this.roomId);
-    }
+    if (!outcome.alreadySeated) await this.deps.store.setUserActiveRoom(claims.userId, this.roomId);
     const now = this.deps.nowFn();
     await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
   }
@@ -431,7 +359,7 @@ export class RoomActor {
     this.encryptedSeed = started.encryptedSeed;
     this.revealedSeed = null;
     this.gameState = started.gameState;
-    this.armTurnTimersForCurrentState(now);
+    this.refreshTurnTimers(now);
     await this.persistAndEmit(now, started.events);
   }
 
@@ -510,7 +438,7 @@ export class RoomActor {
         if (s.userId) await this.deps.store.clearUserActiveRoom(s.userId, this.roomId);
       }
     } else {
-      this.armTurnTimersForCurrentState(now);
+      this.refreshTurnTimers(now);
     }
 
     const outbound = projectEngineStepToWsEvents({
@@ -557,7 +485,14 @@ export class RoomActor {
           { kind: 'ALL' },
         ),
       ]);
-      this.scheduleGraceAbandon(seatIdx, this.reconnectGraceMs);
+      scheduleDisconnectAbandonTimer({
+        timers: this.timers,
+        seat: seatIdx,
+        delayMs: this.reconnectGraceMs,
+        enqueue: (t) => this.enqueue(t),
+        shouldAbandon: () => this.status === 'IN_GAME' && !this.seats[seatIdx]?.connected,
+        applySystemAction: (a) => this.applyEngineActionInternal(a),
+      });
     });
   }
 

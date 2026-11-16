@@ -4,6 +4,19 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.3.0-m2] — 2026-11-13 (Ajustes Pre-M2 y Módulo M2 — Game Server Autoritativo `@truco/game-server`)
+
+### Agregado
+
+- **Ajustes pre-M2 en `@truco/engine`:** política parametrizable `responderSelectionMode` en `RuleSet` (`NEXT_IN_TURN` por defecto en 2v2/N-seat, `PIE_OF_TEAM` y `ANY_TEAM_MEMBER`), elevación de cobertura de ramas (`% Branches`) a **100 %** en `src/view.ts` y `src/handlers/*`, documentación en `docs/RULES.md` y registro de mejora pendiente de IA para M6 en `docs/BACKLOG.md` (`BL-010`).
+- **Contratos WebSocket y seguridad en `@truco/shared`:** esquemas Zod discriminados para los 10 mensajes cliente→servidor y todos los eventos servidor→cliente, catálogo de frases rápidas rioplatenses (`QUICK_CHAT_PHRASES`) y ticket de autenticación de handshake firmado HMAC-SHA256 (`signWsAuthTicket` / `verifyWsAuthTicket`).
+- **Puerto de persistencia `GameStore`:** interfaz explícita con implementaciones `InMemoryGameStore` y `RedisGameStore` (`ioredis`, scripts Lua para lease single-writer y pipeline atómico `MULTI/EXEC`), verificadas con suite contractual compartida (`game-store.contract.spec.ts`) y documentadas en `docs/ISSUES.md`.
+- **Seguridad de mazo y rate limiting en `@truco/game-server`:** commit-reveal CSPRNG (`SHA-256`), `Rng` determinista en modo contador `HMAC-SHA256`, cifrado autenticado en reposo **AES-256-GCM** (`SEED_ENCRYPTION_KEY`) y limitador deslizante `WsConnectionRateLimiter` por conexión y categoría (`action`, `chat`, `table`).
+- **Salas single-writer y resiliencia (`RoomActor` + `RoomManager`):** ready-check, temporizador de turno con aviso previo (`isWarning: true`) y `SYSTEM_TIMEOUT`, desconexión con gracia de 45 s (`SYSTEM_ABANDON`), reconexión por `sessionId` y `lastSeq` (replay filtrado por audiencia o `game.resync` vía `viewFor`), bloqueo de una sala activa por usuario (`CONFLICT`) y recuperación automática desde `GameStore` tras caída del proceso (`simulateCrash`).
+- **Suite de integración Socket.IO (1v1 y 2v2) y documentación:** verificación recursiva mensaje por mensaje de **cero fugas de cartas o señas rivales** en partidas completas de 2 y 4 clientes, `docs/EVENTS.md` completo y ADRs **ADR-011** y **ADR-012** en `docs/DECISIONS.md`.
+
+---
+
 ## [0.2.0-m1] — 2026-11-13 (Módulo M1 — Motor Puro `@truco/engine`)
 
 ### Agregado

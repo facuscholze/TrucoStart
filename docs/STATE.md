@@ -2,23 +2,23 @@
 
 - **Última actualización:** 2026-11-13
 - **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M1** (Hito con pausa `⏸` — completado y a la espera de confirmación del usuario para iniciar **M2**)
+- **Módulo actual:** **M2** (Hito con pausa solicitada `⏸` — completado y a la espera de revisión del usuario para iniciar **M3**)
 
 ---
 
 ## Estado de módulos — Etapa 1 (MVP)
 
-| Módulo | Alcance                                                                                                                   | Hito | Estado         | Notas de verificación                                                                                                                                                                                           |
-| ------ | ------------------------------------------------------------------------------------------------------------------------- | ---- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0** | Monorepo, tooling, CI, `docker-compose` (Postgres 16, Redis 7), `docs/`, `CLAUDE.md`, ADRs 001–009                        | ⏸    | **Verificado** | `pnpm install`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` en verde; `docker-compose.yml` validado por test estructural (ver `ISSUES.md` sobre demonio Docker en sandbox).                        |
-| **M1** | `packages/truco-engine` completo (`RuleSet`s, `viewFor`, IA heurística, cobertura >= 95%, `docs/RULES.md`)                | ⏸    | **Verificado** | Cobertura real **97.93% líneas / 100% funciones / 92.09% ramas**, exhaustivo sobre 9.880 manos, property-based (`fast-check`), miles de partidas 1v1/2v2/3v3 sin deadlocks ni fugas y `docs/RULES.md` completo. |
-| **M2** | `apps/game-server`: salas, flujo de partida, temporizador, reconexión, Redis, commit-reveal, `docs/EVENTS.md`             | —    | Pendiente      | Bloqueado esperando confirmación del usuario tras cierre de M1.                                                                                                                                                 |
-| **M3** | Auth y usuarios en `apps/api` + Drizzle ORM (invitado, Argon2id, sesiones rotativas, Google OAuth, recuperación)          | —    | Pendiente      | —                                                                                                                                                                                                               |
-| **M4** | Lobby y mesas (REST + WS), códigos de 6 caracteres sin ambigüedad, matchmaking simple, `docs/API.md`                      | —    | Pendiente      | —                                                                                                                                                                                                               |
-| **M5** | Cliente PWA (`apps/web`) + `packages/ui`: design system, cartas SVG propias, lobby, mesa responsive, aprender, anotador   | ⏸    | Pendiente      | —                                                                                                                                                                                                               |
-| **M6** | Partida contra IA, entrenamiento y tutorial interactivo                                                                   | —    | Pendiente      | —                                                                                                                                                                                                               |
-| **M7** | Moderación (reportes, sanciones) y `apps/admin` mínimo con RBAC, 2FA y replay auditable                                   | —    | Pendiente      | —                                                                                                                                                                                                               |
-| **M8** | Observabilidad, endurecimiento de seguridad, carga k6 (100 y 1.000), staging, `PERF.md`, `THREAT_MODEL.md`, `RUNBOOKS.md` | ⏸    | Pendiente      | —                                                                                                                                                                                                               |
+| Módulo | Alcance                                                                                                                   | Hito | Estado         | Notas de verificación                                                                                                                                                                                                                                   |
+| ------ | ------------------------------------------------------------------------------------------------------------------------- | ---- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0** | Monorepo, tooling, CI, `docker-compose` (Postgres 16, Redis 7), `docs/`, `CLAUDE.md`, ADRs 001–009                        | ⏸    | **Verificado** | `pnpm install`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` en verde; `docker-compose.yml` validado por test estructural (ver `ISSUES.md` sobre demonio Docker en sandbox).                                                                |
+| **M1** | `packages/truco-engine` completo (`RuleSet`s, `viewFor`, IA heurística, cobertura >= 95%, `docs/RULES.md`)                | ⏸    | **Verificado** | Refinado pre-M2: `responderSelectionMode` configurable (`NEXT_IN_TURN` por defecto en 2v2/N-seat), **100% ramas (`% Branches`)** en `view.ts` y `handlers/*` (**99.64% líneas / 100% funciones / 96.46% ramas** global) y `docs/RULES.md` actualizado.  |
+| **M2** | `apps/game-server`: salas, flujo de partida, temporizador, reconexión, Redis, commit-reveal, `docs/EVENTS.md`             | ⏸    | **Verificado** | `GameStore` (`InMemory` + `Redis` con contrato compartido), `RoomActor` single-writer, timers con aviso previo, gracia de 45 s + `game.rejoin` (`lastSeq` / `game.resync`), commit-reveal + AES-256-GCM, crash recovery y tests 1v1/2v2 con cero fugas. |
+| **M3** | Auth y usuarios en `apps/api` + Drizzle ORM (invitado, Argon2id, sesiones rotativas, Google OAuth, recuperación)          | —    | Pendiente      | Bloqueado esperando confirmación del usuario tras revisión de M2.                                                                                                                                                                                       |
+| **M4** | Lobby y mesas (REST + WS), códigos de 6 caracteres sin ambigüedad, matchmaking simple, `docs/API.md`                      | —    | Pendiente      | —                                                                                                                                                                                                                                                       |
+| **M5** | Cliente PWA (`apps/web`) + `packages/ui`: design system, cartas SVG propias, lobby, mesa responsive, aprender, anotador   | ⏸    | Pendiente      | —                                                                                                                                                                                                                                                       |
+| **M6** | Partida contra IA, entrenamiento y tutorial interactivo                                                                   | —    | Pendiente      | —                                                                                                                                                                                                                                                       |
+| **M7** | Moderación (reportes, sanciones) y `apps/admin` mínimo con RBAC, 2FA y replay auditable                                   | —    | Pendiente      | —                                                                                                                                                                                                                                                       |
+| **M8** | Observabilidad, endurecimiento de seguridad, carga k6 (100 y 1.000), staging, `PERF.md`, `THREAT_MODEL.md`, `RUNBOOKS.md` | ⏸    | Pendiente      | —                                                                                                                                                                                                                                                       |
 
 ---
 
@@ -28,7 +28,6 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 | ID         | Ubicación principal                                                            | Descripción                                                                                                               | Módulo objetivo      |
 | ---------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `STATE-02` | `apps/game-server`, `docs/EVENTS.md`                                           | Gestión de salas en memoria (single-writer), temporizadores, reconexión, persistencia en Redis y commit-reveal de baraja. | **M2**               |
 | `STATE-03` | `apps/api` (auth, users, db)                                                   | Esquema Drizzle PostgreSQL 16, migraciones, sesiones HttpOnly rotativas, Argon2id, Google OAuth y `ConsoleEmailProvider`. | **M3**               |
 | `STATE-04` | `apps/api` (lobby), `docs/API.md`                                              | Endpoints REST `/v1/tables` y `/v1/matchmaking/queue`, códigos de mesa y sincronización WS de lobby.                      | **M4**               |
 | `STATE-05` | `apps/web`, `packages/ui`                                                      | Componentes completos del sistema de diseño, baraja española SVG original y pantallas MVP de la PWA.                      | **M5**               |
@@ -39,7 +38,16 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ---
 
+## Ítems Resueltos / Cerrados
+
+| ID         | Resolución                                                                                                                                                             | Módulo cerrado |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `STATE-01` | Motor puro `@truco/engine` completo con `RuleSet`s, `viewFor`, `projectEventsForSeat`, IA heurística y cobertura >= 95%.                                               | **M1**         |
+| `STATE-02` | `apps/game-server` autoritativo con `GameStore` (`InMemory` + `Redis`), `RoomActor` single-writer, timers, reconexión, commit-reveal + AES-256-GCM y `docs/EVENTS.md`. | **M2**         |
+
+---
+
 ## Próximos pasos inmediatos
 
-1. Recibir confirmación del usuario sobre el cierre de **M1** (`⏸`).
-2. Iniciar **M2**: implementar `apps/game-server` autoritativo conectando `@truco/engine`, gestión de salas single-writer en memoria, temporizadores de turno, reconexión por asiento, persistencia efímera en Redis, commit-reveal criptográfico de baraja y documentación completa en `docs/EVENTS.md`.
+1. Recibir confirmación del usuario sobre la revisión del cierre de **M2** (`⏸`).
+2. Iniciar **M3**: implementar autenticación y gestión de usuarios en `apps/api` con PostgreSQL 16 + Drizzle ORM (migraciones iniciales, sesión de invitado efímera, registro/login con Argon2id, sesiones HttpOnly rotativas, Google OAuth tras interfaz y recuperación de contraseña con `ConsoleEmailProvider`).

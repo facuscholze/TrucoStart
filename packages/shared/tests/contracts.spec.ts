@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -118,6 +119,21 @@ describe('Shared REST & WebSocket contracts', () => {
       nickname: 'Facu',
       exp: now + 60_000,
     });
+
+    // Equivalencia bit a bit con RFC 2104 HMAC-SHA256 de node:crypto (claves <= 64 y > 64 bytes)
+    const [payloadB64, sigB64] = token.split('.');
+    const nodeSigB64 = createHmac('sha256', TEST_SECRET)
+      .update(payloadB64!, 'utf8')
+      .digest('base64url');
+    expect(sigB64).toBe(nodeSigB64);
+
+    const longSecret = 'clave-larga-mayor-a-64-bytes-para-verificar-bloque-rfc2104-sha256-exacto!!';
+    const longToken = signWsAuthTicket(
+      { userId: 'u2', sessionId: 'sess-87654321', nickname: 'Nico', exp: now + 60_000 },
+      longSecret,
+    );
+    const [longP, longS] = longToken.split('.');
+    expect(longS).toBe(createHmac('sha256', longSecret).update(longP!, 'utf8').digest('base64url'));
 
     // Expirado
     expect(verifyWsAuthTicket(token, TEST_SECRET, now + 60_001)).toBeNull();

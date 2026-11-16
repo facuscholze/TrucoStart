@@ -232,18 +232,20 @@ describe('M4 Room Provisioning Contract & Match Lifecycle Publisher (Memory + Bu
       const workerConn = new Redis(redisUrl!, { maxRetriesPerRequest: null });
 
       const received: MatchLifecycleEvent[] = [];
+      let resolveDone!: () => void;
       const donePromise = new Promise<void>((resolve) => {
-        const worker = new Worker(
-          queueName,
-          async (job) => {
-            received.push(MatchLifecycleEventSchema.parse(job.data));
-            await worker.close();
-            resolve();
-          },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          { connection: workerConn as any },
-        );
+        resolveDone = resolve;
       });
+      const worker = new Worker(
+        queueName,
+        async (job) => {
+          received.push(MatchLifecycleEventSchema.parse(job.data));
+          resolveDone();
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { connection: workerConn as any },
+      );
+      await worker.waitUntilReady();
 
       try {
         await publisher.publish({
@@ -260,6 +262,7 @@ describe('M4 Room Provisioning Contract & Match Lifecycle Publisher (Memory + Bu
         expect(received).toHaveLength(1);
         expect(received[0]!.kind).toBe('match.started');
       } finally {
+        await worker.close();
         await publisher.close();
         if (workerConn.status !== 'end') {
           await workerConn.quit();

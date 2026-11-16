@@ -101,3 +101,8 @@ export const authTokensTable = pgTable(
   },
   (t) => [index('auth_tokens_user_purpose_idx').on(t.userId, t.purpose)],
 );
+
+export type UserRow = typeof usersTable.$inferSelect;
+export type ProfileRow = typeof profilesTable.$inferSelect;
+export type SessionRow = typeof sessionsTable.$inferSelect;
+export type AuthTokenRow = typeof authTokensTable.$inferSelect;

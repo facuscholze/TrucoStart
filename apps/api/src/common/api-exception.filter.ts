@@ -53,7 +53,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
     if (exception instanceof ZodError) {
       reply.status(HttpStatus.BAD_REQUEST).send(
         createApiErrorResponse('VALIDATION_ERROR', 'Los datos enviados no son válidos', {
-          issues: exception.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+          issues: exception.issues.map((i) => ({
+            path: i.path.map(String).join('.'),
+            message: i.message,
+          })),
         }),
       );
       return;

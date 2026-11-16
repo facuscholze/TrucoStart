@@ -1,15 +1,15 @@
-import type { ZodType, ZodTypeDef } from 'zod';
+import type { z } from 'zod';
 import { DomainApiException } from './api-exception.js';
 
-export function parseWithZod<TOutput, TDef extends ZodTypeDef = ZodTypeDef, TInput = unknown>(
-  schema: ZodType<TOutput, TDef, TInput>,
+export function parseWithZod<TSchema extends z.ZodType>(
+  schema: TSchema,
   input: unknown,
-): TOutput {
+): z.output<TSchema> {
   const result = schema.safeParse(input);
   if (!result.success) {
     throw new DomainApiException(400, 'VALIDATION_ERROR', 'Los datos enviados no son válidos', {
       issues: result.error.issues.map((issue) => ({
-        path: issue.path.join('.'),
+        path: issue.path.map(String).join('.'),
         message: issue.message,
       })),
     });

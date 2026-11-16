@@ -13,6 +13,7 @@ import {
   LobbyWsSnapshotEventSchema,
   LobbyWsTableRemovedEventSchema,
   LobbyWsTableUpsertedEventSchema,
+  MAX_PUBLIC_TABLES_RESULTS,
   type PublicLobbyTableSummary,
   PublicLobbyTableSummarySchema,
   type TableVisibility,
@@ -51,6 +52,17 @@ function parseCookieHeader(cookieHeader: string | undefined): Record<string, str
 
 function userRoomName(userId: string): string {
   return `user:${userId}`;
+}
+
+function normalizeSocketIp(rawAddress: string | undefined): string {
+  if (!rawAddress) return '127.0.0.1';
+  if (rawAddress.startsWith('::ffff:')) {
+    return rawAddress.slice('::ffff:'.length);
+  }
+  if (rawAddress === '::1') {
+    return '127.0.0.1';
+  }
+  return rawAddress;
 }
 
 @Injectable()
@@ -93,12 +105,24 @@ export class LobbyRealtimeGateway implements OnApplicationBootstrap, OnApplicati
     const nsp = this.io.of(LOBBY_WS_NAMESPACE);
     nsp.use(async (socket, next) => {
       try {
+        const clientIp = normalizeSocketIp(socket.handshake.address);
+        const ipRate = await this.rateLimitStore.consumeWindow(
+          `lobby:ws-connect:ip:${clientIp}`,
+          this.config.lobbyWsConnectIpMax,
+          this.config.lobbyWsConnectWindowMs,
+        );
+        if (!ipRate.allowed) {
+          next(new Error('RATE_LIMITED'));
+          return;
+        }
+
         const userId = await this.authenticateHandshake(socket.handshake);
         if (!userId) {
           next(new Error('UNAUTHORIZED'));
           return;
         }
         socket.data['userId'] = userId;
+        socket.data['clientIp'] = clientIp;
         next();
       } catch {
         next(new Error('UNAUTHORIZED'));
@@ -107,22 +131,46 @@ export class LobbyRealtimeGateway implements OnApplicationBootstrap, OnApplicati
 
     nsp.on('connection', (socket) => {
       const userId = socket.data['userId'] as string | undefined;
+      const clientIp = (socket.data['clientIp'] as string | undefined) ?? '127.0.0.1';
       if (userId) {
         void socket.join(userRoomName(userId));
       }
 
-      if (this.snapshotLoader) {
-        void this.snapshotLoader()
-          .then((tables) => {
-            const payload = LobbyWsSnapshotEventSchema.parse({
-              tables: tables.map((t) => PublicLobbyTableSummarySchema.parse(t)),
+      const emitCappedSnapshot = async () => {
+        if (!this.snapshotLoader) return;
+        const maxResults = Math.min(
+          this.config.lobbyWsMaxSnapshotResults,
+          MAX_PUBLIC_TABLES_RESULTS,
+        );
+        const tables = await this.snapshotLoader();
+        const payload = LobbyWsSnapshotEventSchema.parse({
+          tables: tables.slice(0, maxResults).map((t) => PublicLobbyTableSummarySchema.parse(t)),
+        });
+        socket.emit('lobby.snapshot', payload);
+      };
+
+      void emitCappedSnapshot().catch(() => {
+        // Ignorar si el socket se cerró durante la carga inicial
+      });
+
+      socket.on('lobby.requestSnapshot', () => {
+        void (async () => {
+          const eventRate = await this.rateLimitStore.consumeWindow(
+            `lobby:ws-event:ip:${clientIp}`,
+            this.config.lobbyWsEventIpMax,
+            this.config.lobbyWsConnectWindowMs,
+          );
+          if (!eventRate.allowed) {
+            socket.emit('lobby.error', {
+              code: 'RATE_LIMITED',
+              message: 'Demasiadas solicitudes en tiempo real desde esta IP.',
+              retryAfterMs: eventRate.retryAfterMs,
             });
-            socket.emit('lobby.snapshot', payload);
-          })
-          .catch(() => {
-            // Ignorar si el socket se cerró durante la carga inicial
-          });
-      }
+            return;
+          }
+          await emitCappedSnapshot();
+        })().catch(() => undefined);
+      });
     });
 
     this.lobbyNsp = nsp;

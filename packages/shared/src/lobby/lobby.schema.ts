@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { JOIN_CODE_ALPHABET, JOIN_CODE_LENGTH } from '../constants/app.js';
+import {
+  DEFAULT_PUBLIC_TABLES_LIMIT,
+  JOIN_CODE_ALPHABET,
+  JOIN_CODE_LENGTH,
+  MAX_PUBLIC_TABLES_RESULTS,
+} from '../constants/app.js';
 import { MatchOutcomeSchema } from '../users/users.schema.js';
 import { GameModeSchema, RulesetCodeSchema } from '../ws/client-events.schema.js';
 
@@ -50,7 +55,13 @@ export const ListTablesQuerySchema = z
       .transform((v) => v === 'true')
       .optional(),
     status: LobbyListFilterStatusSchema.optional(),
-    limit: z.coerce.number().int().min(1).max(50).optional().default(25),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_PUBLIC_TABLES_RESULTS)
+      .optional()
+      .default(DEFAULT_PUBLIC_TABLES_LIMIT),
   })
   .strict();
 export type ListTablesQuery = z.infer<typeof ListTablesQuerySchema>;
@@ -111,7 +122,7 @@ export const PublicLobbyTableSummarySchema = z
 export type PublicLobbyTableSummary = z.infer<typeof PublicLobbyTableSummarySchema>;
 
 export const PublicTableListResponseSchema = z.object({
-  tables: z.array(PublicLobbyTableSummarySchema),
+  tables: z.array(PublicLobbyTableSummarySchema).max(MAX_PUBLIC_TABLES_RESULTS),
 });
 export type PublicTableListResponse = z.infer<typeof PublicTableListResponseSchema>;
 
@@ -211,7 +222,7 @@ export type MatchmakingCancelResponse = z.infer<typeof MatchmakingCancelResponse
  * Eventos emitidos por el namespace WebSocket separado `/lobby`.
  */
 export const LobbyWsSnapshotEventSchema = z.object({
-  tables: z.array(PublicLobbyTableSummarySchema),
+  tables: z.array(PublicLobbyTableSummarySchema).max(MAX_PUBLIC_TABLES_RESULTS),
 });
 export const LobbyWsTableUpsertedEventSchema = z.object({
   table: PublicLobbyTableSummarySchema,

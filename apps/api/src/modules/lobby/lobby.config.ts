@@ -12,6 +12,7 @@ import {
   DEFAULT_TABLE_IDLE_TTL_MS,
   DEFAULT_TABLE_INVITE_TTL_MS,
   DEFAULT_TURN_TIMEOUT_MS,
+  MAX_PUBLIC_TABLES_RESULTS,
   type RulesetCode,
 } from '@truco/shared';
 import { DomainApiException } from '../../common/api-exception.js';
@@ -31,6 +32,13 @@ export interface LobbyRuntimeConfig {
   readonly joinCodeIpMax: number;
   readonly joinCodeAccountMax: number;
   readonly joinCodeWindowMs: number;
+  readonly listTablesIpMax: number;
+  readonly listTablesWindowMs: number;
+  readonly listTablesMaxResults: number;
+  readonly lobbyWsConnectIpMax: number;
+  readonly lobbyWsConnectWindowMs: number;
+  readonly lobbyWsEventIpMax: number;
+  readonly lobbyWsMaxSnapshotResults: number;
   readonly nowFn: () => number;
 }
 
@@ -60,6 +68,19 @@ export function buildLobbyRuntimeConfigFromEnv(
     joinCodeIpMax: overrides.joinCodeIpMax ?? 10,
     joinCodeAccountMax: overrides.joinCodeAccountMax ?? 8,
     joinCodeWindowMs: overrides.joinCodeWindowMs ?? 60_000,
+    listTablesIpMax: overrides.listTablesIpMax ?? 60,
+    listTablesWindowMs: overrides.listTablesWindowMs ?? 60_000,
+    listTablesMaxResults: Math.min(
+      MAX_PUBLIC_TABLES_RESULTS,
+      Math.max(1, overrides.listTablesMaxResults ?? MAX_PUBLIC_TABLES_RESULTS),
+    ),
+    lobbyWsConnectIpMax: overrides.lobbyWsConnectIpMax ?? 20,
+    lobbyWsConnectWindowMs: overrides.lobbyWsConnectWindowMs ?? 60_000,
+    lobbyWsEventIpMax: overrides.lobbyWsEventIpMax ?? 30,
+    lobbyWsMaxSnapshotResults: Math.min(
+      MAX_PUBLIC_TABLES_RESULTS,
+      Math.max(1, overrides.lobbyWsMaxSnapshotResults ?? MAX_PUBLIC_TABLES_RESULTS),
+    ),
     nowFn: overrides.nowFn ?? Date.now,
   };
 }

@@ -71,7 +71,9 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
   onApplicationBootstrap(): void {
     this.realtimeGateway.registerSnapshotLoader(async () => {
       await this.sweepExpiredTables();
-      const rows = await this.lobbyRepository.listPublicTables({ limit: 50 });
+      const rows = await this.lobbyRepository.listPublicTables({
+        limit: this.config.lobbyWsMaxSnapshotResults,
+      });
       return rows.map((agg) => toPublicTableSummary(agg));
     });
 
@@ -131,11 +133,32 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
     return { inviteToken, inviteExpiresAt: new Date(exp).toISOString() };
   }
 
-  async listPublicTables(query: ListTablesQuery): Promise<PublicTableListResponse> {
+  async listPublicTables(
+    query: ListTablesQuery,
+    meta: RequestClientMeta = { ip: '127.0.0.1', userAgent: null },
+  ): Promise<PublicTableListResponse> {
+    const ipLimit = await this.rateLimitStore.consumeWindow(
+      `lobby:list-tables:ip:${meta.ip}`,
+      this.config.listTablesIpMax,
+      this.config.listTablesWindowMs,
+    );
+    if (!ipLimit.allowed) {
+      throw new DomainApiException(
+        429,
+        'RATE_LIMITED',
+        'Demasiadas consultas al listado de mesas desde esta IP. Intentá nuevamente en unos segundos.',
+        { retryAfterMs: ipLimit.retryAfterMs },
+      );
+    }
+
     await this.sweepExpiredTables();
-    const aggregates = await this.lobbyRepository.listPublicTables(query);
+    const cappedLimit = Math.min(query.limit, this.config.listTablesMaxResults);
+    const aggregates = await this.lobbyRepository.listPublicTables({
+      ...query,
+      limit: cappedLimit,
+    });
     return PublicTableListResponseSchema.parse({
-      tables: aggregates.map((agg) => toPublicTableSummary(agg)),
+      tables: aggregates.slice(0, cappedLimit).map((agg) => toPublicTableSummary(agg)),
     });
   }
 

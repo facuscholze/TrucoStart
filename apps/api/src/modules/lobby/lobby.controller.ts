@@ -40,9 +40,12 @@ export class LobbyController {
   constructor(@Inject(LobbyService) private readonly lobbyService: LobbyService) {}
 
   @Get()
-  async listPublicTables(@Query() rawQuery: unknown): Promise<PublicTableListResponse> {
+  async listPublicTables(
+    @Query() rawQuery: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<PublicTableListResponse> {
     const query = parseWithZod(ListTablesQuerySchema, rawQuery ?? {});
-    return this.lobbyService.listPublicTables(query);
+    return this.lobbyService.listPublicTables(query, extractClientMeta(req));
   }
 
   @Post()

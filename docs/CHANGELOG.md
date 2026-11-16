@@ -4,6 +4,27 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.5.0-m4] — 2026-11-13 (Ajustes Pre-M4 y Módulo M4 — Lobby, Mesas, Matchmaking y Persistencia de Partidas)
+
+### Agregado
+
+- **Ajustes Pre-M4 (Ítems 1–6):**
+  - Verificación de M3 en GitHub Actions CI contra PostgreSQL 16 y Redis 7 reales, corrigiendo el aislamiento de tests sobre bases efímeras PostgreSQL (`4087eb1`).
+  - Puerto `RateLimitStore` (`InMemoryRateLimitStore` + `RedisRateLimitStore` con scripts Lua) y suite contractual compartida; cambio del bloqueo progresivo de login a `(cuenta + IP)` más umbral de Captcha por cuenta para evitar denegación de servicio sobre cuentas de terceros (`ADR-015`).
+  - Tickets WebSocket estrictamente **single-use** mediante identificador `jti` persistido con TTL en `RateLimitStore`/`GameStore` (`f4bc23c`).
+  - Eliminación de rutas redundantes `PATCH/DELETE/export` bajo `/v1/users/:id`, conservando exclusivamente `/v1/me*` para mutaciones/exportación propias, y documentación del requisito de mismo _registrable site_ para cookies `SameSite=Lax` (`ADR-016`).
+- **Contrato formal `apps/api <-> apps/game-server` sin escritura directa a PostgreSQL (`ADR-017`):**
+  - Aprovisionamiento síncrono firmado con HMAC-SHA256 (`POST /internal/rooms` y `DELETE /internal/rooms/:id`) con variante adicional `AR_CORTO_15_FLOR_V1` (`ar-corto-15-flor-v1`) y bloqueo de salas ad-hoc (`allowAdHocRooms = false`).
+  - Publicación asíncrona de `match.started`, `table.seatVacated` y `match.completed` desde `apps/game-server` vía BullMQ/Redis (`BullMqMatchLifecyclePublisher` + `InMemoryMatchLifecycleBus`), consumidos en `apps/api` (`MatchPersistenceService`) para persistir `matches`, `match_players` y `match_events` en una sola transacción SQL idempotente.
+- **Lobby REST (`/v1/tables/*`), namespace WS `/lobby` y códigos/invitaciones:**
+  - Migración SQL Drizzle `0001_rare_havok.sql` (`table_seats` con índice único parcial `WHERE is_active = true` garantizando máximo 1 mesa activa por cuenta + columnas `ruleset_code`, `target_score`, `flor_enabled`, `turn_timeout_ms`, `expires_at`, `closed_reason` en `tables`).
+  - Endpoints `GET /v1/tables` (filtros por modo, puntos, flor, ruleset y estado), `POST /v1/tables`, `GET /v1/tables/:id`, `POST /v1/tables/:id/join` (`SELECT ... FOR UPDATE`), `POST /v1/tables/join-by-code` (doble rate limit por IP y cuenta sobre códigos de 6 caracteres `JOIN_CODE_ALPHABET` + tokens de invitación HMAC con expiración), `POST /v1/tables/:id/invite`, `POST /v1/tables/:id/leave` (transferencia determinista de propiedad o cierre) y `DELETE /v1/tables/:id` (solo dueño antes de iniciar), con expiración por TTL y limpieza de mesas abandonadas.
+  - Namespace Socket.IO aislado `/lobby` autenticado y validado con `PublicLobbyTableSummarySchema` (`.strict()`), probado con cero filtraciones de mesas privadas o datos privados de jugadores.
+- **Matchmaking simple (`1v1` y `2v2`):** puerto `MatchmakingStore` (`InMemoryMatchmakingStore` + `RedisMatchmakingStore` en Lua + tests de contrato), endpoints `POST/GET/DELETE /v1/matchmaking/queue` con timeout configurable, cancelación segura y notificación push privada `matchmaking.matched`.
+- **Suite E2E distribuida real y documentación:** test E2E levantando `apps/api` real + `apps/game-server` real jugando una partida completa tras unirse por código y verificando persistencia en PostgreSQL (`matches`, `match_players`, `match_events`), actualización de OpenAPI 3.1 (`0.4.0`), `docs/API.md`, `docs/EVENTS.md`, `docs/THREAT_MODEL.md` y `docs/STATE.md`.
+
+---
+
 ## [0.4.0-m3] — 2026-11-13 (Pre-M3 y Módulo M3 — Autenticación, Sesiones y Usuarios en `@truco/api`)
 
 ### Agregado

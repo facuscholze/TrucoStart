@@ -12,9 +12,9 @@
 2. **Inyección y payloads malformados (HTTP / WS):**
    - Mitigación: esquemas estrictos Zod en `@truco/shared` rechazando propiedades o tipos inesperados.
 3. **Robo de sesión y fuerza bruta:**
-   - Mitigación: cookies `HttpOnly; Secure; SameSite`, rotación de refresh tokens con detección de reutilización, contraseñas con Argon2id, bloqueo progresivo y 2FA obligatorio en administración.
-4. **Abuso de recursos / DoS aplicativo:**
-   - Mitigación: rate limiting diferenciado por IP, cuenta y tipo de evento WS (cantos, chat rápido, creación de mesas).
+   - Mitigación: cookies `HttpOnly; Secure; SameSite=Lax` (requiriendo mismo _registrable site_ entre `web` y `api`, ver `ADR-016`), rotación de refresh tokens con revocación de familia ante reúso, tickets WS estrictamente **single-use** (`jti` con TTL en `RateLimitStore`), contraseñas con Argon2id, bloqueo progresivo por combinación **`(cuenta + IP)`** y escalamiento a **Captcha por cuenta** sin bloquear globalmente cuentas de terceros ante ataques distribuidos (`ADR-015`).
+4. **Abuso de recursos, enumeración de mesas privadas y DoS aplicativo:**
+   - Mitigación: rate limiting en Redis (`RateLimitStore`) diferenciado por IP, cuenta y tipo de evento WS; códigos de unión de 6 caracteres (`JOIN_CODE_ALPHABET`) protegidos con doble rate limit por IP y por cuenta en `POST /v1/tables/join-by-code`; invitaciones firmadas con HMAC-SHA256 y expiración (`table-invite-v1`); aislamiento estricto de mesas `PRIVATE` (404 ante terceros y cero emisiones en `/lobby`); límite atómico de 1 mesa activa por cuenta mediante índice único parcial en PostgreSQL (`table_seats_one_active_per_user_uniq`) y RPC interno autenticado con HMAC (`internal-rpc-v1`, `ADR-017`).
 5. **Economía sin riesgo monetario:**
    - Mitigación por diseño: cero dinero real, cero retiros y cero transferencias entre jugadores.
 6. **Datos personales y cumplimiento legal (`STATE-09`):**

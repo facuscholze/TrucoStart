@@ -196,3 +196,105 @@
   "recentMatches": []
 }
 ```
+
+---
+
+## 4. Lobby y Mesas (`/v1/tables`) — Módulo M4
+
+`apps/api` es la única fuente de verdad de las mesas en PostgreSQL (`tables` + `table_seats`) y aprovisiona de forma síncrona cada sala en `apps/game-server` vía RPC interno firmado con HMAC-SHA256 (`POST /internal/rooms` y `DELETE /internal/rooms/:id`, documentado en `ADR-017`).
+
+| Método   | Ruta                      | Auth                  | Descripción                                                                                                                                                                                                     |
+| -------- | ------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1/tables`              | Pública               | Lista únicamente mesas con `visibility = 'PUBLIC'` filtradas por `mode` (`1v1` \| `2v2`), `targetScore` (`15` \| `30`), `flor` (`true` \| `false`), `rulesetCode`, `status` (`WAITING` \| `IN_GAME`) y `limit`. |
+| `POST`   | `/v1/tables`              | Cookie `truco_access` | Crea mesa `PUBLIC` o `PRIVATE`, asigna asiento `0` al anfitrión, genera `joinCode` de 6 caracteres sin ambigüedad (`23456789ABCDEFGHJKLMNPQRSTUVWXYZ`) y aprovisiona la sala en `game-server`.                  |
+| `GET`    | `/v1/tables/:id`          | Cookie `truco_access` | Devuelve detalle de mesa. Si es `PRIVATE` y el solicitante no la integra, responde `404 NOT_FOUND` para impedir enumeración.                                                                                    |
+| `POST`   | `/v1/tables/:id/join`     | Cookie `truco_access` | Reserva atómicamente (`SELECT ... FOR UPDATE`) un asiento libre en una mesa `PUBLIC`. Rechaza mesas `PRIVATE` con `403 FORBIDDEN`.                                                                              |
+| `POST`   | `/v1/tables/join-by-code` | Cookie `truco_access` | Ingresa por `code` de 6 caracteres (protegido con rate limit independiente por IP y por cuenta) o por `inviteToken` firmado con HMAC y expiración.                                                              |
+| `POST`   | `/v1/tables/:id/invite`   | Cookie `truco_access` | Genera un enlace de invitación firmado (`table-invite-v1`) con expiración acotada al TTL de la mesa (solo integrantes mientras `status = 'WAITING'`).                                                           |
+| `POST`   | `/v1/tables/:id/leave`    | Cookie `truco_access` | Abandona mesa en espera (`WAITING`). Si sale el dueño, transfiere la propiedad determinísticamente al integrante más antiguo o cierra la mesa si queda vacía.                                                   |
+| `DELETE` | `/v1/tables/:id`          | Cookie `truco_access` | Cierra la mesa y elimina la sala en `game-server` (exclusivo para el dueño y únicamente antes de que comience la partida).                                                                                      |
+
+### Ejemplos de Lobby REST
+
+#### `POST /v1/tables` (`201 Created`)
+
+Solicitud:
+
+```json
+{
+  "mode": "1v1",
+  "visibility": "PRIVATE",
+  "targetScore": 15,
+  "flor": true,
+  "turnTimeoutMs": 20000
+}
+```
+
+Respuesta:
+
+```json
+{
+  "id": "019a8d80-2100-7a10-8b20-112233445566",
+  "roomId": "019a8d80-2100-7a10-8b20-112233445566",
+  "mode": "1v1",
+  "visibility": "PRIVATE",
+  "rulesetCode": "ar-corto-15-flor-v1",
+  "targetScore": 15,
+  "flor": true,
+  "turnTimeoutMs": 20000,
+  "status": "WAITING",
+  "ownerNickname": "LuciaCriolla",
+  "isOwner": true,
+  "mySeat": 0,
+  "occupiedSeats": 1,
+  "maxSeats": 2,
+  "seats": [
+    {
+      "seat": 0,
+      "team": 0,
+      "occupied": true,
+      "nickname": "LuciaCriolla",
+      "isOwner": true,
+      "isSelf": true
+    },
+    { "seat": 1, "team": 1, "occupied": false, "nickname": null, "isOwner": false, "isSelf": false }
+  ],
+  "joinCode": "K7M4P9",
+  "inviteToken": "eyJ0YWJsZUlkIjoiMDE5YThkODAtMjEwMC03YTEwLThiMjAtMTEyMjMzNDQ1NTY2IiwiZXhwIjoxNzYzMDUwOTAwMDAwfQ.abc123...",
+  "inviteExpiresAt": "2026-11-13T16:25:00.000Z",
+  "expiresAt": "2026-11-13T16:20:00.000Z",
+  "createdAt": "2026-11-13T16:10:00.000Z"
+}
+```
+
+#### `POST /v1/tables/join-by-code` (`200 OK`)
+
+```json
+{
+  "code": "K7M4P9"
+}
+```
+
+---
+
+## 5. Matchmaking Rápido (`/v1/matchmaking/queue`) — Módulo M4
+
+| Método   | Ruta                    | Auth                  | Descripción                                                                                                                                                                                 |
+| -------- | ----------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST`   | `/v1/matchmaking/queue` | Cookie `truco_access` | Encola al jugador por `(mode, rulesetCode)` (`1v1` cupo 2, `2v2` cupo 4). Responde `200` (`QUEUED`) o `201` (`MATCHED`) al completar el cupo creando la mesa y notificando por WS `/lobby`. |
+| `GET`    | `/v1/matchmaking/queue` | Cookie `truco_access` | Devuelve el estado actual (`IDLE`, `QUEUED` con posición/vencimiento o `MATCHED` con `tableId`, `roomId`, `mySeat`, `myTeam`).                                                              |
+| `DELETE` | `/v1/matchmaking/queue` | Cookie `truco_access` | Cancela la búsqueda en cola de manera atómica e idempotente (`{ "cancelled": true }`).                                                                                                      |
+
+#### Ejemplo `POST /v1/matchmaking/queue` al completar cupo (`201 Created`)
+
+```json
+{
+  "status": "MATCHED",
+  "tableId": "019a8d85-9900-7c41-9d10-aabbccddeeff",
+  "roomId": "019a8d85-9900-7c41-9d10-aabbccddeeff",
+  "mode": "1v1",
+  "rulesetCode": "ar-standard-v1",
+  "mySeat": 1,
+  "myTeam": 1
+}
+```

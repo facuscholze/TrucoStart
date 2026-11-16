@@ -208,3 +208,29 @@ Cualquier cliente o auditor externo puede verificar al finalizar la partida (`ga
    $$\operatorname{SHA-256}(\text{"truco-v1:"} \parallel \text{seedReveal}) \stackrel{?}{=} \text{seedCommitment}$$
 2. **Reproducibilidad determinista del mazo:**
    Inicializando `createRngFromSeedHex(seedReveal)` (`HMAC-SHA256` en modo contador big-endian de 64 bits proyectado a precisión IEEE-754 de 53 bits) y llamando a `createGame(ruleset, seats, rng)`, se obtiene exactamente el mismo reparto inicial de cartas de la partida.
+
+---
+
+## 8. Namespace WebSocket de Lobby (`/lobby` en `apps/api`) — Módulo M4
+
+El tráfico en tiempo real del lobby corre en un namespace Socket.IO **estrictamente separado** (`/lobby`, servido por `apps/api`) respecto del servidor de partidas (`apps/game-server`):
+
+- **Autenticación de handshake:** acepta `auth.token` (ticket efímero single-use emitido por `POST /v1/auth/ws-ticket` con verificación de `jti` único) o cookie `truco_access` válida. Conexiones anónimas o al namespace raíz `/` de `apps/api` son rechazadas (`UNAUTHORIZED` / `NAMESPACE_FORBIDDEN`).
+- **Garantía de cero filtraciones:** todos los broadcasts públicos pasan por `PublicLobbyTableSummarySchema` (`.strict()`). **Jamás** se emite evento alguno sobre mesas `PRIVATE` ni campos privados del jugador (`userId`, `ownerId`, `email`, `sessionId`, `joinCode`, `inviteToken`).
+
+| Evento Servidor → Cliente | Destinatario                                        | Payload ejemplar                                                                                                                                                                                                                                                                                 |
+| ------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lobby.snapshot`          | Socket recién conectado                             | `{ "tables": [ /* PublicLobbyTableSummary[] */ ] }`                                                                                                                                                                                                                                              |
+| `lobby.tableUpsert`       | Todos en `/lobby` (solo mesas `PUBLIC`)             | `{ "table": { "id": "019a8d80-...", "mode": "2v2", "rulesetCode": "ar-sin-flor-v1", "targetScore": 30, "flor": false, "turnTimeoutMs": 25000, "status": "WAITING", "ownerNickname": "ManoBrava", "occupiedSeats": 2, "maxSeats": 4, "seats": [...], "createdAt": "2026-11-13T16:12:00.000Z" } }` |
+| `lobby.tableRemoved`      | Todos en `/lobby` (solo mesas `PUBLIC`)             | `{ "tableId": "019a8d80-..." }`                                                                                                                                                                                                                                                                  |
+| `matchmaking.matched`     | Sala privada `user:<userId>` del jugador emparejado | `{ "tableId": "019a8d85-...", "roomId": "019a8d85-...", "mode": "1v1", "rulesetCode": "ar-standard-v1", "seat": 0, "team": 0 }`                                                                                                                                                                  |
+
+---
+
+## 9. Eventos Asíncronos de Ciclo de Vida (`apps/game-server -> BullMQ -> apps/api`)
+
+`apps/game-server` **nunca escribe en PostgreSQL** (`ADR-017`). Publica eventos validados con `MatchLifecycleEventSchema` en la cola BullMQ `truco-match-lifecycle` consumidos por `MatchPersistenceService` en `apps/api`:
+
+1. `match.started`: marca `tables.status = 'IN_GAME'` y actualiza `/lobby` si la mesa es pública.
+2. `table.seatVacated`: libera asiento inactivo en `WAITING` (transfiriendo propiedad o cerrando mesa huérfana).
+3. `match.completed`: ejecuta una **única transacción PostgreSQL** idempotente por `matchId` que inserta `matches`, `match_players` y `match_events`, marca `tables.status = 'FINISHED'` y desactiva `table_seats.is_active` para liberar a todos los participantes.

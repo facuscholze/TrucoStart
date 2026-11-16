@@ -42,43 +42,61 @@ export interface CreatePostgresConnectionOptions {
   readonly databaseUrl: string;
   readonly runMigrations?: boolean;
   readonly migrationsFolder?: string;
-  readonly isolatedSchema?: string;
+  readonly isolatedDatabaseName?: string;
+}
+
+function replaceDatabaseNameInUrl(rawUrl: string, dbName: string): string {
+  const parsed = new URL(rawUrl);
+  parsed.pathname = `/${dbName}`;
+  return parsed.toString();
 }
 
 export async function createPostgresDatabase(
   options: CreatePostgresConnectionOptions,
 ): Promise<DatabaseConnectionHandle> {
   const migrationsFolder = options.migrationsFolder ?? DEFAULT_MIGRATIONS_FOLDER;
-  const schemaName = options.isolatedSchema;
+  const ephemeralDb = options.isolatedDatabaseName;
 
-  if (schemaName && !/^[a-z0-9_]+$/.test(schemaName)) {
-    throw new Error(`Nombre de esquema aislado inválido: ${schemaName}`);
+  if (ephemeralDb && !/^[a-z0-9_]+$/.test(ephemeralDb)) {
+    throw new Error(`Nombre de base efímera inválido: ${ephemeralDb}`);
   }
 
-  if (schemaName) {
-    const bootstrapClient = new pg.Client({ connectionString: options.databaseUrl });
-    await bootstrapClient.connect();
+  let effectiveUrl = options.databaseUrl;
+  if (ephemeralDb) {
+    const adminClient = new pg.Client({ connectionString: options.databaseUrl });
+    await adminClient.connect();
     try {
-      await bootstrapClient.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+      await adminClient.query(`CREATE DATABASE "${ephemeralDb}"`);
     } finally {
-      await bootstrapClient.end();
+      await adminClient.end();
     }
+    effectiveUrl = replaceDatabaseNameInUrl(options.databaseUrl, ephemeralDb);
   }
 
   const pool = new pg.Pool({
-    connectionString: options.databaseUrl,
-    max: schemaName ? 4 : 15,
-    ...(schemaName ? { options: `-c search_path=${schemaName},public` } : {}),
+    connectionString: effectiveUrl,
+    max: ephemeralDb ? 4 : 15,
   });
 
-  const db = drizzleNodePg(pool, { schema }) as unknown as AppDatabase;
+  const nodePgDb = drizzleNodePg(pool, { schema });
+  const db = nodePgDb as unknown as AppDatabase;
 
-  if (options.runMigrations ?? true) {
-    await migrateNodePg(pool ? drizzleNodePg(pool, { schema }) : (db as never), {
-      migrationsFolder,
-      ...(schemaName ? { migrationsSchema: schemaName } : {}),
-    });
-    await seedInitialRulesets(db);
+  try {
+    if (options.runMigrations ?? true) {
+      await migrateNodePg(nodePgDb, { migrationsFolder });
+      await seedInitialRulesets(db);
+    }
+  } catch (err) {
+    await pool.end().catch(() => undefined);
+    if (ephemeralDb) {
+      const cleanupClient = new pg.Client({ connectionString: options.databaseUrl });
+      await cleanupClient
+        .connect()
+        .then(() => cleanupClient.query(`DROP DATABASE IF EXISTS "${ephemeralDb}" WITH (FORCE)`))
+        .catch(() => undefined)
+        .finally(() => cleanupClient.end().catch(() => undefined));
+    }
+    throw err;
   }
 
   let closed = false;
@@ -97,14 +115,18 @@ export async function createPostgresDatabase(
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
-      if (schemaName) {
+      await pool.end();
+      if (ephemeralDb) {
+        const adminClient = new pg.Client({ connectionString: options.databaseUrl });
         try {
-          await pool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+          await adminClient.connect();
+          await adminClient.query(`DROP DATABASE IF EXISTS "${ephemeralDb}" WITH (FORCE)`);
         } catch {
-          // Ignorar errores de limpieza de esquema efímero al cerrar
+          // Ignorar errores de limpieza de base efímera al cerrar
+        } finally {
+          await adminClient.end().catch(() => undefined);
         }
       }
-      await pool.end();
     },
   };
 }
@@ -147,17 +169,18 @@ export async function createPgliteDatabase(
 
 /**
  * Crea una base migrada con las MISMAS migraciones SQL de Drizzle:
- * - Si `DATABASE_URL` está definido (p. ej. PostgreSQL 16 real en GitHub Actions CI), usa `pg.Pool` en un esquema aislado.
+ * - Si `DATABASE_URL` está definido (p. ej. PostgreSQL 16 real en GitHub Actions CI), crea una base efímera aislada
+ *   y ejecuta las migraciones sin modificar sobre el esquema real `public`.
  * - Si no está definido (sandbox local sin Docker), usa `PGlite` (PostgreSQL real WASM en memoria).
  */
 export async function createAdaptiveTestDatabase(): Promise<DatabaseConnectionHandle> {
   const dbUrl = process.env['DATABASE_URL'];
   if (dbUrl && dbUrl.trim().length > 0) {
-    const isolatedSchema = `test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const isolatedDatabaseName = `truco_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     return createPostgresDatabase({
       databaseUrl: dbUrl,
       runMigrations: true,
-      isolatedSchema,
+      isolatedDatabaseName,
     });
   }
   return createPgliteDatabase();

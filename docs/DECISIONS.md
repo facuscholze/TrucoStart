@@ -251,3 +251,19 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
 - **Consecuencias:**
   - Ningún tercero puede bloquear la cuenta de otro jugador conociendo su email: el dueño legítimo siempre puede iniciar sesión presentando su contraseña real junto con el desafío Captcha.
   - Consistencia horizontal entre múltiples instancias de `apps/api` respaldada por Redis 7 en producción y CI.
+
+---
+
+## ADR-016: Topología de Despliegue _Same-Site_ (`eTLD+1`) para Cookies `SameSite=Lax` entre `web`, `admin` y `api`
+
+- **Fecha:** 2026-11-13
+- **Estado:** Aceptado
+- **Contexto:** Las cookies de sesión (`truco_access` y `truco_refresh`) se emiten con `HttpOnly; Secure; SameSite=Lax` para mitigar CSRF en peticiones sub-recurso (`fetch`/`XHR`) originadas desde terceros maliciosos. En los navegadores modernos, la clasificación _same-site_ frente a _cross-site_ se evalúa sobre el **sitio registrable (`scheme + eTLD+1`)** conforme a la Public Suffix List:
+  - Si `apps/web` y `apps/api` se desplegaran bajo dominios registrables distintos (por ejemplo `truco-web.vercel.app` y `truco-api.fly.dev`, ambos sufijos públicos independientes), toda petición `fetch('https://.../v1/...', { credentials: 'include' })` sería tratada como **cross-site** y el navegador **omitiría las cookies `SameSite=Lax`** en `POST`/`PATCH`/`DELETE` e incluso en `GET` de sub-recursos tras redirecciones cross-site.
+- **Decisión:**
+  1. Establecer como **invariante obligatoria de despliegue** en staging y producción que `apps/web`, `apps/admin` y `apps/api` compartan el mismo **sitio registrable (`eTLD+1`)** —p. ej. `app.truco.ar`, `admin.truco.ar` y `api.truco.ar` configurando `COOKIE_DOMAIN=.truco.ar`— o bien enrutar `/v1/*` mediante reverse-proxy/CDN bajo el mismo origen exacto (`https://truco.ar/v1/*`).
+  2. Para `apps/game-server` (que puede residir en otro subdominio o incluso en otro borde regional), mantener la autenticación del handshake WebSocket desacoplada de cookies mediante el ticket efímero de un solo uso `POST /v1/auth/ws-ticket` enviado explícitamente en `socket.auth.token`.
+- **Alternativas consideradas:**
+  - _Relajar las cookies a `SameSite=None; Secure`_: descartado porque expone todas las mutaciones autenticadas a envío automático cross-site y queda sujeto al bloqueo progresivo de cookies de terceros (3PCD / CHIPS) en Safari, Firefox y Chrome.
+- **Consecuencias:**
+  - Protección CSRF nativa de `SameSite=Lax` intacta sin degradación por políticas de privacidad de navegadores, con requisito explícito de DNS/enrutamiento documentado para infraestructura.

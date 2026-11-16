@@ -10,7 +10,8 @@
 - **Modelo de autenticación HTTP:** cookies `HttpOnly; Secure; SameSite=Lax`:
   - `truco_access` (`Path=/`, TTL `900 s` / 15 min): cookie de acceso firmada con HMAC-SHA256 (`access-v1:<SESSION_SECRET>`) y verificada contra estado vivo de sesión y cuenta en PostgreSQL.
   - `truco_refresh` (`Path=/v1/auth`, TTL `2592000 s` / 30 días): token opaco CSPRNG (32 bytes base64url; solo su hash `SHA-256` se almacena en `sessions.refresh_hash`). Rota en cada `POST /v1/auth/refresh` dentro de `family_id`; si se reutiliza un token ya rotado, se revoca **toda la familia de sesiones** (`REUSE_DETECTED`) y se registra en `audit_logs`.
-- **Puente HTTP → WebSocket (`apps/game-server`):** el cliente autenticado solicita un ticket efímero (`60 s`) en `POST /v1/auth/ws-ticket` y lo presenta en el handshake Socket.IO (`auth: { token }`). La firma del ticket y la firma de `truco_access` están criptográficamente separadas por dominio.
+  - **Requisito de despliegue (`SameSite=Lax`):** `apps/web`, `apps/admin` y `apps/api` deben compartir el mismo **sitio registrable (`eTLD+1`)** —por ejemplo `app.truco.ar`, `admin.truco.ar` y `api.truco.ar` con `COOKIE_DOMAIN=.truco.ar`, o enrutar `/v1` por reverse-proxy en el mismo origen— para que el navegador adjunte cookies `SameSite=Lax` en peticiones `fetch(..., { credentials: 'include' })` (véase `ADR-016` en `docs/DECISIONS.md`).
+- **Puente HTTP → WebSocket (`apps/game-server`):** el cliente autenticado solicita un ticket efímero de **un solo uso** (`jti` único + TTL `60 s`) en `POST /v1/auth/ws-ticket` y lo presenta en el handshake Socket.IO (`auth: { token }`). `apps/game-server` consume atómicamente `jti` en `GameStore` rechazando cualquier reúso. La firma del ticket y la firma de `truco_access` están criptográficamente separadas por dominio.
 - **Formato uniforme de error** (`@truco/shared` -> `ApiErrorResponseSchema`):
   ```json
   {
@@ -42,22 +43,22 @@
 
 ## 3. Autenticación y Sesiones (`/v1/auth/*`)
 
-| Método   | Ruta                           | Auth            | Código OK | Descripción                                                                                        |
-| -------- | ------------------------------ | --------------- | --------- | -------------------------------------------------------------------------------------------------- |
-| `POST`   | `/v1/auth/guest`               | No              | `201`     | Crea cuenta invitada efímera con apodo criollo autogenerado y emite cookies `HttpOnly`.            |
-| `POST`   | `/v1/auth/promote-guest`       | `truco_access`  | `200`     | Convierte cuenta invitada en registrada **conservando el mismo `user.id`, nivel/XP y partidas**.   |
-| `POST`   | `/v1/auth/register`            | No              | `201`     | Registra cuenta con Argon2id, unicidad case-insensitive de apodo, filtro ofensivo y email verify.  |
-| `POST`   | `/v1/auth/login`               | No              | `200`     | Inicia sesión con tiempo constante Argon2id y bloqueo progresivo (`60s -> 300s -> 900s -> 3600s`). |
-| `POST`   | `/v1/auth/google`              | No              | `200`     | Inicia sesión o vincula cuenta existente mediante Google ID Token (`GoogleOAuthVerifier`).         |
-| `POST`   | `/v1/auth/refresh`             | `truco_refresh` | `200`     | Rota refresh token; revoca toda la familia si detecta reutilización de token ya rotado.            |
-| `POST`   | `/v1/auth/logout`              | Cookie opcional | `200`     | Revoca sesión actual (o todas si `allDevices: true`) y limpia cookies.                             |
-| `GET`    | `/v1/auth/sessions`            | `truco_access`  | `200`     | Lista dispositivos/sesiones activas marcando `isCurrent`.                                          |
-| `DELETE` | `/v1/auth/sessions/:sessionId` | `truco_access`  | `200`     | Revoca una sesión propia (`403 FORBIDDEN` si pertenece a otro usuario).                            |
-| `POST`   | `/v1/auth/forgot`              | No              | `200`     | Solicita reseteo de clave con respuesta idéntica exista o no el correo (anti-enumeración).         |
-| `POST`   | `/v1/auth/reset`               | No              | `200`     | Consume token de un solo uso, actualiza clave Argon2id y revoca todas las sesiones previas.        |
-| `POST`   | `/v1/auth/verify-email`        | No              | `200`     | Confirma correo electrónico mediante token de verificación de un solo uso.                         |
-| `POST`   | `/v1/auth/resend-verification` | No              | `200`     | Reenvía enlace de verificación con respuesta uniforme anti-enumeración.                            |
-| `POST`   | `/v1/auth/ws-ticket`           | `truco_access`  | `200`     | Emite ticket firmado efímero (`60 s`) para conectar a `apps/game-server` vía Socket.IO.            |
+| Método   | Ruta                           | Auth            | Código OK | Descripción                                                                                          |
+| -------- | ------------------------------ | --------------- | --------- | ---------------------------------------------------------------------------------------------------- |
+| `POST`   | `/v1/auth/guest`               | No              | `201`     | Crea cuenta invitada efímera con apodo criollo autogenerado y emite cookies `HttpOnly`.              |
+| `POST`   | `/v1/auth/promote-guest`       | `truco_access`  | `200`     | Convierte cuenta invitada en registrada **conservando el mismo `user.id`, nivel/XP y partidas**.     |
+| `POST`   | `/v1/auth/register`            | No              | `201`     | Registra cuenta con Argon2id, unicidad case-insensitive de apodo, filtro ofensivo y email verify.    |
+| `POST`   | `/v1/auth/login`               | No              | `200`     | Inicia sesión con Argon2id, lockout progresivo por `(cuenta + IP)` y Captcha tras umbral por cuenta. |
+| `POST`   | `/v1/auth/google`              | No              | `200`     | Inicia sesión o vincula cuenta existente mediante Google ID Token (`GoogleOAuthVerifier`).           |
+| `POST`   | `/v1/auth/refresh`             | `truco_refresh` | `200`     | Rota refresh token; revoca toda la familia si detecta reutilización de token ya rotado.              |
+| `POST`   | `/v1/auth/logout`              | Cookie opcional | `200`     | Revoca sesión actual (o todas si `allDevices: true`) y limpia cookies.                               |
+| `GET`    | `/v1/auth/sessions`            | `truco_access`  | `200`     | Lista dispositivos/sesiones activas marcando `isCurrent`.                                            |
+| `DELETE` | `/v1/auth/sessions/:sessionId` | `truco_access`  | `200`     | Revoca una sesión propia (`403 FORBIDDEN` si pertenece a otro usuario).                              |
+| `POST`   | `/v1/auth/forgot`              | No              | `200`     | Solicita reseteo de clave con respuesta idéntica exista o no el correo (anti-enumeración).           |
+| `POST`   | `/v1/auth/reset`               | No              | `200`     | Consume token de un solo uso, actualiza clave Argon2id y revoca todas las sesiones previas.          |
+| `POST`   | `/v1/auth/verify-email`        | No              | `200`     | Confirma correo electrónico mediante token de verificación de un solo uso.                           |
+| `POST`   | `/v1/auth/resend-verification` | No              | `200`     | Reenvía enlace de verificación con respuesta uniforme anti-enumeración.                              |
+| `POST`   | `/v1/auth/ws-ticket`           | `truco_access`  | `200`     | Emite ticket firmado efímero (`60 s`) para conectar a `apps/game-server` vía Socket.IO.              |
 
 ### Ejemplos de Request / Response — Auth
 
@@ -130,18 +131,15 @@
 
 ## 4. Cuenta Propia y Usuarios (`/v1/me` y `/v1/users/:id`)
 
-| Método   | Ruta                    | Auth                          | Código OK | Descripción                                                                                    |
-| -------- | ----------------------- | ----------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
-| `GET`    | `/v1/me`                | `truco_access`                | `200`     | Cuenta y perfil privados del usuario autenticado (`email`, `settings`, `bio`, `xp`, `level`).  |
-| `PATCH`  | `/v1/me`                | `truco_access`                | `200`     | Actualiza `nickname`, `avatarId`, `bio` o `settings` propios.                                  |
-| `GET`    | `/v1/me/export`         | `truco_access`                | `200`     | Exportación portátil JSON de datos personales, estadísticas y partidas recientes (Ley 25.326). |
-| `DELETE` | `/v1/me`                | `truco_access`                | `200`     | Elimina cuenta propia (exige `password` si aplica), anonimiza PII y revoca todas las sesiones. |
-| `GET`    | `/v1/users/:id`         | No                            | `200`     | Perfil estrictamente público (`id`, `nickname`, `isGuest`, `avatarId`, `level`, `xp`, `bio`).  |
-| `PATCH`  | `/v1/users/:id`         | `truco_access` (solo titular) | `200`     | Actualiza perfil verificando titularidad estricta (`403 FORBIDDEN` si `:id !== principal.id`). |
-| `GET`    | `/v1/users/:id/stats`   | No                            | `200`     | Estadísticas agregadas públicas (`matchesPlayed`, `wins`, `losses`, `abandons`, `winRate`).    |
-| `GET`    | `/v1/users/:id/matches` | No                            | `200`     | Historial público de partidas paginado por cursor (`?limit=20&cursor=<matchId>`).              |
-| `GET`    | `/v1/users/:id/export`  | `truco_access` (solo titular) | `200`     | Exportación por ID verificando titularidad estricta (`403 FORBIDDEN` si es otro usuario).      |
-| `DELETE` | `/v1/users/:id`         | `truco_access` (solo titular) | `200`     | Eliminación por ID verificando titularidad estricta (`403 FORBIDDEN` si es otro usuario).      |
+| Método   | Ruta                    | Auth           | Código OK | Descripción                                                                                    |
+| -------- | ----------------------- | -------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1/me`                | `truco_access` | `200`     | Cuenta y perfil privados del usuario autenticado (`email`, `settings`, `bio`, `xp`, `level`).  |
+| `PATCH`  | `/v1/me`                | `truco_access` | `200`     | Actualiza `nickname`, `avatarId`, `bio` o `settings` propios.                                  |
+| `GET`    | `/v1/me/export`         | `truco_access` | `200`     | Exportación portátil JSON de datos personales, estadísticas y partidas recientes (Ley 25.326). |
+| `DELETE` | `/v1/me`                | `truco_access` | `200`     | Elimina cuenta propia (exige `password` si aplica), anonimiza PII y revoca todas las sesiones. |
+| `GET`    | `/v1/users/:id`         | No             | `200`     | Perfil estrictamente público (`id`, `nickname`, `isGuest`, `avatarId`, `level`, `xp`, `bio`).  |
+| `GET`    | `/v1/users/:id/stats`   | No             | `200`     | Estadísticas agregadas públicas (`matchesPlayed`, `wins`, `losses`, `abandons`, `winRate`).    |
+| `GET`    | `/v1/users/:id/matches` | No             | `200`     | Historial público de partidas paginado por cursor (`?limit=20&cursor=<matchId>`).              |
 
 ### Ejemplos de Request / Response — Users
 

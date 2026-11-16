@@ -65,12 +65,7 @@ export class UsersController {
     @Req() req: FastifyRequest,
   ): Promise<MeResponse> {
     const input = parseWithZod(PatchMeRequestSchema, rawBody);
-    return this.usersService.updateOwnProfile(
-      principal,
-      principal.userId,
-      input,
-      extractClientMeta(req),
-    );
+    return this.usersService.updateOwnProfile(principal, input, extractClientMeta(req));
   }
 
   @Get('me/export')
@@ -79,7 +74,7 @@ export class UsersController {
     @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Req() req: FastifyRequest,
   ): Promise<AccountExportResponse> {
-    return this.usersService.exportAccountData(principal, principal.userId, extractClientMeta(req));
+    return this.usersService.exportAccountData(principal, extractClientMeta(req));
   }
 
   @Delete('me')
@@ -94,7 +89,6 @@ export class UsersController {
     const input = parseWithZod(DeleteAccountBodySchema, rawBody ?? {});
     const result = await this.usersService.deleteAccount(
       principal,
-      principal.userId,
       input.password,
       extractClientMeta(req),
     );
@@ -106,19 +100,6 @@ export class UsersController {
   async getUserById(@Param() rawParams: unknown): Promise<PublicUserProfile> {
     const { id } = parseWithZod(UserIdParamSchema, rawParams);
     return this.usersService.getPublicUserProfile(id);
-  }
-
-  @Patch('users/:id')
-  @UseGuards(SessionAuthGuard)
-  async patchUserById(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param() rawParams: unknown,
-    @Body() rawBody: unknown,
-    @Req() req: FastifyRequest,
-  ): Promise<MeResponse> {
-    const { id } = parseWithZod(UserIdParamSchema, rawParams);
-    const input = parseWithZod(PatchMeRequestSchema, rawBody);
-    return this.usersService.updateOwnProfile(principal, id, input, extractClientMeta(req));
   }
 
   @Get('users/:id/stats')
@@ -135,38 +116,5 @@ export class UsersController {
     const { id } = parseWithZod(UserIdParamSchema, rawParams);
     const query = parseWithZod(CursorPaginationQuerySchema, rawQuery ?? {});
     return this.usersService.getUserMatches(id, query);
-  }
-
-  @Get('users/:id/export')
-  @UseGuards(SessionAuthGuard)
-  async exportUserById(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param() rawParams: unknown,
-    @Req() req: FastifyRequest,
-  ): Promise<AccountExportResponse> {
-    const { id } = parseWithZod(UserIdParamSchema, rawParams);
-    return this.usersService.exportAccountData(principal, id, extractClientMeta(req));
-  }
-
-  @Delete('users/:id')
-  @UseGuards(SessionAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  async deleteUserById(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param() rawParams: unknown,
-    @Body() rawBody: unknown,
-    @Req() req: FastifyRequest,
-    @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<DeleteAccountResponse> {
-    const { id } = parseWithZod(UserIdParamSchema, rawParams);
-    const input = parseWithZod(DeleteAccountBodySchema, rawBody ?? {});
-    const result = await this.usersService.deleteAccount(
-      principal,
-      id,
-      input.password,
-      extractClientMeta(req),
-    );
-    clearAuthCookiesOnReply(reply, this.config.cookieConfig);
-    return result;
   }
 }

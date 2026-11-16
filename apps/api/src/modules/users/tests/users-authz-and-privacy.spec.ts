@@ -41,7 +41,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     await dbHandle.close();
   });
 
-  it('prevents User A from reading or modifying User B private data (403 FORBIDDEN) and strips PII from public endpoints', async () => {
+  it('exposes own-account mutations/exports exclusively under /v1/me, enforces 403 on cross-user sessions, and strips PII from public endpoints', async () => {
     const resA = await app.inject({
       method: 'POST',
       url: '/v1/auth/register',
@@ -68,42 +68,40 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     const sessionBId = resB.json().sessionId as string;
     const jarA = extractAuthCookies(resA.headers['set-cookie']).map;
 
-    // 1. User A intenta modificar el perfil de User B -> 403 FORBIDDEN
-    const patchAttempt = await app.inject({
+    // 1. Las rutas PATCH /v1/users/:id, GET /v1/users/:id/export y DELETE /v1/users/:id NO existen (404 NOT_FOUND)
+    const patchUsersRoute = await app.inject({
       method: 'PATCH',
       url: `/v1/users/${userB.id}`,
       headers: { cookie: buildCookieHeader(jarA) },
-      payload: { bio: 'Hackeado por User A' },
+      payload: { bio: 'Ruta eliminada' },
     });
-    expect(patchAttempt.statusCode).toBe(403);
-    expect(patchAttempt.json().error.code).toBe('FORBIDDEN');
+    expect(patchUsersRoute.statusCode).toBe(404);
 
-    // 2. User A intenta exportar los datos privados de User B -> 403 FORBIDDEN
-    const exportAttempt = await app.inject({
+    const exportUsersRoute = await app.inject({
       method: 'GET',
       url: `/v1/users/${userB.id}/export`,
       headers: { cookie: buildCookieHeader(jarA) },
     });
-    expect(exportAttempt.statusCode).toBe(403);
+    expect(exportUsersRoute.statusCode).toBe(404);
 
-    // 3. User A intenta borrar la cuenta de User B -> 403 FORBIDDEN
-    const deleteAttempt = await app.inject({
+    const deleteUsersRoute = await app.inject({
       method: 'DELETE',
       url: `/v1/users/${userB.id}`,
       headers: { cookie: buildCookieHeader(jarA) },
       payload: { password: 'ClaveUserB123' },
     });
-    expect(deleteAttempt.statusCode).toBe(403);
+    expect(deleteUsersRoute.statusCode).toBe(404);
 
-    // 4. User A intenta revocar la sesión activa de User B -> 403 FORBIDDEN
+    // 2. User A intenta revocar la sesión activa de User B -> 403 FORBIDDEN
     const revokeBAttempt = await app.inject({
       method: 'DELETE',
       url: `/v1/auth/sessions/${sessionBId}`,
       headers: { cookie: buildCookieHeader(jarA) },
     });
     expect(revokeBAttempt.statusCode).toBe(403);
+    expect(revokeBAttempt.json().error.code).toBe('FORBIDDEN');
 
-    // 5. GET /v1/users/:id solo devuelve campos públicos (jamás email, passwordHash, googleSub ni settings)
+    // 3. GET /v1/users/:id solo devuelve campos públicos (jamás email, passwordHash, googleSub ni settings)
     const publicB = await app.inject({
       method: 'GET',
       url: `/v1/users/${userB.id}`,
@@ -116,7 +114,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     expect('googleSub' in pubJson).toBe(false);
     expect('settings' in pubJson).toBe(false);
 
-    // 6. User A sí puede actualizar su propio perfil vía PATCH /v1/me
+    // 4. User A actualiza exclusivamente su propio perfil vía PATCH /v1/me
     const ownPatch = await app.inject({
       method: 'PATCH',
       url: '/v1/me',

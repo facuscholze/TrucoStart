@@ -223,6 +223,9 @@
             "minLength": 1,
             "maxLength": 128
           },
+          "captchaToken": {
+            "type": "string"
+          },
           "deviceName": {
             "type": "string",
             "maxLength": 80
@@ -841,7 +844,7 @@
     "/auth/login": {
       "post": {
         "tags": ["Auth"],
-        "summary": "Iniciar sesión con bloqueo progresivo por fuerza bruta",
+        "summary": "Iniciar sesión con lockout progresivo por (cuenta + IP) y Captcha tras umbral por cuenta",
         "requestBody": {
           "required": true,
           "content": {
@@ -863,6 +866,16 @@
               }
             }
           },
+          "400": {
+            "description": "Captcha requerido o inválido tras fallos acumulados en la cuenta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Credenciales inválidas",
             "content": {
@@ -874,7 +887,7 @@
             }
           },
           "423": {
-            "description": "Cuenta bloqueada temporalmente",
+            "description": "Combinación (cuenta + IP) bloqueada temporalmente",
             "content": {
               "application/json": {
                 "schema": {
@@ -884,7 +897,7 @@
             }
           },
           "429": {
-            "description": "Rate limit por IP o por cuenta",
+            "description": "Rate limit por IP o por (cuenta + IP)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1217,7 +1230,7 @@
     "/auth/ws-ticket": {
       "post": {
         "tags": ["Auth"],
-        "summary": "Emitir ticket firmado efímero (60 s) para Socket.IO contra game-server",
+        "summary": "Emitir ticket firmado efímero de un solo uso (jti + TTL 60 s) para Socket.IO contra game-server",
         "security": [
           {
             "accessCookie": []
@@ -1392,110 +1405,6 @@
             }
           }
         }
-      },
-      "patch": {
-        "tags": ["Users"],
-        "summary": "Actualizar perfil por ID (exige titularidad estricta; 403 si id != usuario actual)",
-        "security": [
-          {
-            "accessCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PatchMeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Perfil actualizado",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Acceso denegado sobre recurso ajeno",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": ["Users"],
-        "summary": "Eliminar cuenta por ID (exige titularidad estricta; 403 si id != usuario actual)",
-        "security": [
-          {
-            "accessCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteAccountRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Cuenta eliminada",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteAccountResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Acceso denegado sobre recurso ajeno",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/users/{id}/stats": {
@@ -1568,50 +1477,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserMatchesResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/users/{id}/export": {
-      "get": {
-        "tags": ["Users"],
-        "summary": "Exportar datos de cuenta por ID (exige titularidad estricta; 403 si id != usuario actual)",
-        "security": [
-          {
-            "accessCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Exportación JSON",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountExportResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Acceso denegado sobre datos privados ajenos",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }

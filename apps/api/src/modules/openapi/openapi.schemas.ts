@@ -107,6 +107,7 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
     properties: {
       email: { type: 'string', format: 'email' },
       password: { type: 'string', minLength: 1, maxLength: 128 },
+      captchaToken: { type: 'string' },
       deviceName: { type: 'string', maxLength: 80 },
     },
   },

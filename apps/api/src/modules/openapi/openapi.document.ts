@@ -112,13 +112,15 @@ export function buildOpenApiV1Document(): OpenApiDocument {
       '/auth/login': {
         post: {
           tags: ['Auth'],
-          summary: 'Iniciar sesión con bloqueo progresivo por fuerza bruta',
+          summary:
+            'Iniciar sesión con lockout progresivo por (cuenta + IP) y Captcha tras umbral por cuenta',
           requestBody: JSON_BODY('#/components/schemas/LoginRequest'),
           responses: {
             200: JSON_RES('Sesión iniciada', '#/components/schemas/AuthSessionResponse'),
+            400: ERR_RES('Captcha requerido o inválido tras fallos acumulados en la cuenta'),
             401: ERR_RES('Credenciales inválidas'),
-            423: ERR_RES('Cuenta bloqueada temporalmente'),
-            429: ERR_RES('Rate limit por IP o por cuenta'),
+            423: ERR_RES('Combinación (cuenta + IP) bloqueada temporalmente'),
+            429: ERR_RES('Rate limit por IP o por (cuenta + IP)'),
           },
         },
       },
@@ -233,7 +235,8 @@ export function buildOpenApiV1Document(): OpenApiDocument {
       '/auth/ws-ticket': {
         post: {
           tags: ['Auth'],
-          summary: 'Emitir ticket firmado efímero (60 s) para Socket.IO contra game-server',
+          summary:
+            'Emitir ticket firmado efímero de un solo uso (jti + TTL 60 s) para Socket.IO contra game-server',
           security: [{ accessCookie: [] }],
           responses: {
             200: JSON_RES('Ticket WS emitido', '#/components/schemas/WsTicketResponse'),
@@ -287,34 +290,6 @@ export function buildOpenApiV1Document(): OpenApiDocument {
             404: ERR_RES('Jugador no encontrado'),
           },
         },
-        patch: {
-          tags: ['Users'],
-          summary:
-            'Actualizar perfil por ID (exige titularidad estricta; 403 si id != usuario actual)',
-          security: [{ accessCookie: [] }],
-          parameters: [
-            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
-          ],
-          requestBody: JSON_BODY('#/components/schemas/PatchMeRequest'),
-          responses: {
-            200: JSON_RES('Perfil actualizado', '#/components/schemas/MeResponse'),
-            403: ERR_RES('Acceso denegado sobre recurso ajeno'),
-          },
-        },
-        delete: {
-          tags: ['Users'],
-          summary:
-            'Eliminar cuenta por ID (exige titularidad estricta; 403 si id != usuario actual)',
-          security: [{ accessCookie: [] }],
-          parameters: [
-            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
-          ],
-          requestBody: JSON_BODY('#/components/schemas/DeleteAccountRequest', false),
-          responses: {
-            200: JSON_RES('Cuenta eliminada', '#/components/schemas/DeleteAccountResponse'),
-            403: ERR_RES('Acceso denegado sobre recurso ajeno'),
-          },
-        },
       },
       '/users/{id}/stats': {
         get: {
@@ -344,21 +319,6 @@ export function buildOpenApiV1Document(): OpenApiDocument {
           ],
           responses: {
             200: JSON_RES('Página de partidas', '#/components/schemas/UserMatchesResponse'),
-          },
-        },
-      },
-      '/users/{id}/export': {
-        get: {
-          tags: ['Users'],
-          summary:
-            'Exportar datos de cuenta por ID (exige titularidad estricta; 403 si id != usuario actual)',
-          security: [{ accessCookie: [] }],
-          parameters: [
-            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
-          ],
-          responses: {
-            200: JSON_RES('Exportación JSON', '#/components/schemas/AccountExportResponse'),
-            403: ERR_RES('Acceso denegado sobre datos privados ajenos'),
           },
         },
       },

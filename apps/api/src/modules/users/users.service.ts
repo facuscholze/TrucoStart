@@ -37,16 +37,6 @@ export class UsersService {
     @Inject(PasswordHasher) private readonly passwordHasher: PasswordHasher,
   ) {}
 
-  private assertOwnership(principal: AuthenticatedPrincipal, targetUserId: string): void {
-    if (principal.userId !== targetUserId) {
-      throw new DomainApiException(
-        403,
-        'FORBIDDEN',
-        'No tenés autorización para acceder o modificar recursos privados de otro usuario.',
-      );
-    }
-  }
-
   async getMe(principal: AuthenticatedPrincipal): Promise<MeResponse> {
     const found = await this.usersRepo.findActiveUserWithProfile(principal.userId);
     if (!found) {
@@ -60,12 +50,10 @@ export class UsersService {
 
   async updateOwnProfile(
     principal: AuthenticatedPrincipal,
-    targetUserId: string,
     input: PatchMeRequest,
     meta: RequestClientMeta,
   ): Promise<MeResponse> {
-    this.assertOwnership(principal, targetUserId);
-    const found = await this.usersRepo.findActiveUserWithProfile(targetUserId);
+    const found = await this.usersRepo.findActiveUserWithProfile(principal.userId);
     if (!found) {
       throw new DomainApiException(404, 'NOT_FOUND', 'Usuario no encontrado.');
     }
@@ -182,10 +170,9 @@ export class UsersService {
 
   async exportAccountData(
     principal: AuthenticatedPrincipal,
-    targetUserId: string,
     meta: RequestClientMeta,
   ): Promise<AccountExportResponse> {
-    this.assertOwnership(principal, targetUserId);
+    const targetUserId = principal.userId;
     const found = await this.usersRepo.findActiveUserWithProfile(targetUserId);
     if (!found) {
       throw new DomainApiException(404, 'NOT_FOUND', 'Cuenta no encontrada.');
@@ -220,11 +207,10 @@ export class UsersService {
 
   async deleteAccount(
     principal: AuthenticatedPrincipal,
-    targetUserId: string,
     password: string | undefined,
     meta: RequestClientMeta,
   ): Promise<DeleteAccountResponse> {
-    this.assertOwnership(principal, targetUserId);
+    const targetUserId = principal.userId;
     const found = await this.usersRepo.findActiveUserWithProfile(targetUserId);
     if (!found) {
       throw new DomainApiException(404, 'NOT_FOUND', 'Cuenta no encontrada.');

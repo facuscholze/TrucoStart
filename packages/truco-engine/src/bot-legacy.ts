@@ -128,7 +128,7 @@ function selectBestCardToPlay(
  * IA heurística sin trampa: recibe EXCLUSIVAMENTE `PlayerView` (salida de `viewFor`),
  * sin acceso al estado completo del servidor ni a cartas/señas ocultas.
  */
-export function chooseBotAction(view: PlayerView, rng?: Rng): Action {
+export function chooseBotActionLegacy(view: PlayerView, rng?: Rng): Action {
   const { legalActions: actions } = view;
   if (actions.length === 0) {
     throw new Error(`No existen acciones legales disponibles para el asiento ${view.mySeat}`);

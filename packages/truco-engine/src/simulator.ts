@@ -1,19 +1,34 @@
-import { chooseBotAction } from './bot.js';
+import { chooseBotAction } from './bot/index.js';
+import { chooseBotActionLegacy } from './bot-legacy.js';
 import { applyAction, createGame } from './engine.js';
 import { createSeededRng } from './rng.js';
+import type { BotParams } from './bot/difficulty.js';
 import type { RuleSet } from './rulesets.js';
 import type { Action, DomainEvent, GameState } from './state.types.js';
 import type { PlayerSeat, Rng, TeamId } from './types.js';
+import type { PlayerView } from './view.js';
 import { viewFor } from './view.js';
 
-export type AgentKind = 'HEURISTIC' | 'RANDOM';
+/**
+ * Agentes disponibles en simulación:
+ * - `RANDOM`: jugada uniforme entre acciones legales (línea base inferior).
+ * - `LEGACY`: heurística original de M1 (línea base a superar por el nivel difícil).
+ * - `EASY` / `MEDIUM` / `HARD`: IA nueva parametrizada (BL-010).
+ * - `HEURISTIC`: alias de `MEDIUM` (compatibilidad con benchmarks previos).
+ */
+export type AgentKind = 'HEURISTIC' | 'RANDOM' | 'LEGACY' | 'EASY' | 'MEDIUM' | 'HARD';
+
+/** Agente de simulación: una dificultad conocida o una función que decide sobre `PlayerView`. */
+export type AgentSelector = AgentKind | ((view: PlayerView, rng: Rng) => Action);
 
 export interface SimulateMatchOptions {
   readonly ruleset: RuleSet;
   readonly numSeats: number;
   readonly numTeams?: number;
   readonly seed: number;
-  readonly agentByTeam?: Readonly<Record<TeamId, AgentKind>>;
+  readonly agentByTeam?: Readonly<Record<TeamId, AgentSelector>>;
+  /** Override de parámetros por equipo (usado por tuning/benchmarks de la IA). */
+  readonly agentParamsByTeam?: Readonly<Record<TeamId, BotParams>>;
   readonly maxSteps?: number;
   readonly recordEvents?: boolean;
 }
@@ -47,13 +62,29 @@ export function buildSeats(numSeats: number, numTeams = 2): PlayerSeat[] {
   return seats;
 }
 
-function chooseAgentAction(kind: AgentKind, state: GameState, seat: number, rng: Rng): Action {
+export function chooseAgentAction(
+  kind: AgentKind,
+  state: GameState,
+  seat: number,
+  rng: Rng,
+  paramsOverride?: BotParams,
+): Action {
   const view = viewFor(state, seat);
-  if (kind === 'HEURISTIC') {
-    return chooseBotAction(view, rng);
+  switch (kind) {
+    case 'RANDOM': {
+      const idx = Math.floor(rng.nextFloat() * view.legalActions.length);
+      return view.legalActions[idx]!;
+    }
+    case 'LEGACY':
+      return chooseBotActionLegacy(view, rng);
+    case 'EASY':
+    case 'MEDIUM':
+    case 'HARD':
+      return chooseBotAction(view, rng, paramsOverride ?? kind);
+    case 'HEURISTIC':
+    default:
+      return chooseBotAction(view, rng);
   }
-  const idx = Math.floor(rng.nextFloat() * view.legalActions.length);
-  return view.legalActions[idx]!;
 }
 
 export function simulateMatch(options: SimulateMatchOptions): SimulatedMatchResult {
@@ -63,6 +94,7 @@ export function simulateMatch(options: SimulateMatchOptions): SimulatedMatchResu
     numTeams = 2,
     seed,
     agentByTeam = {},
+    agentParamsByTeam = {},
     maxSteps = 5_000,
     recordEvents = false,
   } = options;
@@ -98,8 +130,11 @@ export function simulateMatch(options: SimulateMatchOptions): SimulatedMatchResu
 
     const activeSeat = state.hand.activeSeat;
     const team = state.seats[activeSeat]!.team;
-    const kind: AgentKind = agentByTeam[team] ?? 'HEURISTIC';
-    const action = chooseAgentAction(kind, state, activeSeat, rng);
+    const selector: AgentSelector = agentByTeam[team] ?? 'HEURISTIC';
+    const action =
+      typeof selector === 'function'
+        ? selector(viewFor(state, activeSeat), rng)
+        : chooseAgentAction(selector, state, activeSeat, rng, agentParamsByTeam[team]);
 
     const result = applyAction(state, action);
     if (!result.ok) {

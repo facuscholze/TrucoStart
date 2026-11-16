@@ -4,6 +4,27 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.8.0-m6-ai] — 2026-11-13 (M6 — IA de Truco de Tres Niveles, BL-010)
+
+### Agregado
+
+- **IA parametrizada en `@truco/engine` (`packages/truco-engine/src/bot/`):** un único algoritmo (`chooseBotAction(view, rng, difficultyOrParams)`) consume `BotParams` explícitos por nivel (`bot/difficulty.ts`: `EASY` / `MEDIUM` / `HARD`, congelados e inmutables) en lugar de código duplicado. El bot de M1 se conserva como línea base en `bot-legacy.ts` (`chooseBotActionLegacy`, exportado para benchmarks).
+- **Memoria y probabilidades sin trampa (`bot/knowledge.ts`):** `buildCardKnowledge(view)` recuerda cartas jugadas, deduce el universo de cartas no vistas y estima cartas rivales pendientes; `estimateCardWinProbability`, `estimateEnvidoWinProbability` (Monte Carlo determinista por vista) y `estimateHandWinRate` (rollout de 120 muestreos de las manos ajenas desconocidas + `evaluateHandWinnerFromRounds`) producen la fuerza real de la mano. Toda la entrada sigue siendo **exclusivamente `PlayerView`**.
+- **Decisiones de canto basadas en EV:** Envido (cantar/subir/aceptar) según tanto, probabilidad estimada y marcador; Truco/Retruco/Vale Cuatro según fuerza de mano, posición (mano/pie), estar debajo en el marcador, defensa en punto de partida y farol moderado (`bluffRate`). Regla dura implementada y testeada: **con carta imbatible (macho de espadas en mesa o en mano) nunca se rechaza un canto**, incluido Vale Cuatro.
+- **Juego de cartas económico:** se elige la carta más baja que alcanza para ganar la baza, se acompaña al compañero cuando ya asegura la baza y se reservan las altas; el nivel fácil introduce errores ocasionales (`cardMistakeRate`).
+- **Benchmark reproducible (`src/benchmark.ts`, `docs/PERF.md`):** `runMatchup` / `runBenchmark` alternan el lado de la mesa y reportan win rate con **IC 95% de Wilson**. Sobre 2.000 partidas por enfrentamiento: **difícil 62,9% vs bot anterior de M1** (IC `[60,8%, 65,0%]`), 63,2% vs medio, 79,8% vs fácil y 98,0% vs azar; medio ≈ bot anterior (49,5%) y 72,5% vs fácil. Costo: ~10 ms de CPU por partida.
+
+### Corregido
+
+- `simulateMatch` acepta `LEGACY` / `EASY` / `MEDIUM` / `HARD` como agentes, `agentParamsByTeam` para tuning y selectores por función (`AgentSelector`), manteniendo `HEURISTIC` como alias del nivel medio.
+
+### Tests
+
+- `packages/truco-engine/tests/bot-m6.spec.ts`: Vale Cuatro con carta imbatible (los tres niveles responden `QUIERO`), carta más baja que alcanza, Envido con tanto alto (31) y umbral por dificultad (26 solo lo canta el difícil), monotonía de parámetros.
+- `packages/truco-engine/tests/bot-benchmark.spec.ts`: regresión del criterio de aceptación (>60% vs M1 con 400 partidas deterministas) y escalera difícil > medio > fácil.
+
+---
+
 ## [0.7.0-m5b] — 2026-11-13 (Sub-etapa M5b — Lobby en Vivo, Auth/Perfil, Aprender, Anotador Offline, PWA y E2E Multi-Cliente)
 
 ### Agregado

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { chooseBotAction } from '../src/bot.js';
+import { chooseBotAction } from '../src/bot/index.js';
 import { getCardById } from '../src/cards.js';
 import { applyAction, createGame, createGameWithHands } from '../src/engine.js';
 import { createSeededRng } from '../src/rng.js';
@@ -25,7 +25,7 @@ const SEATS_2V2: PlayerSeat[] = [
 describe('Non-cheating Heuristic AI (chooseBotAction)', () => {
   it('structurally never imports GameState or engine internals, consuming strictly PlayerView', () => {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    const botSource = fs.readFileSync(path.resolve(currentDir, '../src/bot.ts'), 'utf8');
+    const botSource = fs.readFileSync(path.resolve(currentDir, '../src/bot/index.ts'), 'utf8');
     expect(botSource).not.toContain('GameState');
     expect(botSource).not.toContain('remainingHandsBySeat');
     expect(botSource).not.toContain('initialHandsBySeat');

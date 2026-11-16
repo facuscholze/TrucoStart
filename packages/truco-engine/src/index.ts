@@ -1,4 +1,6 @@
-export * from './bot.js';
+export * from './bot-legacy.js';
+export * from './benchmark.js';
+export * from './bot/index.js';
 export * from './calls.js';
 export * from './cards.js';
 export * from './engine.js';

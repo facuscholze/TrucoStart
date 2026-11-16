@@ -13,7 +13,7 @@
   1. Se provee `docker-compose.yml` completo en la raíz (referenciando `infra/docker-compose.yml`) con PostgreSQL 16 y Redis 7, healthchecks, volúmenes persistentes y variables alineadas con `.env.example`.
   2. Una suite automatizada en Vitest valida sintaxis YAML, servicios, puertos, healthchecks, volúmenes y paridad con `.env.example` y `.github/workflows/ci.yml`.
   3. En CI (GitHub Actions) se definen `services` reales de PostgreSQL 16 y Redis 7 para las pruebas de integración.
-  4. Para módulos M2/M3/M4 dentro del sandbox sin Docker, los repositorios/adaptadores se diseñan con interfaces limpias para ejecutar tests contra instancias reales cuando estén disponibles (CI/local) y adaptadores verificables en entornos restringidos, marcando cualquier fallback explícitamente en `STATE.md`.
+  4. En **M2 (`apps/game-server`)** se implementó la interfaz limpia `GameStore` (`apps/game-server/src/store/game-store.interface.ts`) con dos adaptadores de producción/testing: `InMemoryGameStore` (clonado profundo para tests locales sin Docker) y `RedisGameStore` (transacciones atómicas `MULTI/EXEC` y scripts Lua sobre `ioredis`). La suite compartida de contrato `apps/game-server/tests/game-store.contract.spec.ts` corre siempre contra `InMemoryGameStore` y se ejecuta automáticamente contra `RedisGameStore` real cada vez que `REDIS_URL` está definido en el entorno (como en `.github/workflows/ci.yml`).
 
 ### ISSUE-002: Cumplimiento normativo Ley 25.326 (Protección de Datos Personales — Argentina)
 

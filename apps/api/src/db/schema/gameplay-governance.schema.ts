@@ -1,5 +1,7 @@
-import type { GameMode, MatchOutcome } from '@truco/shared';
+import type { GameMode, MatchOutcome, RulesetCode } from '@truco/shared';
+import { sql } from 'drizzle-orm';
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -7,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -32,16 +35,52 @@ export const tablesTable = pgTable(
     rulesetId: uuid('ruleset_id')
       .notNull()
       .references(() => rulesetsTable.id),
+    rulesetCode: varchar('ruleset_code', { length: 64 })
+      .$type<RulesetCode>()
+      .notNull()
+      .default('ar-standard-v1'),
+    targetScore: integer('target_score').notNull().default(30),
+    florEnabled: boolean('flor_enabled').notNull().default(true),
+    turnTimeoutMs: integer('turn_timeout_ms').notNull().default(25_000),
     visibility: varchar('visibility', { length: 16 })
       .$type<'PUBLIC' | 'PRIVATE'>()
       .notNull()
       .default('PUBLIC'),
     joinCode: varchar('join_code', { length: 12 }).unique(),
     status: varchar('status', { length: 16 }).notNull().default('WAITING'),
+    closedReason: varchar('closed_reason', { length: 32 }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('tables_status_visibility_mode_idx').on(t.status, t.visibility, t.mode)],
+  (t) => [
+    index('tables_status_visibility_mode_idx').on(t.status, t.visibility, t.mode),
+    index('tables_status_expires_idx').on(t.status, t.expiresAt),
+  ],
+);
+
+export const tableSeatsTable = pgTable(
+  'table_seats',
+  {
+    tableId: uuid('table_id')
+      .notNull()
+      .references(() => tablesTable.id, { onDelete: 'cascade' }),
+    seat: integer('seat').notNull(),
+    team: integer('team').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    nickname: varchar('nickname', { length: 32 }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tableId, t.seat] }),
+    uniqueIndex('table_seats_table_user_uniq').on(t.tableId, t.userId),
+    uniqueIndex('table_seats_one_active_per_user_uniq')
+      .on(t.userId)
+      .where(sql`${t.isActive} = true`),
+  ],
 );
 
 export const matchesTable = pgTable('matches', {

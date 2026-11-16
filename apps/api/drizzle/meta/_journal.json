@@ -8,6 +8,13 @@
       "when": 1794838882025,
       "tag": "0000_thick_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794844560104,
+      "tag": "0001_rare_havok",
+      "breakpoints": true
     }
   ]
 }

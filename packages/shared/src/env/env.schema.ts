@@ -64,6 +64,17 @@ export const ServerEnvSchema = z
     CAPTCHA_SITE_KEY: z.string().optional().default(''),
     CAPTCHA_SECRET: z.string().optional().default(''),
 
+    NICKNAME_BLOCKED_TERMS: z
+      .string()
+      .optional()
+      .default('')
+      .transform((raw) =>
+        raw
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+
     RATE_LIMIT_HTTP_WINDOW_MS: PositiveIntFromEnv.default(60_000),
     RATE_LIMIT_HTTP_MAX: PositiveIntFromEnv.default(120),
     RATE_LIMIT_AUTH_MAX: PositiveIntFromEnv.default(15),

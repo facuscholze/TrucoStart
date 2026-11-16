@@ -13,3 +13,18 @@ export const DEFAULT_RECONNECT_GRACE_MS = 45_000;
 export const DEFAULT_WS_RATE_LIMIT_WINDOW_MS = 10_000;
 export const DEFAULT_WS_TABLE_EVENT_MAX = 15;
 export const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 2_592_000;
+
+export const ACCESS_COOKIE_NAME = 'truco_access';
+export const REFRESH_COOKIE_NAME = 'truco_refresh';
+export const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 900; // 15 min
+export const DEFAULT_WS_TICKET_TTL_MS = 60_000; // 60 s
+export const DEFAULT_EMAIL_VERIFY_TTL_MS = 86_400_000; // 24 h
+export const DEFAULT_PASSWORD_RESET_TTL_MS = 1_800_000; // 30 min
+
+export const LOCKOUT_THRESHOLD_ATTEMPTS = 5;
+export const LOCKOUT_DURATIONS_MS = Object.freeze([
+  60_000, // 5to intento fallido -> 1 min
+  300_000, // 6to intento fallido -> 5 min
+  900_000, // 7mo intento fallido -> 15 min
+  3_600_000, // 8vo+ intento fallido -> 60 min
+]);

@@ -8,6 +8,8 @@ import type { DatabaseConnectionHandle } from './db/database.provider.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule, type AuthModuleOptions } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { LobbyModule, type LobbyModuleOptions } from './modules/lobby/lobby.module.js';
+import { MatchmakingModule } from './modules/matchmaking/matchmaking.module.js';
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
@@ -15,9 +17,9 @@ export interface CreateAppModuleOptions {
   readonly dbHandle?: DatabaseConnectionHandle;
   readonly authOptions?: AuthModuleOptions;
   readonly rateLimitOptions?: RateLimitModuleOptions;
+  readonly lobbyOptions?: LobbyModuleOptions;
 }
 
-// TODO(STATE-04): Incorporar LobbyModule en M4.
 // TODO(STATE-07): Incorporar ModerationModule y AdminModule en M7.
 // TODO(STATE-08): Incorporar MetricsModule (/v1/metrics) y trazas OpenTelemetry en M8.
 @Module({})
@@ -29,8 +31,13 @@ export class AppModule {
 
     const sharedNowFn =
       options.rateLimitOptions?.nowFn ??
+      options.lobbyOptions?.runtimeConfig?.nowFn ??
       options.authOptions?.rateLimitConfig?.nowFn ??
       options.authOptions?.runtimeConfig?.nowFn;
+
+    const sharedSessionSecret =
+      options.lobbyOptions?.runtimeConfig?.sessionSecret ??
+      options.authOptions?.runtimeConfig?.sessionSecret;
 
     return {
       module: AppModule,
@@ -43,6 +50,15 @@ export class AppModule {
         AuditModule,
         AuthModule.register(options.authOptions),
         UsersModule,
+        LobbyModule.register({
+          ...options.lobbyOptions,
+          runtimeConfig: {
+            ...options.lobbyOptions?.runtimeConfig,
+            ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
+            ...(sharedSessionSecret !== undefined ? { sessionSecret: sharedSessionSecret } : {}),
+          },
+        }),
+        MatchmakingModule,
         HealthModule,
         OpenApiModule,
       ],

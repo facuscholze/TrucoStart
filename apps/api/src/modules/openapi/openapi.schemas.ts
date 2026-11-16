@@ -1,3 +1,5 @@
+import { OPENAPI_LOBBY_SCHEMAS } from './openapi-lobby.fragment.js';
+
 export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
   ApiErrorResponse: {
     type: 'object',
@@ -327,4 +329,5 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
       userId: { type: 'string', format: 'uuid' },
     },
   },
+  ...OPENAPI_LOBBY_SCHEMAS,
 };

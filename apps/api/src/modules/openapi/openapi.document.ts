@@ -1,4 +1,5 @@
 import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '@truco/shared';
+import { OPENAPI_LOBBY_PATHS } from './openapi-lobby.fragment.js';
 import { OPENAPI_COMPONENTS_SCHEMAS } from './openapi.schemas.js';
 
 export interface OpenApiDocument {
@@ -31,9 +32,9 @@ export function buildOpenApiV1Document(): OpenApiDocument {
     openapi: '3.1.0',
     info: {
       title: 'Mesa de Truco — HTTP API v1',
-      version: '0.3.0',
+      version: '0.4.0',
       description:
-        'API HTTP v1 para autenticación segura (Argon2id, cookies HttpOnly, rotación de refresh tokens con revocación de familia), emisión de tickets efímeros WebSocket y gestión de cuentas/perfiles (sin dinero real).',
+        'API HTTP v1 para autenticación segura, cuentas/perfiles (/v1/me), lobby de mesas públicas/privadas con invitaciones firmadas, matchmaking (1v1/2v2) y persistencia transaccional de partidas.',
     },
     servers: [{ url: '/v1', description: 'API v1' }],
     components: {
@@ -322,6 +323,7 @@ export function buildOpenApiV1Document(): OpenApiDocument {
           },
         },
       },
+      ...OPENAPI_LOBBY_PATHS,
     },
   };
 }

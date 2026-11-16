@@ -1,5 +1,5 @@
 import { AR_CORTO_15_V1, createGame, createSeededRng } from '@truco/engine';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type {
   GameStore,
   PersistedRoomSnapshot,
@@ -25,8 +25,9 @@ function defineGameStoreContractSuite(
       cleanup = created.cleanup;
     });
 
-    afterAll(async () => {
+    afterEach(async () => {
       if (cleanup) await cleanup();
+      await store.close();
     });
 
     it('persists and loads room snapshots and ordered event logs without mutation leaks', async () => {

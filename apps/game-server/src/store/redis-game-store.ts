@@ -18,7 +18,7 @@ end
 const CLAIM_OR_RENEW_LUA = `
 local current = redis.call("get", KEYS[1])
 if (not current) or (current == ARGV[1]) then
-  redis.call("psetex", KEYS[1], ARGV[2], ARGV[1])
+  redis.call("psetex", KEYS[1], tonumber(ARGV[2]), ARGV[1])
   return 1
 end
 return 0
@@ -138,6 +138,11 @@ export class RedisGameStore implements GameStore {
   }
 
   async close(): Promise<void> {
-    await this.redis.quit();
+    if (this.redis.status === 'end') return;
+    try {
+      await this.redis.quit();
+    } catch {
+      this.redis.disconnect();
+    }
   }
 }

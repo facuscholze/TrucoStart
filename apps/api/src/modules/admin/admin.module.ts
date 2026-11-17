@@ -22,6 +22,8 @@ export interface AdminModuleOptions {
   readonly userEviction?: UserEvictionPort;
   readonly gameServerInternalUrl?: string;
   readonly internalSecret?: string;
+  /** Redes habilitadas para el panel (por defecto `ADMIN_ALLOWED_NETWORKS`). */
+  readonly allowedNetworks?: readonly string[];
 }
 
 @Module({})
@@ -31,7 +33,13 @@ export class AdminModule {
       module: AdminModule,
       controllers: [AdminAuthController, AdminController],
       providers: [
-        { provide: ADMIN_RUNTIME_CONFIG, useValue: buildAdminRuntimeConfig(options.runtimeConfig) },
+        {
+          provide: ADMIN_RUNTIME_CONFIG,
+          useValue: buildAdminRuntimeConfig({
+            ...options.runtimeConfig,
+            ...(options.allowedNetworks ? { allowedNetworks: options.allowedNetworks } : {}),
+          }),
+        },
         {
           provide: USER_EVICTION,
           useValue:

@@ -21,7 +21,7 @@ COPY apps/web ./apps/web
 RUN pnpm --filter @truco/web... build
 
 FROM nginx:1.27-alpine AS runner
-COPY infra/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infra/docker/nginx-web.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

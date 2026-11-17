@@ -96,7 +96,29 @@ export const ServerEnvSchema = z
     IDLE_ROOM_SWEEP_MS: PositiveIntFromEnv.default(DEFAULT_IDLE_ROOM_SWEEP_MS),
 
     SENTRY_DSN: z.string().optional().default(''),
+    SENTRY_TRACES_SAMPLE_RATE: z.string().optional().default(''),
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().default(''),
+    OTEL_SERVICE_NAME: z.string().optional().default(''),
+    OTEL_TRACES_SAMPLER_ARG: z.string().optional().default(''),
+
+    LOG_LEVEL: z
+      .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+      .default('info'),
+    /** Token de `Authorization: Bearer` para `/v1/metrics`. Vacío = endpoint deshabilitado. */
+    METRICS_TOKEN: z.string().optional().default(''),
+    /** Redes (IPv4/IPv6 con prefijo opcional) habilitadas para el panel admin. */
+    ADMIN_ALLOWED_NETWORKS: z
+      .string()
+      .optional()
+      .default('')
+      .transform((raw) =>
+        raw
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    /** Origen separado del panel admin (se usa para CORS del panel, no del jugador). */
+    ADMIN_ORIGIN: z.string().optional().default(''),
 
     S3_ENDPOINT: z.string().optional().default(''),
     S3_REGION: z.string().optional().default('us-east-1'),

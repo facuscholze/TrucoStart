@@ -17,16 +17,31 @@ import {
   type MatchLifecyclePublisher,
   NoopMatchLifecyclePublisher,
 } from './events/match-lifecycle-publisher.js';
+import { timingSafeEqual } from 'node:crypto';
+import {
+  apiSecurityHeaders,
+  buildRequestLogFields,
+  CORRELATION_ID_HEADER,
+  createCorrelationId,
+  pickCorrelationId,
+} from '@truco/shared';
 import { tryHandleInternalProvisioningRoute } from './http/internal-provisioning-handler.js';
 import { tryHandleInternalUserRoutes } from './http/internal-user-routes.js';
 import { emitRoomExpiredLifecycle } from './rooms/room-lifecycle-notifier.js';
 import type { ModerationLookup } from './rooms/moderation.js';
+import { GameMetrics } from './observability/game-metrics.js';
 import { RoomManager } from './rooms/room-manager.js';
 import { WsConnectionRateLimiter, type WsRateLimiterConfig } from './security/rate-limiter.js';
 import type { GameStore } from './store/game-store.interface.js';
 import { InMemoryGameStore } from './store/in-memory-game-store.js';
 
 const DEFAULT_DEV_SECRET = 'dev-only-placeholder-secret-minimum-32-chars!!';
+
+export interface GameServerLoggerLike {
+  info(fields: Record<string, unknown>, message: string): void;
+  warn(fields: Record<string, unknown>, message: string): void;
+  error(fields: Record<string, unknown>, message: string): void;
+}
 
 export interface GameServerOptions {
   readonly appName?: string;
@@ -48,6 +63,8 @@ export interface GameServerOptions {
   readonly internalRpcMaxSkewMs?: number;
   readonly rateLimiter?: WsRateLimiterConfig;
   readonly nowFn?: () => number;
+  /** Logger estructurado (pino) para requests internos y conexiones WebSocket. */
+  readonly logger?: GameServerLoggerLike;
   /**
    * Semilla de reparto fija (hex de 64 chars) para tests E2E reproducibles.
    * Debe permanecer sin definir en producción: el reparto usa `randomBytes(32)`.
@@ -74,6 +91,7 @@ export interface GameServerInstance {
   >;
   readonly roomManager: RoomManager;
   readonly store: GameStore;
+  readonly metrics: GameMetrics;
   provisionRoom(spec: RoomProvisionSpec): Promise<void>;
   deleteRoom(roomId: string): Promise<void>;
   listen(port: number, host?: string): Promise<number>;
@@ -112,6 +130,8 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
   const store = options.store ?? new InMemoryGameStore(options.nowFn);
   const lifecyclePublisher = options.lifecyclePublisher ?? new NoopMatchLifecyclePublisher();
   const nowFn = options.nowFn ?? Date.now;
+  const logger = options.logger;
+  const metrics = new GameMetrics();
 
   const roomManager = new RoomManager({
     store,
@@ -172,7 +192,31 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       : null;
   idleSweepTimer?.unref?.();
 
+  const securityHeaders = apiSecurityHeaders({
+    production: process.env['NODE_ENV'] === 'production',
+  });
+
   const httpServer = createServer((req, res) => {
+    const requestStartedAt = nowFn();
+    const correlationId = pickCorrelationId(req.headers[CORRELATION_ID_HEADER], () =>
+      createCorrelationId(),
+    );
+    res.setHeader(CORRELATION_ID_HEADER, correlationId);
+    for (const [name, value] of Object.entries(securityHeaders)) res.setHeader(name, value);
+    res.on('finish', () => {
+      logger?.info(
+        buildRequestLogFields({
+          service: 'game-server',
+          correlationId,
+          method: req.method ?? 'GET',
+          path: (req.url ?? '/').split('?')[0] ?? '/',
+          status: res.statusCode,
+          durationMs: nowFn() - requestStartedAt,
+        }),
+        'http_request',
+      );
+    });
+
     if (req.method === 'GET' && req.url === '/health') {
       const body: HealthResponse = {
         status: 'ok',
@@ -182,6 +226,26 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(body));
+      return;
+    }
+
+    // Métricas internas: sólo con `Authorization: Bearer $INTERNAL_RPC_SECRET`.
+    if (req.method === 'GET' && req.url?.split('?')[0] === '/internal/metrics') {
+      const provided = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+      const expected = Buffer.from(internalSecret);
+      const candidate = Buffer.from(provided);
+      const authorized =
+        candidate.length === expected.length && timingSafeEqual(candidate, expected);
+      if (!authorized) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Firma interna inválida' } }),
+        );
+        return;
+      }
+      const snapshot = metrics.snapshot(roomManager.getStatusCounts());
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(snapshot));
       return;
     }
 
@@ -246,6 +310,19 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
   });
 
   io.on('connection', (socket) => {
+    metrics.onConnectionOpened();
+    logger?.info(
+      {
+        service: 'game-server',
+        correlationId: pickCorrelationId(socket.handshake.headers[CORRELATION_ID_HEADER], () =>
+          createCorrelationId(),
+        ),
+        socketId: socket.id,
+        userId: socket.data.claims?.userId ?? null,
+      },
+      'ws_connected',
+    );
+
     socket.on('envelope', (rawMessage: unknown) => {
       const baseParsed = WsEnvelopeSchema.safeParse(rawMessage);
       if (!baseParsed.success) {
@@ -302,10 +379,25 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
         return;
       }
 
-      void roomManager.dispatchClientMessage(socket, socket.data.claims, clientMsg.data);
+      const actionStartedAt = nowFn();
+      if (clientMsg.data.type === 'game.rejoin') metrics.onReconnection();
+      void roomManager
+        .dispatchClientMessage(socket, socket.data.claims, clientMsg.data)
+        .catch(() => metrics.onError())
+        .finally(() => metrics.onAction(clientMsg.data.type, nowFn() - actionStartedAt));
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      metrics.onConnectionClosed();
+      logger?.info(
+        {
+          service: 'game-server',
+          socketId: socket.id,
+          userId: socket.data.claims?.userId ?? null,
+          reason,
+        },
+        'ws_disconnected',
+      );
       rateLimiter.removeConnection(socket.id);
       void roomManager.handleSocketDisconnect(socket);
     });
@@ -316,6 +408,7 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
     io,
     roomManager,
     store,
+    metrics,
     provisionRoom(spec: RoomProvisionSpec): Promise<void> {
       return roomManager.provisionRoom(spec);
     },

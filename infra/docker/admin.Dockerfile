@@ -21,7 +21,7 @@ COPY apps/admin ./apps/admin
 RUN pnpm --filter @truco/admin... build
 
 FROM nginx:1.27-alpine AS runner
-COPY infra/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infra/docker/nginx-admin.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/admin/dist /usr/share/nginx/html
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

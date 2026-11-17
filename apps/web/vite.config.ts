@@ -1,4 +1,4 @@
-import { DEFAULT_APP_NAME } from '@truco/shared';
+import { DEFAULT_APP_NAME, webSecurityHeaders } from '@truco/shared';
 import { designTokens } from '@truco/ui';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
@@ -21,6 +21,16 @@ const sharedDevProxy = {
     changeOrigin: true,
   },
 };
+
+/**
+ * Mismas cabeceras que nginx en producción (`infra/docker/nginx-web.conf`): si la CSP
+ * rompe algo en `vite preview`, el E2E lo detecta antes de desplegar.
+ */
+const devSecurityHeaders = webSecurityHeaders({
+  production: false,
+  apiOrigin: process.env['VITE_API_URL'] ?? 'http://127.0.0.1:3001',
+  gameServerOrigin: process.env['VITE_GAME_SERVER_URL'] ?? 'http://127.0.0.1:3002',
+});
 
 export default defineConfig({
   plugins: [
@@ -70,12 +80,14 @@ export default defineConfig({
     }),
   ],
   server: {
+    headers: devSecurityHeaders,
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: true,
     proxy: sharedDevProxy,
   },
   preview: {
+    headers: devSecurityHeaders,
     host: '0.0.0.0',
     port: 4173,
     allowedHosts: true,

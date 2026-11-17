@@ -1,21 +1,55 @@
-# Modelo de Amenazas y Seguridad (`THREAT_MODEL.md`)
+# Modelo de amenazas y seguridad (`THREAT_MODEL.md`)
 
-> **Estado:** Principios rectores establecidos en **M0**. Auditoría completa STRIDE, pruebas automatizadas anti-fuga y endurecimiento final se consolidan en **M8** (`STATE-08`).
+> **Estado:** revisión de cierre de MVP (**M8a**, noviembre 2026). Cada control está marcado
+> como **implementado** (con test o archivo que lo respalda), **parcial** o **pendiente**.
+> Lo pendiente requiere infraestructura que el sandbox de desarrollo no tiene (Docker,
+> proveedor real, usuarios reales) y está automatizado en CI o documentado en `DEPLOY.md`.
 
-## Superficies y controles obligatorios desde el diseño
+## Activos a proteger
 
-1. **Manipulación de estado de juego / revelación de cartas ajenas:**
-   - Mitigación: servidor 100% autoritativo; el cliente jamás recibe `GameState`, solo `viewFor(state, seat)` y eventos proyectados con `projectEventsForSeat`; barajado CSPRNG Fisher-Yates determinista con esquema **commit-reveal** verificable al final de la partida (`SHA-256("truco-v1:" + seedReveal) === seedCommitment`).
-   - **Alcance exacto y límite criptográfico del commit-reveal:**
-     - **Qué garantiza:** prueba matemáticamente ante todos los participantes que el servidor fijó la semilla aleatoria _antes_ de jugar la primera carta (`game.started`) y **no alteró el orden del mazo ni las manos posteriores durante el transcurso de la partida**.
-     - **Qué NO oculta por sí solo:** al tratarse de una arquitectura cliente-servidor autoritativa (y no de _mental poker_ criptográfico entre pares), **el servidor conoce la semilla y todas las manos privadas mientras la partida está en curso (`IN_GAME`)**. Por ello, la confidencialidad frente a operadores o volcados de memoria/cache se protege complementariamente cifrando la semilla en reposo en Redis con **AES-256-GCM** (`SEED_ENCRYPTION_KEY`), prohibiendo todo endpoint administrativo que exponga manos activas no jugadas y auditando accesos en `audit_logs`.
-2. **Inyección y payloads malformados (HTTP / WS):**
-   - Mitigación: esquemas estrictos Zod en `@truco/shared` rechazando propiedades o tipos inesperados.
-3. **Robo de sesión y fuerza bruta:**
-   - Mitigación: cookies `HttpOnly; Secure; SameSite=Lax` (requiriendo mismo _registrable site_ entre `web` y `api`, ver `ADR-016`), rotación de refresh tokens con revocación de familia ante reúso, tickets WS estrictamente **single-use** (`jti` con TTL en `RateLimitStore`), contraseñas con Argon2id, bloqueo progresivo por combinación **`(cuenta + IP)`** y escalamiento a **Captcha por cuenta** sin bloquear globalmente cuentas de terceros ante ataques distribuidos (`ADR-015`).
-4. **Abuso de recursos, enumeración de mesas privadas y DoS aplicativo:**
-   - Mitigación: rate limiting en Redis (`RateLimitStore`) diferenciado por IP, cuenta y tipo de evento WS; códigos de unión de 6 caracteres (`JOIN_CODE_ALPHABET`) protegidos con doble rate limit por IP y por cuenta en `POST /v1/tables/join-by-code`; invitaciones firmadas con HMAC-SHA256 y expiración (`table-invite-v1`); aislamiento estricto de mesas `PRIVATE` (404 ante terceros y cero emisiones en `/lobby`); límite atómico de 1 mesa activa por cuenta mediante índice único parcial en PostgreSQL (`table_seats_one_active_per_user_uniq`) y RPC interno autenticado con HMAC (`internal-rpc-v1`, `ADR-017`).
-5. **Economía sin riesgo monetario:**
-   - Mitigación por diseño: cero dinero real, cero retiros y cero transferencias entre jugadores.
-6. **Datos personales y cumplimiento legal (`STATE-09`):**
-   - Minimización de datos personales y revisión jurídica pendiente conforme a la **Ley 25.326** de la República Argentina.
+1. Cuentas y sesiones de jugadores (cookies `HttpOnly`, tickets WS, refresh tokens).
+2. Manos y cartas no jugadas durante la partida (ventaja competitiva).
+3. Registro de auditoría del panel (`audit_logs`) y acciones de moderación.
+4. Secretos de infraestructura (`SESSION_SECRET`, `INTERNAL_RPC_SECRET`,
+   `ADMIN_TOTP_ENCRYPTION_KEY`, `SEED_ENCRYPTION_KEY`, `METRICS_TOKEN`, credenciales de email).
+5. Datos personales mínimos (email, IP) sujetos a la Ley 25.326.
+
+## Matriz STRIDE
+
+| Amenaza                    | Escenario                                               | Control                                                                                                                                            | Estado                                                                                 |
+| -------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **S**poofing               | Robo de cookie de sesión o de ticket WS                 | Cookies `HttpOnly; Secure; SameSite=Lax`; tickets WS de un solo uso con TTL; cookie del panel separada (`truco_admin_access`, 30 min)              | Implementado                                                                           |
+| Spoofing                   | Falsificar llamadas internas API↔game-server            | HMAC-SHA256 sobre `método\npath\ntimestamp\nnonce\nbody`, skew 30 s, nonce de un solo uso (`internal-rpc-v2`)                                      | Implementado (`verify-signed-request.spec`)                                            |
+| Spoofing                   | Panel admin desde una red ajena                         | `ADMIN_ALLOWED_NETWORKS` (IPv4/IPv6/CIDR) validado en el servidor en cada request, antes de la cookie                                              | Implementado (`network-policy.spec`, `admin.spec`)                                     |
+| **T**ampering              | Cliente intenta alterar el estado de juego              | Servidor 100 % autoritativo; el cliente sólo recibe `viewFor(state, seat)` y eventos proyectados                                                   | Implementado (`multiplayer-no-leak.spec`)                                              |
+| Tampering                  | Modificar o borrar la auditoría                         | Trigger de base: `UPDATE`/`DELETE` bloqueados en `audit_logs`                                                                                      | Implementado (`audit-immutability.spec`)                                               |
+| Tampering                  | Resolver dos veces el mismo reporte                     | Claim/resolve con `version` optimista                                                                                                              | Implementado (`admin.spec`)                                                            |
+| **R**epudiation            | Moderador niega haber visto un replay o sancionado      | `ADMIN_REPLAY_ACCESSED`, `ADMIN_REPORT_CLAIMED`, `ADMIN_SANCTION_ISSUED` con motivo, IP y actor                                                    | Implementado                                                                           |
+| Repudiation                | Acciones internas sin trazabilidad                      | Logs estructurados con `correlationId` y sin datos personales                                                                                      | Implementado (`observability.spec`)                                                    |
+| **I**nformation disclosure | Un jugador ve manos ajenas                              | Proyección por asiento, tests anti-fuga, sin cartas en logs                                                                                        | Implementado                                                                           |
+| Information disclosure     | Fuga de PII en logs o métricas                          | `LOG_REDACT_PATHS` + `redactLogPayload()`; logs con patrón de ruta (sin ids ni query); email enmascarado salvo `users:read_pii`                    | Implementado (`observability.spec`)                                                    |
+| Information disclosure     | `/metrics` expuesto a Internet                          | Token Bearer obligatorio, comparación en tiempo constante, 503 si falta configuración                                                              | Implementado (`metrics.spec`)                                                          |
+| Information disclosure     | Fuga de secretos en el repo o en bundles                | `scripts/scan-secrets.mjs` y `scripts/check-bundles-no-secrets.mjs` en CI                                                                          | Implementado (CI)                                                                      |
+| Information disclosure     | Clickjacking / inyección en la web y el panel           | CSP estricta (`script-src 'self'`), `frame-ancestors 'none'`, HSTS, `nosniff`, `Referrer-Policy`, `Permissions-Policy` en web, admin y API + nginx | Implementado (`observability.spec`, `deploy-headers.spec`, `m8-security-headers.spec`) |
+| Information disclosure     | Panel admin indexado o cacheado                         | Origen separado, `no-store`, `X-Robots-Tag: noindex`, `Cache-Control` en assets                                                                    | Implementado                                                                           |
+| Information disclosure     | Volcado de memoria/Redis revela la semilla              | Semilla cifrada AES-256-GCM; reveal sólo al terminar la partida                                                                                    | Implementado                                                                           |
+| **D**enial of service      | Fuerza bruta de login y de códigos de mesa              | Rate limit por IP/cuenta/tipo de evento; bloqueo progresivo; captcha por cuenta                                                                    | Implementado                                                                           |
+| DoS                        | Inflar series de Prometheus con rutas arbitrarias       | Etiqueta de ruta normalizada (`:id`) y sin query string                                                                                            | Implementado (`metrics.spec`)                                                          |
+| DoS                        | Salas huérfanas consumiendo memoria                     | Barrido por inactividad (`IDLE_ROOM_TTL_MS`) con `room.expired`                                                                                    | Implementado (`idle-room-ttl.spec`)                                                    |
+| DoS                        | Saturación del game-server                              | Límite de conexiones por IP y por proceso; escalado horizontal con _owner lease_ en Redis                                                          | Parcial: no hay prueba de carga real en infra (`PERF.md`)                              |
+| **E**levation of privilege | Jugador intenta usar endpoints del panel                | Permisos RBAC validados en el servidor por endpoint (12 permisos) + 2FA obligatorio                                                                | Implementado (`admin.spec`)                                                            |
+| Elevation of privilege     | Acceso al panel sin segundo factor                      | TOTP obligatorio (`ADMIN_2FA_NOT_CONFIGURED`), códigos de un solo uso, ventana ±1 paso, comparación en tiempo constante                            | Implementado (`totp.spec`)                                                             |
+| Elevation of privilege     | Administrador secuestra una cuenta con `users:read_pii` | Permiso separado, motivo obligatorio y auditoría de la consulta                                                                                    | Implementado                                                                           |
+| Elevation of privilege     | Cuenta sancionada sigue jugando                         | Expulsión inmediata de sockets y salas al aplicar la sanción (`/internal/users/:id/evict`)                                                         | Implementado (`moderation-eviction.spec`)                                              |
+
+## Riesgos abiertos
+
+| Riesgo                                                | Impacto                                     | Mitigación actual                                           | Qué falta                                                        |
+| ----------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| Sin WAF ni protección volumétrica delante de la API   | DoS de capa 7                               | Rate limit aplicativo + Cloudflare en el plan de despliegue | Activar Cloudflare y reglas de firewall en staging (`DEPLOY.md`) |
+| TLS y HSTS dependen del proxy                         | Intercepción si se sirve HTTP               | `Strict-Transport-Security` en nginx y API en producción    | Verificar con `curl -I` en el dominio real                       |
+| Correos transaccionales en modo `console` por defecto | No hay verificación real de email           | Adaptador Resend/SMTP listo, activable por env              | Credenciales del proveedor y prueba de entrega real              |
+| Trazas OTel/Sentry no instaladas                      | Menos visibilidad de errores en producción  | Configuración y arranque tolerante ya implementados         | `pnpm add @opentelemetry/sdk-node @sentry/node` y DSN            |
+| Respaldos sólo verificados en CI                      | Pérdida de datos ante incidente no ensayado | Script + job `backup-restore`                               | Correr el job y programar cron en el servidor                    |
+| Legal pendiente (Ley 25.326, edad mínima)             | Exposición normativa                        | Páginas en borrador marcadas y `LEGAL_CHECKLIST.md`         | Revisión de abogado                                              |
+| Sin pentest externo                                   | Vulnerabilidades desconocidas               | Tests automatizados + revisión STRIDE                       | Auditoría externa antes de abrir al público                      |

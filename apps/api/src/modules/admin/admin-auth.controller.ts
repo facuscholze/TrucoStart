@@ -21,7 +21,7 @@ import { parseWithZod } from '../../common/zod-validation.js';
 import { extractClientMeta } from '../auth/guards/session-auth.guard.js';
 import { AdminAuthService, ADMIN_SESSION_COOKIE } from './admin-auth.service.js';
 import { ADMIN_RUNTIME_CONFIG, type AdminRuntimeConfig } from './admin.config.js';
-import { AdminAuthGuard } from './guards/admin-auth.guard.js';
+import { AdminAuthGuard, assertAdminNetworkAllowed } from './guards/admin-auth.guard.js';
 import { CurrentAdmin } from './guards/current-admin.decorator.js';
 import type { AdminPrincipal } from './admin-auth.service.js';
 
@@ -40,6 +40,7 @@ export class AdminAuthController {
     @Req() req: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<AdminLoginResponse> {
+    assertAdminNetworkAllowed(req.ip, this.config);
     const input = parseWithZod(AdminLoginRequestSchema, rawBody) as AdminLoginRequest;
     const bundle = await this.authService.login(input, extractClientMeta(req));
     this.authService.applyCookie(reply, bundle.cookieValue, bundle.cookieMaxAgeSeconds);

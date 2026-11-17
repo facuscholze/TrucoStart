@@ -1,4 +1,4 @@
-import { parseServerEnv } from '@truco/shared';
+import { buildLoggerOptions, initializeTracing, parseServerEnv } from '@truco/shared';
 import pino from 'pino';
 import { BullMqMatchLifecyclePublisher } from './events/match-lifecycle-publisher.js';
 import { createHttpModerationLookup } from './rooms/http-moderation-lookup.js';
@@ -6,8 +6,19 @@ import { createGameServer } from './server.js';
 import { RedisGameStore } from './store/redis-game-store.js';
 
 async function main(): Promise<void> {
-  const logger = pino({ name: 'truco-game-server' });
   const env = parseServerEnv(process.env);
+  const logger = pino(buildLoggerOptions({ service: 'game-server', level: env.LOG_LEVEL }));
+  await initializeTracing(
+    {
+      OTEL_EXPORTER_OTLP_ENDPOINT: env.OTEL_EXPORTER_OTLP_ENDPOINT,
+      OTEL_SERVICE_NAME: env.OTEL_SERVICE_NAME,
+      OTEL_TRACES_SAMPLER_ARG: env.OTEL_TRACES_SAMPLER_ARG,
+      SENTRY_DSN: env.SENTRY_DSN,
+      SENTRY_TRACES_SAMPLE_RATE: env.SENTRY_TRACES_SAMPLE_RATE,
+    },
+    'truco-game-server',
+    (message, fields) => logger.info(fields ?? {}, message),
+  );
   const store = new RedisGameStore(env.REDIS_URL);
   const lifecyclePublisher = new BullMqMatchLifecyclePublisher(env.REDIS_URL);
 
@@ -16,6 +27,7 @@ async function main(): Promise<void> {
     corsOrigins: env.CORS_ORIGINS,
     store,
     lifecyclePublisher,
+    logger,
     allowAdHocRooms: false,
     sessionSecret: env.SESSION_SECRET,
     internalSecret: env.INTERNAL_RPC_SECRET || env.SESSION_SECRET,

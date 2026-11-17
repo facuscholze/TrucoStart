@@ -353,6 +353,16 @@ export class RoomManager {
     return this.rooms.size;
   }
 
+  /** Salas por estado (`WAITING`, `IN_GAME`, `FINISHED`, …) para métricas. */
+  getStatusCounts(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const actor of this.rooms.values()) {
+      const status = actor.getTableStatus();
+      counts[status] = (counts[status] ?? 0) + 1;
+    }
+    return counts;
+  }
+
   disposeLocalTimersOnly(): void {
     for (const actor of this.rooms.values()) {
       actor.dispose();

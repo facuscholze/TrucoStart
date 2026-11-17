@@ -1,0 +1,54 @@
+# Alertas por SLO (ver docs/RUNBOOKS.md). Sintaxis Prometheus v2.
+groups:
+  - name: truco-slo
+    rules:
+      - alert: TrucoApiSinMetricas
+        expr: up{job="truco-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'La API no responde al scrape de métricas'
+          runbook: 'docs/RUNBOOKS.md#api-caida'
+
+      - alert: TrucoErrores5xxAltos
+        expr: |
+          sum(rate(truco_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(truco_http_requests_total[5m])), 0.001) > 0.02
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Tasa de 5xx por encima del 2% durante 10 minutos'
+          runbook: 'docs/RUNBOOKS.md#errores-5xx'
+
+      - alert: TrucoLatenciaAccionAlta
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(truco_action_duration_seconds_bucket[5m]))
+          ) > 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'p95 de latencia de acción por encima de 150 ms'
+          runbook: 'docs/RUNBOOKS.md#latencia-de-accion'
+
+      - alert: TrucoJobsFallidos
+        expr: increase(truco_jobs_failed_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Jobs fallidos en la cola de match-lifecycle'
+          runbook: 'docs/RUNBOOKS.md#jobs-fallidos'
+
+      - alert: TrucoSalasSinDrenar
+        expr: max(truco_rooms_by_status) > 500
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Demasiadas salas vivas: posible fuga de salas'
+          runbook: 'docs/RUNBOOKS.md#salas-colgadas'

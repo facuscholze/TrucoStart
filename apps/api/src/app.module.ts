@@ -15,6 +15,10 @@ import {
   ModerationModule,
   type ModerationModuleOptions,
 } from './modules/moderation/moderation.module.js';
+import {
+  ObservabilityModule,
+  type ObservabilityModuleOptions,
+} from './modules/observability/observability.module.js';
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
@@ -25,9 +29,9 @@ export interface CreateAppModuleOptions {
   readonly lobbyOptions?: LobbyModuleOptions;
   readonly moderationOptions?: ModerationModuleOptions;
   readonly adminOptions?: AdminModuleOptions;
+  readonly observabilityOptions?: ObservabilityModuleOptions;
 }
 
-// TODO(STATE-08): Incorporar MetricsModule (/v1/metrics) y trazas OpenTelemetry en M8.
 @Module({})
 export class AppModule {
   static register(options: CreateAppModuleOptions = {}): DynamicModule {
@@ -84,6 +88,7 @@ export class AppModule {
               : {}),
           },
         }),
+        ObservabilityModule.register(options.observabilityOptions),
         HealthModule,
         OpenApiModule,
       ],

@@ -17,7 +17,8 @@ import { io as createClient, type Socket as ClientSocket } from 'socket.io-clien
 import { GameMetrics } from '../src/observability/game-metrics.js';
 import { createGameServer, type GameServerInstance } from '../src/server.js';
 
-const SECRET = 'perf-bench-secret-minimo-32-caracteres!!';
+// Secreto ficticio del bench local (no se usa en ningún entorno real).
+const SECRET = 'perf-bench-local-fixture-32-caracteres!!';
 const ROOMS = Number(process.env['PERF_ROOMS'] ?? 25);
 const ACTIONS_PER_ROOM = Number(process.env['PERF_ACTIONS'] ?? 40);
 

@@ -34,8 +34,10 @@ if [ "$objetos" -lt 1 ]; then
 fi
 rm -f "${target}.toc"
 
-sha256sum "$target" > "${target}.sha256"
-echo "[backup] OK: ${objetos} objetos, $(du -h "$target" | cut -f1), sha256=$(cut -d' ' -f1 "${target}.sha256")"
+# El checksum se guarda con ruta relativa a BACKUP_DIR para que `restore-postgres.sh`
+# pueda verificarlo desde ese directorio (el path absoluto rompía el drill de CI).
+( cd "$BACKUP_DIR" && sha256sum "$(basename "$target")" > "$(basename "$target").sha256" )
+echo "[backup] OK: ${objetos} objetos, $(du -h "$target" | cut -f1), sha256=$(basename "$target").sha256"
 
 if [ -n "$RETENTION_DAYS" ] && [ "$RETENTION_DAYS" -gt 0 ]; then
   find "$BACKUP_DIR" -name 'truco-*.dump*' -type f -mtime "+${RETENTION_DAYS}" -print -delete \

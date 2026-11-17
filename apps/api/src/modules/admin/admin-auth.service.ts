@@ -138,7 +138,18 @@ export class AdminAuthService {
       );
     }
 
-    const secret = decryptTotpSecret(twoFactor.secretEncrypted, this.config.totpEncryptionKey);
+    let secret: string;
+    try {
+      secret = decryptTotpSecret(twoFactor.secretEncrypted, this.config.totpEncryptionKey);
+    } catch {
+      // El secreto no se puede descifrar: casi siempre `ADMIN_TOTP_ENCRYPTION_KEY` cambió.
+      throw new DomainApiException(
+        500,
+        'INTERNAL_ERROR',
+        'No se pudo leer el segundo factor: verificá ADMIN_TOTP_ENCRYPTION_KEY.',
+        { reason: 'ADMIN_2FA_MISCONFIGURED' },
+      );
+    }
     const isRecoveryCode = /^\d{4}-?\d{4}$/.test(input.totpCode.replace(/\s/g, ''));
     let verified = false;
     let usedStep: number | null = null;

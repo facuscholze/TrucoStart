@@ -92,9 +92,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let code = 'UNKNOWN';
     let message = `Error ${response.status}`;
     try {
-      const body = (await response.json()) as { code?: string; message?: string };
-      code = body.code ?? code;
-      message = body.message ?? message;
+      const body = (await response.json()) as {
+        code?: string;
+        message?: string;
+        error?: { code?: string; message?: string };
+      };
+      code = body.code ?? body.error?.code ?? code;
+      message = body.error?.message ?? body.message ?? message;
     } catch {
       // El cuerpo no era JSON: se conserva el mensaje genérico.
     }

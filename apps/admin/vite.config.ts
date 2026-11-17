@@ -14,4 +14,16 @@ export default defineConfig({
       },
     },
   },
+  // `vite preview` (suite E2E y staging) también necesita alcanzar la API.
+  preview: {
+    host: '0.0.0.0',
+    port: 5174,
+    allowedHosts: true,
+    proxy: {
+      '/v1': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
+    },
+  },
 });

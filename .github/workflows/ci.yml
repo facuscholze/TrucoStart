@@ -103,7 +103,10 @@ jobs:
         run: docker compose config -q
 
       - name: Validate staging compose configuration
-        run: docker compose -f infra/docker-compose.staging.yml config -q
+        run: |
+          # `env_file: ../.env` es obligatorio para Compose: se genera desde el ejemplo.
+          cp .env.example .env
+          docker compose -f infra/docker-compose.staging.yml config -q
 
   backup-restore:
     name: Respaldo y restauración de PostgreSQL
@@ -173,15 +176,36 @@ jobs:
           TARGET_DATABASE_URL: postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore
         run: |
           dump="$(ls -1t backups/truco-*.dump | head -1)"
-          echo "Restaurando ${dump}"
-          if ! bash -x ./infra/backups/restore-postgres.sh "${dump}"; then
-            echo "::error::Falló la restauración; diagnóstico:"
-            pg_restore --list "${dump}" | head -20
-            pg_restore --list "${dump}" | tail -5
-            psql "postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore" -c '\dt' || true
-            psql "postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore" -c '\dn' || true
+          echo "Restaurando ${dump}" | tee restore-diag.txt
+          set +e
+          bash -x ./infra/backups/restore-postgres.sh "${dump}" >> restore-diag.txt 2>&1
+          status=$?
+          set -e
+          tail -40 restore-diag.txt
+          if [ "${status}" -ne 0 ]; then
+            {
+              echo "--- pg_restore --list (head) ---"
+              pg_restore --list "${dump}" | head -20
+              echo "--- pg_restore --list (tail) ---"
+              pg_restore --list "${dump}" | tail -5
+              echo "--- tablas en destino ---"
+              psql "${TARGET_DATABASE_URL}" -c '\dt'
+              echo "--- esquemas en destino ---"
+              psql "${TARGET_DATABASE_URL}" -c '\dn'
+              echo "--- versiones ---"
+              pg_restore --version
+              psql --version
+            } >> restore-diag.txt 2>&1
             exit 1
           fi
+
+      - name: Upload restore diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-diagnostics
+          path: restore-diag.txt
+          retention-days: 3
 
       - name: Compare row counts after restore
         run: |

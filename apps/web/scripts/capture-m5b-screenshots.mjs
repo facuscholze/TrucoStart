@@ -370,6 +370,64 @@ async function main() {
         await context.close();
       }
 
+      // 6b. M6 — Mesa de práctica contra la máquina con pista de entrenamiento abierta
+      {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          isMobile: viewport.isMobile,
+          hasTouch: viewport.isMobile,
+          deviceScaleFactor: 2,
+          locale: 'es-AR',
+        });
+        const page = await context.newPage();
+        await ensureGuestSession(page);
+        await page.goto(`${BASE_URL}/`);
+        await page
+          .getByRole('heading', { name: /Jugar contra la máquina/i })
+          .first()
+          .waitFor({ timeout: 30_000 });
+        await page.getByRole('button', { name: /Dificultad Difícil/i }).click();
+        await page
+          .getByRole('button', { name: /Jugar contra la máquina/i })
+          .first()
+          .click();
+        await page.waitForURL(/\/mesa\/.*practice=1/, { timeout: 45_000 });
+        await page.getByRole('region', { name: /Mesa de truco en vivo/i }).waitFor({
+          timeout: 45_000,
+        });
+        await page.getByTestId('practice-hint-button').waitFor({ timeout: 45_000 });
+        await page.getByTestId('practice-hint-button').click();
+        await page.getByTestId('practice-hint-text').waitFor({ timeout: 20_000 });
+        await capture(page, shot('m6-practica-pista'), shotOpts);
+        await context.close();
+      }
+
+      // 6c. M6 — Tutorial interactivo (lección de Envido)
+      {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          isMobile: viewport.isMobile,
+          hasTouch: viewport.isMobile,
+          deviceScaleFactor: 2,
+          locale: 'es-AR',
+        });
+        const page = await context.newPage();
+        await ensureGuestSession(page);
+        await page.goto(`${BASE_URL}/aprender`);
+        await page.getByRole('tab', { name: /Tutorial interactivo/i }).click();
+        await page.getByTestId('tutorial-objective').waitFor({ timeout: 30_000 });
+        await page
+          .getByRole('button', { name: /3\. El envido/i })
+          .click({ timeout: 10_000 })
+          .catch(() => undefined);
+        await page.getByTestId('tutorial-objective').waitFor({ timeout: 20_000 });
+        await capture(page, shot('m6-tutorial'), {
+          ...shotOpts,
+          scrollTo: '[data-testid="tutorial-objective"]',
+        });
+        await context.close();
+      }
+
       // 7. Sala de espera con dos asientos ocupados (invitados nuevos, sin mesa activa previa)
       {
         const { first, second } = await openWaitingRoom(browser, viewport, null);
@@ -393,8 +451,10 @@ async function main() {
     await browser.close();
     shutdownChildren();
     const { readdir } = await import('node:fs/promises');
-    const files = (await readdir(OUT_DIR)).filter((f) => f.startsWith('m5b-')).sort();
-    console.log(`\n${files.length} screenshots M5b en docs/screenshots/`);
+    const files = (await readdir(OUT_DIR))
+      .filter((f) => f.startsWith('m5b-') || f.startsWith('m6-'))
+      .sort();
+    console.log(`\n${files.length} screenshots M5b/M6 en docs/screenshots/`);
     for (const file of files) console.log(` - ${file}`);
   }
 }

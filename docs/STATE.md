@@ -1,8 +1,8 @@
 # Estado del Proyecto ("Mesa de Truco")
 
-- **Última actualización:** 2026-11-13
+- **Última actualización:** 2026-11-17
 - **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M7 cerrado** — moderación (reportes, sanciones, 2FA admin, `audit_logs` inmutable) y `apps/admin` mínimo con RBAC, replay auditable y sesiones separadas (⏸ a la espera de confirmación para iniciar **M8**)
+- **Módulo actual:** **M8a cerrado** — observabilidad y endurecimiento (logs correlacionados sin PII, `/v1/metrics` protegido, cabeceras, restricción del panel por red, escaneo de secretos y respaldo/restauración verificados en CI). **M8b, M8c y M8d pendientes.**
 
 ---
 
@@ -188,3 +188,46 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 1. **M7 cerrado** ⏸ — esperando confirmación del usuario para arrancar **M8** (observabilidad, endurecimiento, carga k6, staging, `PERF.md`/`THREAT_MODEL.md`/`RUNBOOKS.md`).
 2. Antes de M8: revisión legal de datos personales (`STATE-09`) y proveedores reales de email/Google/Captcha (`STATE-10`..`STATE-12`), que hoy son adaptadores simulados.
+
+## M8a — observabilidad y endurecimiento (cerrado, verificado en CI)
+
+| Ítem                                                                      | Implementación                                                                                                                                                                                             | Verificación                                                                                     |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Logs estructurados con correlación API↔game-server, sin PII ni cartas     | `packages/shared/src/observability/logging.ts` (`LOG_REDACT_PATHS`, `redactLogPayload`, `redactLogText`); hooks de Fastify en `apps/api/src/bootstrap.ts`; `logger` del game-server con `x-correlation-id` | `observability.spec.ts` (shared), `metrics.spec.ts` (API), `observability.spec.ts` (game-server) |
+| Métricas Prometheus en `/metrics` protegido                               | `API_METRIC_DEFINITIONS`/`MetricsRegistry` + `modules/observability/metrics.controller.ts` (Bearer `METRICS_TOKEN`, comparación en tiempo constante, 503 si falta configuración)                           | `metrics.spec.ts` (401/503/200, formato, ruta normalizada, conteos)                              |
+| Métricas del juego (WS, salas, latencia de acción, reconexiones, errores) | `apps/game-server/src/observability/game-metrics.ts` + `GET /internal/metrics` (Bearer `INTERNAL_RPC_SECRET`); la API las consume                                                                          | `apps/game-server/tests/observability.spec.ts` (3/3)                                             |
+| Jobs y colas                                                              | `MetricsService` lee `stats()` del consumer BullMQ (pendientes/fallidos)                                                                                                                                   | `metrics.spec.ts` (métricas presentes)                                                           |
+| Trazas OTel y Sentry por entorno                                          | `observability/tracing.ts` (`buildTracingConfig`, `initializeTracing` tolerante a paquetes ausentes)                                                                                                       | `observability.spec.ts` (4 casos); activación documentada en `RUNBOOKS.md#trazas`                |
+| Cabeceras de seguridad (web, admin, API)                                  | `observability/security-headers.ts`; `infra/docker/nginx-web.conf` y `nginx-admin.conf`; previews de Vite con las mismas cabeceras                                                                         | `observability.spec.ts`, `deploy-headers.spec.ts`, `apps/web/e2e/m8-security-headers.spec.ts`    |
+| Panel admin restringible por IP/red y en origen separado                  | `ADMIN_ALLOWED_NETWORKS` (IPv4/IPv6/CIDR) validado en `AdminAuthGuard` y en el login; `ADMIN_ORIGIN` para CORS; `apps/admin` se sirve desde su propio origen                                               | `network-policy.spec.ts` (7/7), `admin.spec.ts`                                                  |
+| Escaneo de secretos y bundles                                             | `scripts/scan-secrets.mjs` y `scripts/check-bundles-no-secrets.mjs` en CI (después del build)                                                                                                              | CI en verde (`44164781692`)                                                                      |
+| Respaldos y restauración                                                  | `infra/backups/{backup,restore}-postgres.sh`; job `backup-restore` que migra, siembra, respalda, restaura en base vacía y **compara conteos**                                                              | CI en verde (`44164781692`, 36 s)                                                                |
+| SLO y dashboards                                                          | `infra/prometheus/{prometheus.yml,alerts.yml}` + `infra/grafana/dashboards/truco-mvp.json` (13 paneles)                                                                                                    | Parseo JSON/validación; **no** desplegado en infra real                                          |
+| Modelo de amenazas revisado                                               | `docs/THREAT_MODEL.md` con matriz STRIDE y estado implementado/parcial/pendiente                                                                                                                           | Documento                                                                                        |
+
+## Pre-M6 verificado (pedido explícito antes de M8)
+
+| Ítem                                    | Estado       | Evidencia                                                                                                           |
+| --------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Registro de jugador                     | Implementado | `apps/api/src/modules/auth/tests/auth.spec.ts` (registro, duplicados, validaciones)                                 |
+| Recuperación de contraseña              | Implementado | `auth.spec.ts` (token de un solo uso, expiración, revocación de sesiones)                                           |
+| Ajustes de cuenta                       | Implementado | `apps/web` (pantalla de perfil/ajustes) + `/v1/me/*`; tests de web                                                  |
+| Limpieza de salas por inactividad       | Implementado | `apps/game-server/tests/idle-room-ttl.spec.ts` (TTL 10 min, `room.expired`)                                         |
+| Semilla fija en E2E                     | Implementado | `E2E_DEAL_SEED_HEX` en `apps/api/scripts/e2e-stack.ts` + reparto esperado en `apps/web/e2e/m5b-multiclient.spec.ts` |
+| E2E del panel contra la API real        | Implementado | `apps/admin/e2e/admin-panel.spec.ts` (login 2FA, reporte, claim, replay auditado, sanción y bloqueo del jugador)    |
+| Captura del diálogo de reporte a 360 px | Implementado | `docs/screenshots/m8-reporte-mesa-360.png` (`apps/web/e2e/m8-report-dialog.spec.ts`)                                |
+
+## Pendiente (M8b, M8c, M8d)
+
+| Bloque                             | Estado    | Qué falta                                                                                                                                                                                                                                                                                      |
+| ---------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M8b Rendimiento y carga**        | Parcial   | Benchmark de acción en sandbox (`pnpm --filter @truco/game-server perf:actions`, p95 0,44 ms con 25 salas/50 sockets, sin Redis ni Postgres); faltan escenarios k6 (100 y 1.000 usuarios), workflow manual, `docs/PERF.md` con `EXPLAIN` de consultas críticas y ajustes de índices/paginación |
+| **M8c Despliegue a staging**       | Pendiente | `docs/DEPLOY.md` con proveedor elegido, workflow de despliegue con migraciones, `.github/workflows/perf.yml`, adaptadores reales de email/JWKS/Turnstile activables por env y `docker-compose` de staging endurecido                                                                           |
+| **M8d Cierre legal y de producto** | Pendiente | Páginas de Términos/Privacidad/Cookies/Reglas (borradores "PENDIENTE DE REVISIÓN LEGAL"), edad mínima configurable, `docs/LEGAL_CHECKLIST.md`, revisión de la regla 13 y prueba de humo final en staging                                                                                       |
+
+## Próximos pasos inmediatos
+
+1. **M8b**: escenarios k6 (100 y 1.000 usuarios) + `docs/PERF.md` con lo medido en sandbox y lo pendiente en infra real.
+2. **M8c**: `docs/DEPLOY.md` (proveedor justificado), workflow de despliegue y adaptadores externos por env.
+3. **M8d**: páginas legales en borrador, `docs/LEGAL_CHECKLIST.md`, regla 13 y humo en staging.
+4. Cierre de M8: estado real de cada criterio de salida (verificado / parcial / pendiente de medir).

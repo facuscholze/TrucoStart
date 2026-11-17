@@ -129,6 +129,11 @@ funcionando: la observabilidad **nunca** tumba el arranque.
 ## 3. Respaldos y restauración de PostgreSQL
 
 Scripts: `infra/backups/backup-postgres.sh` y `infra/backups/restore-postgres.sh`.
+
+> **Versión del cliente:** usá `pg_dump`/`pg_restore` de la **misma versión mayor que el
+> servidor**. Con un cliente más nuevo (p. ej. 18 contra un servidor 16) el dump incluye
+> `SET transaction_timeout` (parámetro de PG 17+) y la restauración falla. En el drill de CI
+> los scripts se ejecutan dentro de la imagen `postgres:16-alpine` para garantizar la paridad.
 Prueba de restauración automatizada: job `backup-restore` de `.github/workflows/ci.yml`
 (migra, siembra, respalda, restaura en una base vacía y **compara conteos** de
 `users`, `matches`, `match_events`, `audit_logs`).

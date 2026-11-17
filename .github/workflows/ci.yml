@@ -168,13 +168,19 @@ jobs:
       - name: Seed development data
         run: pnpm --filter @truco/api db:seed:dev
 
-      - name: Run backup
-        run: ./infra/backups/backup-postgres.sh
+      # El runner trae psql/pg_dump 18 y el servicio es PostgreSQL 16: pg_dump 18 escribe
+      # `SET transaction_timeout` (parámetro de PG17+) y la restauración contra 16 falla.
+      # Se ejecutan los scripts con el cliente de la misma imagen que el servidor.
+      - name: Run backup (cliente PostgreSQL 16)
+        run: |
+          docker run --rm --network host -v "$PWD:/repo" -w /repo \
+            -e DATABASE_URL -e BACKUP_DIR -e BACKUP_RETENTION_DAYS \
+            postgres:16-alpine bash -c './infra/backups/backup-postgres.sh'
 
       - name: Create empty restore database
         run: psql "postgresql://truco_backup:truco_backup_password@localhost:5432/postgres" -c "CREATE DATABASE truco_restore"
 
-      - name: Restore into the empty database
+      - name: Restore into the empty database (cliente PostgreSQL 16)
         env:
           TARGET_DATABASE_URL: postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore
           # La base destino está recién creada: restauración atómica sin --clean.
@@ -183,42 +189,22 @@ jobs:
           dump="$(ls -1t backups/truco-*.dump | head -1)"
           echo "Restaurando ${dump}" | tee restore-diag.txt
           set +e
-          bash -x ./infra/backups/restore-postgres.sh "${dump}" >> restore-diag.txt 2>&1
+          docker run --rm --network host -v "$PWD:/repo" -w /repo \
+            -e TARGET_DATABASE_URL -e RESTORE_ATOMIC \
+            postgres:16-alpine bash -c "./infra/backups/restore-postgres.sh '${dump}'" \
+            >> restore-diag.txt 2>&1
           status=$?
           set -e
           tail -40 restore-diag.txt
           if [ "${status}" -ne 0 ]; then
             {
               echo "--- pg_restore --list (head) ---"
-              pg_restore --list "${dump}" | head -20
-              echo "--- pg_restore --list (tail) ---"
-              pg_restore --list "${dump}" | tail -5
+              docker run --rm -v "$PWD:/repo" -w /repo postgres:16-alpine pg_restore --list "${dump}" | head -20
               echo "--- tablas en destino ---"
               psql "${TARGET_DATABASE_URL}" -c '\dt'
-              echo "--- esquemas en destino ---"
-              psql "${TARGET_DATABASE_URL}" -c '\dn'
-              echo "--- versiones ---"
-              pg_restore --version
-              psql --version
             } >> restore-diag.txt 2>&1
             exit 1
           fi
-
-      - name: Upload restore diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: restore-diagnostics
-          path: restore-diag.txt
-          retention-days: 3
-
-      # TEMPORAL: los logs/artefactos de Actions no son accesibles desde el entorno de
-      # desarrollo; se publica el diagnóstico como comentario del PR para poder leerlo.
-      - name: Publish restore diagnostics as PR comment (temporal)
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh pr comment 1 --repo "${{ github.repository }}" --body-file restore-diag.txt
 
       - name: Compare row counts after restore
         run: |

@@ -51,13 +51,21 @@ export function base32Decode(input: string): Buffer {
   return Buffer.from(bytes);
 }
 
-/** Código TOTP de 6 dígitos para un `step` de 30 s (RFC 6238, HMAC-SHA1). */
-export function generateTotpCode(secret: string, atMs: number, stepSeconds = 30): string {
+/**
+ * Código TOTP para un `step` de 30 s (RFC 6238, HMAC-SHA1).
+ * `digits` permite verificar los vectores oficiales del RFC (8 dígitos); el panel usa 6.
+ */
+export function generateTotpCode(
+  secret: string,
+  atMs: number,
+  stepSeconds = 30,
+  digits = 6,
+): string {
   const step = Math.floor(atMs / 1000 / stepSeconds);
-  return hotp(base32Decode(secret), step);
+  return hotp(base32Decode(secret), step, digits);
 }
 
-function hotp(key: Buffer, counter: number): string {
+export function hotp(key: Buffer, counter: number, digits = 6): string {
   const buffer = Buffer.alloc(8);
   buffer.writeUInt32BE(Math.floor(counter / 2 ** 32), 0);
   buffer.writeUInt32BE(counter % 2 ** 32, 4);
@@ -68,7 +76,8 @@ function hotp(key: Buffer, counter: number): string {
     ((digest[offset + 1]! & 0xff) << 16) |
     ((digest[offset + 2]! & 0xff) << 8) |
     (digest[offset + 3]! & 0xff);
-  return String(code % 1_000_000).padStart(6, '0');
+  const modulo = 10 ** digits;
+  return String(code % modulo).padStart(digits, '0');
 }
 
 /**
@@ -85,7 +94,11 @@ export function verifyTotpCode(
   const stepSeconds = options.stepSeconds ?? 30;
   const currentStep = Math.floor(atMs / 1000 / stepSeconds);
   const candidate = code.replace(/\s/g, '');
+  // Se exige exactamente 6 dígitos antes de comparar: `timingSafeEqual` requiere
+  // buffers del mismo largo y el contrato del panel nunca acepta otro formato.
   if (!/^\d{6}$/.test(candidate)) return { valid: false, step: null };
+
+  const expectedBuffers: Array<{ step: number; buffer: Buffer }> = [];
 
   for (let delta = -window; delta <= window; delta++) {
     const step = currentStep + delta;
@@ -96,12 +109,18 @@ export function verifyTotpCode(
     ) {
       continue;
     }
-    const expected = hotp(base32Decode(secret), step);
-    if (timingSafeEqual(Buffer.from(expected), Buffer.from(candidate))) {
-      return { valid: true, step };
+    expectedBuffers.push({ step, buffer: Buffer.from(hotp(base32Decode(secret), step)) });
+  }
+
+  // Comparación en tiempo constante (`timingSafeEqual`) contra cada paso candidato.
+  const candidateBuffer = Buffer.from(candidate, 'utf8');
+  let matchedStep: number | null = null;
+  for (const { step, buffer } of expectedBuffers) {
+    if (timingSafeEqual(buffer, candidateBuffer) && matchedStep === null) {
+      matchedStep = step;
     }
   }
-  return { valid: false, step: null };
+  return matchedStep === null ? { valid: false, step: null } : { valid: true, step: matchedStep };
 }
 
 const ENCRYPTION_CONTEXT = 'truco-admin-totp-v1';

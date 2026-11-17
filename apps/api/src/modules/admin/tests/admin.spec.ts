@@ -19,7 +19,12 @@ import {
 } from '../../../db/schema/index.js';
 import { PasswordHasher } from '../../auth/security/password-hasher.js';
 import { buildCookieHeader, extractAuthCookies } from '../../auth/tests/test-cookie-jar.js';
-import { encryptTotpSecret, generateTotpCode, generateTotpSecret } from '../security/totp.js';
+import {
+  decryptTotpSecret,
+  encryptTotpSecret,
+  generateTotpCode,
+  generateTotpSecret,
+} from '../security/totp.js';
 
 const SESSION_SECRET = 'm7-admin-panel-secret-minimo-32-chars!!!!';
 const TOTP_KEY = 'm7-admin-totp-encryption-key-32-chars!!';
@@ -111,6 +116,65 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
     expect(res.statusCode, JSON.stringify(res.json())).toBe(200);
     return buildCookieHeader(extractAuthCookies(res.headers['set-cookie']).map);
   }
+
+  it('guarda el secreto TOTP cifrado en la base (nunca en claro)', async () => {
+    const userId = await createUser({
+      email: 'cifrado@truco.ar',
+      nickname: 'SecretoCifrado',
+      role: 'SUPPORT',
+      withTotp: true,
+    });
+    const secret = secrets.get(userId)!;
+    const [row] = await dbHandle.db
+      .select()
+      .from(adminTwoFactorTable)
+      .where(eq(adminTwoFactorTable.userId, userId));
+
+    expect(row).toBeDefined();
+    expect(row!.secretEncrypted).not.toContain(secret);
+    expect(row!.secretEncrypted).toMatch(/^[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+$/);
+    expect(decryptTotpSecret(row!.secretEncrypted, TOTP_KEY)).toBe(secret);
+    // El secreto cifrado con otra clave no se puede leer.
+    expect(() =>
+      decryptTotpSecret(row!.secretEncrypted, 'otra-clave-de-32-caracteres!!!!!!!!'),
+    ).toThrow();
+  });
+
+  it('rechaza la reutilización del mismo código TOTP', async () => {
+    const email = 'reuso@truco.ar';
+    const userId = await createUser({
+      email,
+      nickname: 'ReusoCodigo',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const code = generateTotpCode(secrets.get(userId)!, clockMs);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: { email, password: ADMIN_PASSWORD, totpCode: code },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: { email, password: ADMIN_PASSWORD, totpCode: code },
+    });
+    expect(second.statusCode).toBe(401);
+    const body = second.json() as { message?: string; error?: { message?: string } };
+    expect(body.error?.message ?? body.message ?? '').toMatch(/código|2FA|inválid/i);
+
+    // Un código del paso siguiente sí se acepta (ventana en avance, no en retroceso).
+    const nextStepCode = generateTotpCode(secrets.get(userId)!, clockMs + 30_000);
+    const third = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: { email, password: ADMIN_PASSWORD, totpCode: nextStepCode },
+    });
+    expect(third.statusCode).toBe(200);
+  });
 
   it('exige 2FA configurado y código válido, y rechaza a jugadores', async () => {
     await createUser({ email: 'no2fa@truco.ar', nickname: 'SinDos' + 'Fa', role: 'MODERATOR' });

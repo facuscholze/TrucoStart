@@ -114,11 +114,16 @@ describe('M6 — bots como asientos del game-server y modo práctica', () => {
     expect(card).toBeTruthy();
     if (card) sendEngineAction(human, ROOM_ID, card);
 
-    await human.waitFor(
-      (env) => env.type === 'game.cardPlayed' && (env.payload['seat'] as number) === 1,
+    // El bot responde solo: puede jugar una carta o cantar (Truco/Envido) según su mano.
+    const botAction = await human.waitFor(
+      (env) =>
+        (env.type === 'game.cardPlayed' || env.type === 'game.callMade') &&
+        ((env.payload['seat'] as number | undefined) === 1 ||
+          ((env.payload['call'] as { seat?: number } | undefined)?.seat ?? -1) === 1),
       'primera acción del bot',
       8_000,
     );
+    expect(['game.cardPlayed', 'game.callMade']).toContain(botAction.type);
   }, 20_000);
 
   it('juega una partida 1v1 completa: el bot reemplaza al humano que se cae', async () => {

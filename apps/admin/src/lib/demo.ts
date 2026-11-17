@@ -1,0 +1,357 @@
+import {
+  ADMIN_ROLE_PERMISSIONS,
+  type AdminAuditEntry,
+  type AdminDashboardMetrics,
+  type AdminMatchReplay,
+  type AdminReportDetail,
+  type AdminReportListItem,
+  type AdminReportListResponse,
+  type AdminSessionSummary,
+  type AdminUserDetail,
+  type AdminUserListItem,
+} from '@truco/shared';
+import type { AdminClient } from './api.js';
+
+/**
+ * Cliente de demostración con datos de ejemplo, usado sólo para capturas del
+ * panel (`VITE_ADMIN_DEMO=1`). Nunca se activa en producción y no toca la API.
+ */
+const NOW = Date.now();
+const iso = (offsetMinutes: number): string => new Date(NOW + offsetMinutes * 60_000).toISOString();
+
+const SESSION: AdminSessionSummary = {
+  userId: '019a7e40-0000-7000-8000-00000000ad01',
+  nickname: 'MartaModera',
+  role: 'ADMIN',
+  permissions: [...ADMIN_ROLE_PERMISSIONS.ADMIN],
+  emailMasked: 'm***a@truco.ar',
+  expiresAt: iso(28),
+  twoFactorEnabled: true,
+};
+
+const USERS: readonly AdminUserListItem[] = [
+  {
+    id: '019a7e40-0000-7000-8000-0000000000a1',
+    nickname: 'TanoBaston',
+    emailMasked: 't***o@truco.ar',
+    role: 'PLAYER',
+    status: 'ACTIVE',
+    statusReason: null,
+    statusExpiresAt: null,
+    mutedUntil: iso(120),
+    isGuest: false,
+    createdAt: iso(-43_200),
+    lastSeenAt: iso(-12),
+    openReportsAgainst: 2,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000a2',
+    nickname: 'LaViejaEscuela',
+    emailMasked: 'l***a@truco.ar',
+    role: 'PLAYER',
+    status: 'SUSPENDED',
+    statusReason: 'Abandono reiterado de partidas rankeadas',
+    statusExpiresAt: iso(2_880),
+    mutedUntil: null,
+    isGuest: false,
+    createdAt: iso(-86_400),
+    lastSeenAt: iso(-180),
+    openReportsAgainst: 3,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000a3',
+    nickname: 'CantorDeMentiras',
+    emailMasked: 'c***s@truco.ar',
+    role: 'PLAYER',
+    status: 'ACTIVE',
+    statusReason: null,
+    statusExpiresAt: null,
+    mutedUntil: null,
+    isGuest: false,
+    createdAt: iso(-120_000),
+    lastSeenAt: iso(-45),
+    openReportsAgainst: 1,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000a4',
+    nickname: 'FlorDeOro',
+    emailMasked: 'f***o@truco.ar',
+    role: 'MODERATOR',
+    status: 'ACTIVE',
+    statusReason: null,
+    statusExpiresAt: null,
+    mutedUntil: null,
+    isGuest: false,
+    createdAt: iso(-200_000),
+    lastSeenAt: iso(-5),
+    openReportsAgainst: 0,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000a5',
+    nickname: 'PibeVirtual',
+    emailMasked: null,
+    role: 'PLAYER',
+    status: 'ACTIVE',
+    statusReason: null,
+    statusExpiresAt: null,
+    mutedUntil: null,
+    isGuest: true,
+    createdAt: iso(-600),
+    lastSeenAt: iso(-2),
+    openReportsAgainst: 0,
+  },
+];
+
+const MATCH_ID = '019a7e40-0000-7000-8000-0000000000d1';
+
+const REPORTS: readonly AdminReportListItem[] = [
+  {
+    id: '019a7e40-0000-7000-8000-0000000000b1',
+    status: 'OPEN',
+    reasonCode: 'COLLUSION',
+    createdAt: iso(-35),
+    reporterId: USERS[2]!.id,
+    reporterNickname: 'CantorDeMentiras',
+    targetId: USERS[0]!.id,
+    targetNickname: 'TanoBaston',
+    matchId: MATCH_ID,
+    claimedBy: null,
+    claimedByNickname: null,
+    version: 0,
+    duplicateCount: 1,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000b2',
+    status: 'IN_REVIEW',
+    reasonCode: 'ABANDONMENT',
+    createdAt: iso(-90),
+    reporterId: USERS[3]!.id,
+    reporterNickname: 'FlorDeOro',
+    targetId: USERS[1]!.id,
+    targetNickname: 'LaViejaEscuela',
+    matchId: MATCH_ID,
+    claimedBy: SESSION.userId,
+    claimedByNickname: SESSION.nickname,
+    version: 1,
+    duplicateCount: 2,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000b3',
+    status: 'OPEN',
+    reasonCode: 'OFFENSIVE_NICKNAME',
+    createdAt: iso(-320),
+    reporterId: USERS[0]!.id,
+    reporterNickname: 'TanoBaston',
+    targetId: USERS[2]!.id,
+    targetNickname: 'CantorDeMentiras',
+    matchId: null,
+    claimedBy: null,
+    claimedByNickname: null,
+    version: 0,
+    duplicateCount: 0,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000b4',
+    status: 'RESOLVED_ACTIONED',
+    reasonCode: 'ABUSIVE_BEHAVIOR',
+    createdAt: iso(-1_500),
+    reporterId: USERS[2]!.id,
+    reporterNickname: 'CantorDeMentiras',
+    targetId: USERS[1]!.id,
+    targetNickname: 'LaViejaEscuela',
+    matchId: MATCH_ID,
+    claimedBy: SESSION.userId,
+    claimedByNickname: SESSION.nickname,
+    version: 2,
+    duplicateCount: 0,
+  },
+];
+
+const METRICS: AdminDashboardMetrics = {
+  activeUsers24h: 184,
+  usersTotal: 2_731,
+  matchesInProgress: 23,
+  matchesFinished24h: 412,
+  openReports: 2,
+  reportsResolved24h: 9,
+  sanctionsActive: 6,
+  generatedAt: iso(0),
+};
+
+const REPORT_LIST: AdminReportListResponse = {
+  items: [...REPORTS],
+  nextCursor: null,
+  totals: { OPEN: 2, IN_REVIEW: 1, RESOLVED_ACTIONED: 1, RESOLVED_DISMISSED: 4 },
+};
+
+const REPORT_DETAIL: AdminReportDetail = {
+  report: {
+    ...REPORTS[0]!,
+    details:
+      'Se mandaron señas con la mano durante tres manos seguidas; el compañero cantó siempre lo mismo.',
+    resolutionNote: null,
+    resolvedByNickname: null,
+    resolvedAt: null,
+    eventLogRef: {
+      matchId: MATCH_ID,
+      eventCount: 96,
+      lastSeq: 96,
+      digest: 'a'.repeat(64),
+    },
+  },
+  target: {
+    id: USERS[0]!.id,
+    nickname: USERS[0]!.nickname,
+    status: USERS[0]!.status,
+    statusReason: null,
+    statusExpiresAt: null,
+    mutedUntil: USERS[0]!.mutedUntil,
+    sanctionsCount: 1,
+    openReportsAgainst: 2,
+  },
+  replayAvailable: true,
+};
+
+const USER_DETAIL: AdminUserDetail = {
+  ...USERS[1]!,
+  email: 'laviejaescuela@truco.ar',
+  bio: 'Jugador de los martes.',
+  sanctions: [
+    {
+      id: '019a7e40-0000-7000-8000-0000000000e1',
+      userId: USERS[1]!.id,
+      type: 'SUSPEND',
+      reason: 'Abandono reiterado de partidas rankeadas',
+      reportId: REPORTS[3]!.id,
+      issuedBy: SESSION.userId,
+      issuedByNickname: SESSION.nickname,
+      expiresAt: iso(2_880),
+      createdAt: iso(-240),
+      revokedAt: null,
+    },
+    {
+      id: '019a7e40-0000-7000-8000-0000000000e2',
+      userId: USERS[1]!.id,
+      type: 'WARNING',
+      reason: 'Lenguaje agresivo en el chat rápido',
+      reportId: null,
+      issuedBy: USERS[3]!.id,
+      issuedByNickname: USERS[3]!.nickname,
+      expiresAt: null,
+      createdAt: iso(-5_000),
+      revokedAt: null,
+    },
+  ],
+  recentMatches: [
+    { matchId: MATCH_ID, mode: '2v2', outcome: 'ABANDONED', endedAt: iso(-100) },
+    {
+      matchId: '019a7e40-0000-7000-8000-0000000000d2',
+      mode: '1v1',
+      outcome: 'LOSS',
+      endedAt: iso(-900),
+    },
+  ],
+};
+
+const REPLAY: AdminMatchReplay = {
+  matchId: MATCH_ID,
+  mode: '2v2',
+  rulesetCode: 'ar-standard-v1',
+  startedAt: iso(-70),
+  endedAt: iso(-40),
+  result: { winnerTeam: 0, scores: { '0': 15, '1': 11 } },
+  players: [
+    { userId: USERS[0]!.id, nickname: USERS[0]!.nickname, seat: 0, team: 0, outcome: 'WIN' },
+    { userId: USERS[2]!.id, nickname: USERS[2]!.nickname, seat: 1, team: 1, outcome: 'LOSS' },
+    { userId: USERS[1]!.id, nickname: USERS[1]!.nickname, seat: 2, team: 0, outcome: 'WIN' },
+    { userId: USERS[4]!.id, nickname: USERS[4]!.nickname, seat: 3, team: 1, outcome: 'LOSS' },
+  ],
+  events: [
+    { seq: 1, type: 'MATCH_STARTED', payload: {}, at: iso(-70) },
+    { seq: 2, type: 'HAND_STARTED', payload: { hand: 1 }, at: iso(-69) },
+    { seq: 12, type: 'CARD_PLAYED', payload: { seat: 0, cardId: '7-espadas' }, at: iso(-66) },
+    { seq: 13, type: 'CARD_PLAYED', payload: { seat: 1, cardId: '3-oros' }, at: iso(-66) },
+    { seq: 34, type: 'TRUCO_CALLED', payload: { seat: 2 }, at: iso(-58) },
+    { seq: 35, type: 'TRUCO_ACCEPTED', payload: { seat: 3 }, at: iso(-58) },
+    { seq: 58, type: 'HAND_FINISHED', payload: { winnerTeam: 0 }, at: iso(-50) },
+    { seq: 96, type: 'MATCH_FINISHED', payload: { winnerTeam: 0 }, at: iso(-40) },
+  ],
+  reconstructed: {
+    handsPlayed: 9,
+    finalScores: { '0': 15, '1': 11 },
+    lastEventType: 'MATCH_FINISHED',
+    valid: true,
+    note: null,
+  },
+};
+
+const AUDIT: readonly AdminAuditEntry[] = [
+  {
+    id: '019a7e40-0000-7000-8000-0000000000f1',
+    actorId: SESSION.userId,
+    actorNickname: SESSION.nickname,
+    action: 'ADMIN_REPLAY_ACCESSED',
+    entity: 'match',
+    entityId: MATCH_ID,
+    reason: 'Verificar denuncia de colusión',
+    ip: '190.15.20.33',
+    createdAt: iso(-20),
+    beforeState: null,
+    afterState: null,
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000f2',
+    actorId: SESSION.userId,
+    actorNickname: SESSION.nickname,
+    action: 'SANCTION_ISSUED',
+    entity: 'user',
+    entityId: USERS[1]!.id,
+    reason: 'Abandono reiterado de partidas rankeadas',
+    ip: '190.15.20.33',
+    createdAt: iso(-240),
+    beforeState: { status: 'ACTIVE' },
+    afterState: { status: 'SUSPENDED' },
+  },
+  {
+    id: '019a7e40-0000-7000-8000-0000000000f3',
+    actorId: USERS[3]!.id,
+    actorNickname: USERS[3]!.nickname,
+    action: 'REPORT_CLAIMED',
+    entity: 'report',
+    entityId: REPORTS[1]!.id,
+    reason: null,
+    ip: '190.15.20.40',
+    createdAt: iso(-88),
+    beforeState: { status: 'OPEN' },
+    afterState: { status: 'IN_REVIEW' },
+  },
+];
+
+export function createDemoClient(): AdminClient {
+  return {
+    login: async () => SESSION,
+    me: async () => SESSION,
+    logout: async () => undefined,
+    permissions: async () => ({
+      permissions: SESSION.permissions,
+      role: SESSION.role,
+      emailMasked: SESSION.emailMasked,
+    }),
+    dashboard: async () => METRICS,
+    listUsers: async () => ({ items: [...USERS], nextCursor: null }),
+    userDetail: async () => USER_DETAIL,
+    sanctionUser: async () => ({
+      sanction: USER_DETAIL.sanctions[0]!,
+      appliedStatus: 'SUSPENDED',
+      mutedUntil: null,
+      sessionsRevoked: 2,
+    }),
+    forceNicknameChange: async () => ({ ok: true }),
+    listReports: async () => REPORT_LIST,
+    reportDetail: async () => REPORT_DETAIL,
+    claimReport: async () => ({ version: 1 }),
+    resolveReport: async () => ({ status: 'RESOLVED_ACTIONED', version: 2 }),
+    replay: async () => REPLAY,
+    listAudit: async () => ({ items: [...AUDIT], nextCursor: null }),
+  };
+}

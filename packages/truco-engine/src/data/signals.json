@@ -1,0 +1,52 @@
+[
+  {
+    "id": "guino_ojo",
+    "label": "Guiñar un ojo",
+    "meaning": "Ancho de espadas (1 de espadas)"
+  },
+  {
+    "id": "cejas_arriba",
+    "label": "Levantar las cejas",
+    "meaning": "Ancho de bastos (1 de bastos)"
+  },
+  {
+    "id": "muesca_derecha",
+    "label": "Comisura a la derecha",
+    "meaning": "Siete de espadas"
+  },
+  {
+    "id": "muesca_izquierda",
+    "label": "Comisura a la izquierda",
+    "meaning": "Siete de oros"
+  },
+  {
+    "id": "morder_labio",
+    "label": "Morder el labio inferior",
+    "meaning": "Cualquier tres (3)"
+  },
+  {
+    "id": "fruncir_labios",
+    "label": "Puchero / fruncir labios",
+    "meaning": "Cualquier dos (2)"
+  },
+  {
+    "id": "boca_entreabierta",
+    "label": "Entreabrir la boca",
+    "meaning": "Anchos falsos (1 de oros o 1 de copas)"
+  },
+  {
+    "id": "inclinacion_cabeza",
+    "label": "Inclinar levemente la cabeza",
+    "meaning": "Tengo tanto alto para el envido"
+  },
+  {
+    "id": "inflar_mejilla",
+    "label": "Inflar una mejilla",
+    "meaning": "Tengo flor"
+  },
+  {
+    "id": "cerrar_ambos_ojos",
+    "label": "Cerrar ambos ojos",
+    "meaning": "Voy ciego (cartas bajas)"
+  }
+]

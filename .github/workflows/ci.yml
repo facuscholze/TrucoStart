@@ -1,0 +1,223 @@
+name: CI
+
+on:
+  push:
+    branches: ['main', 'feat/**', 'fix/**', 'arena/**']
+  pull_request:
+    branches: ['main']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-tests:
+    name: Lint, Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: truco_test
+          POSTGRES_PASSWORD: truco_test_password
+          POSTGRES_DB: truco_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U truco_test -d truco_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      NODE_ENV: test
+      APP_NAME: 'Mesa de Truco'
+      DATABASE_URL: postgresql://truco_test:truco_test_password@localhost:5432/truco_test
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci_test_session_secret_at_least_32_characters_long
+      SEED_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      REFRESH_TOKEN_TTL: '2592000'
+      COOKIE_DOMAIN: localhost
+      CORS_ORIGINS: http://localhost:5173,http://localhost:5174
+      EMAIL_PROVIDER: console
+      CAPTCHA_PROVIDER: disabled
+      TURN_TIMEOUT_MS: '30000'
+      RECONNECT_GRACE_MS: '45000'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies (high/critical)
+        run: pnpm audit --prod --audit-level=high
+
+      - name: Scan tracked files for secrets
+        run: node scripts/scan-secrets.mjs
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Run ESLint
+        run: pnpm lint
+
+      - name: Run TypeScript strict typecheck
+        run: pnpm typecheck
+
+      - name: Run automated tests
+        run: pnpm test
+
+      - name: Build all packages and applications
+        run: pnpm build
+
+      # Se corre después del build: necesita `apps/web/dist` y `apps/admin/dist`.
+      - name: Ensure no secret leaks into production bundles
+        run: node scripts/check-bundles-no-secrets.mjs
+
+      - name: Validate docker-compose configuration
+        run: docker compose config -q
+
+      - name: Validate staging compose configuration
+        run: |
+          # `env_file: ../.env` es obligatorio para Compose: se genera desde el ejemplo.
+          cp .env.example .env
+          docker compose -f infra/docker-compose.staging.yml config -q
+
+  backup-restore:
+    name: Respaldo y restauración de PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: truco_backup
+          POSTGRES_PASSWORD: truco_backup_password
+          POSTGRES_DB: truco_backup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U truco_backup -d truco_backup"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://truco_backup:truco_backup_password@localhost:5432/truco_backup
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci_test_session_secret_at_least_32_characters_long
+      SEED_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      CORS_ORIGINS: http://localhost:5173
+      BACKUP_DIR: ./backups
+      BACKUP_RETENTION_DAYS: '0'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: pnpm --filter @truco/shared --filter @truco/engine build
+
+      - name: Apply migrations
+        run: pnpm --filter @truco/api db:migrate
+
+      - name: Seed development data
+        run: pnpm --filter @truco/api db:seed:dev
+
+      # El runner trae psql/pg_dump 18 y el servicio es PostgreSQL 16: pg_dump 18 escribe
+      # `SET transaction_timeout` (parámetro de PG17+) y la restauración contra 16 falla.
+      # Se ejecutan los scripts con el cliente de la misma imagen que el servidor.
+      - name: Run backup (cliente PostgreSQL 16)
+        run: |
+          docker run --rm --network host -v "$PWD:/repo" -w /repo \
+            -e DATABASE_URL -e BACKUP_DIR -e BACKUP_RETENTION_DAYS \
+            postgres:16-alpine bash -c './infra/backups/backup-postgres.sh'
+
+      - name: Create empty restore database
+        run: psql "postgresql://truco_backup:truco_backup_password@localhost:5432/postgres" -c "CREATE DATABASE truco_restore"
+
+      - name: Restore into the empty database (cliente PostgreSQL 16)
+        env:
+          TARGET_DATABASE_URL: postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore
+          # La base destino está recién creada: restauración atómica sin --clean.
+          RESTORE_ATOMIC: '1'
+        run: |
+          dump="$(ls -1t backups/truco-*.dump | head -1)"
+          echo "Restaurando ${dump}" | tee restore-diag.txt
+          set +e
+          docker run --rm --network host -v "$PWD:/repo" -w /repo \
+            -e TARGET_DATABASE_URL -e RESTORE_ATOMIC \
+            postgres:16-alpine bash -c "./infra/backups/restore-postgres.sh '${dump}'" \
+            >> restore-diag.txt 2>&1
+          status=$?
+          set -e
+          tail -40 restore-diag.txt
+          if [ "${status}" -ne 0 ]; then
+            {
+              echo "--- pg_restore --list (head) ---"
+              docker run --rm -v "$PWD:/repo" -w /repo postgres:16-alpine pg_restore --list "${dump}" | head -20
+              echo "--- tablas en destino ---"
+              psql "${TARGET_DATABASE_URL}" -c '\dt'
+            } >> restore-diag.txt 2>&1
+            exit 1
+          fi
+
+      - name: Compare row counts after restore
+        run: |
+          for table in users matches match_events audit_logs; do
+            original=$(psql "$DATABASE_URL" -tAc "select count(*) from ${table}")
+            restored=$(psql "postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore" -tAc "select count(*) from ${table}")
+            echo "${table}: original=${original} restaurado=${restored}"
+            test "${original}" = "${restored}" || { echo "Diferencia en ${table}"; exit 1; }
+          done
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-backup-drill
+          path: backups/truco-*.dump*
+          retention-days: 3

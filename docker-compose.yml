@@ -1,0 +1,44 @@
+name: mesa-de-truco
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: truco-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-truco_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_pg_password}
+      POSTGRES_DB: ${POSTGRES_DB:-truco_dev}
+      TZ: UTC
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - truco_postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-truco_dev} -d $${POSTGRES_DB:-truco_dev}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: truco-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - truco_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+volumes:
+  truco_postgres_data:
+  truco_redis_data:

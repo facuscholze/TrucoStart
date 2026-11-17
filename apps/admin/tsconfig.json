@@ -1,0 +1,15 @@
+{
+  "extends": "@truco/config/tsconfig/react",
+  "compilerOptions": {
+    "types": ["vite/client"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "tailwind.config.ts"
+  ]
+}

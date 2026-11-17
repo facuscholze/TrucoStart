@@ -1,0 +1,2453 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mesa de Truco — HTTP API v1",
+    "version": "0.4.0",
+    "description": "API HTTP v1 para autenticación segura, cuentas/perfiles (/v1/me), lobby de mesas públicas/privadas con invitaciones firmadas, matchmaking (1v1/2v2) y persistencia transaccional de partidas."
+  },
+  "servers": [
+    {
+      "url": "/v1",
+      "description": "API v1"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "accessCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "truco_access",
+        "description": "Cookie HttpOnly; Secure; SameSite=Lax de acceso corto (15 min)."
+      },
+      "refreshCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "truco_refresh",
+        "description": "Cookie HttpOnly; Secure; SameSite=Lax rotativa en /v1/auth (30 días)."
+      }
+    },
+    "schemas": {
+      "ApiErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "UNAUTHORIZED",
+                  "FORBIDDEN",
+                  "NOT_FOUND",
+                  "CONFLICT",
+                  "RATE_LIMITED",
+                  "ACCOUNT_LOCKED",
+                  "CAPTCHA_FAILED",
+                  "RULE_VIOLATION",
+                  "ROOM_FULL",
+                  "INVALID_STATE",
+                  "INTERNAL_ERROR"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "service", "appName", "timestamp"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok"]
+          },
+          "service": {
+            "type": "string",
+            "enum": ["api"]
+          },
+          "appName": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuthUserSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "emailVerified",
+          "nickname",
+          "isGuest",
+          "role",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": ["string", "null"],
+            "format": "email"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "nickname": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 20
+          },
+          "isGuest": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["PLAYER", "SUPPORT", "MODERATOR", "ADMIN"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "SUSPENDED", "BANNED", "DELETED"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuthSessionResponse": {
+        "type": "object",
+        "required": ["user", "sessionId", "expiresAt"],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/AuthUserSummary"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "GuestCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deviceName": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email", "password", "nickname"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "nickname": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 20
+          },
+          "captchaToken": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "PromoteGuestRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email", "password"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "nickname": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 20
+          },
+          "captchaToken": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email", "password"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "captchaToken": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "GoogleAuthRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["idToken"],
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "minLength": 10
+          },
+          "deviceName": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "LogoutRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allDevices": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "EmailOnlyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token", "newPassword"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 20
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "VerifyEmailRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 20
+          }
+        }
+      },
+      "NonEnumeratingAckResponse": {
+        "type": "object",
+        "required": ["accepted", "message"],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "const": true
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "SessionListResponse": {
+        "type": "object",
+        "required": ["sessions"],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "deviceName",
+                "ipAddress",
+                "userAgent",
+                "createdAt",
+                "lastUsedAt",
+                "expiresAt",
+                "isCurrent"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "deviceName": {
+                  "type": "string"
+                },
+                "ipAddress": {
+                  "type": ["string", "null"]
+                },
+                "userAgent": {
+                  "type": ["string", "null"]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "isCurrent": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "WsTicketResponse": {
+        "type": "object",
+        "required": ["ticket", "expiresAt"],
+        "properties": {
+          "ticket": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "description": "Timestamp epoch en milisegundos"
+          }
+        }
+      },
+      "ProfileDetails": {
+        "type": "object",
+        "required": ["avatarId", "level", "xp", "bio", "settings"],
+        "properties": {
+          "avatarId": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "xp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bio": {
+            "type": "string",
+            "maxLength": 280
+          },
+          "settings": {
+            "type": "object",
+            "required": ["soundEnabled", "animationsReduced", "confirmCalls"],
+            "properties": {
+              "soundEnabled": {
+                "type": "boolean"
+              },
+              "animationsReduced": {
+                "type": "boolean"
+              },
+              "confirmCalls": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "MeResponse": {
+        "type": "object",
+        "required": ["user", "profile"],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/AuthUserSummary"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileDetails"
+          }
+        }
+      },
+      "PatchMeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nickname": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 20
+          },
+          "avatarId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "bio": {
+            "type": "string",
+            "maxLength": 280
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "soundEnabled": {
+                "type": "boolean"
+              },
+              "animationsReduced": {
+                "type": "boolean"
+              },
+              "confirmCalls": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "PublicUserProfile": {
+        "type": "object",
+        "required": ["id", "nickname", "isGuest", "avatarId", "level", "xp", "bio", "createdAt"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nickname": {
+            "type": "string"
+          },
+          "isGuest": {
+            "type": "boolean"
+          },
+          "avatarId": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer"
+          },
+          "xp": {
+            "type": "integer"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserStatsResponse": {
+        "type": "object",
+        "required": ["userId", "matchesPlayed", "wins", "losses", "abandons", "winRate"],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "matchesPlayed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "wins": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "losses": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "abandons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "winRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "UserMatchesResponse": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "matchId",
+                "mode",
+                "rulesetCode",
+                "seat",
+                "team",
+                "score",
+                "outcome",
+                "startedAt",
+                "endedAt"
+              ],
+              "properties": {
+                "matchId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["1v1", "2v2"]
+                },
+                "rulesetCode": {
+                  "type": "string"
+                },
+                "seat": {
+                  "type": "integer"
+                },
+                "team": {
+                  "type": "integer"
+                },
+                "score": {
+                  "type": "integer"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": ["WIN", "LOSS", "ABANDON"]
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "endedAt": {
+                  "type": ["string", "null"],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AccountExportResponse": {
+        "type": "object",
+        "required": [
+          "exportedAt",
+          "user",
+          "profile",
+          "activeSessionsCount",
+          "stats",
+          "recentMatches"
+        ],
+        "properties": {
+          "exportedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUserSummary"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileDetails"
+          },
+          "activeSessionsCount": {
+            "type": "integer"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/UserStatsResponse"
+          },
+          "recentMatches": {
+            "$ref": "#/components/schemas/UserMatchesResponse/properties/items"
+          }
+        }
+      },
+      "DeleteAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteAccountResponse": {
+        "type": "object",
+        "required": ["deleted", "userId"],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "const": true
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PublicLobbySeatSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seat", "team", "occupied", "nickname"],
+        "properties": {
+          "seat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "team": {
+            "type": "integer",
+            "enum": [0, 1]
+          },
+          "occupied": {
+            "type": "boolean"
+          },
+          "nickname": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "PublicLobbyTableSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "mode",
+          "rulesetCode",
+          "targetScore",
+          "flor",
+          "turnTimeoutMs",
+          "status",
+          "ownerNickname",
+          "occupiedSeats",
+          "maxSeats",
+          "seats",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "rulesetCode": {
+            "type": "string",
+            "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"]
+          },
+          "targetScore": {
+            "type": "integer",
+            "enum": [15, 30]
+          },
+          "flor": {
+            "type": "boolean"
+          },
+          "turnTimeoutMs": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 120000
+          },
+          "status": {
+            "type": "string",
+            "enum": ["WAITING", "IN_GAME"]
+          },
+          "ownerNickname": {
+            "type": "string"
+          },
+          "occupiedSeats": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "maxSeats": {
+            "type": "integer",
+            "enum": [2, 4]
+          },
+          "seats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicLobbySeatSummary"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PublicTableListResponse": {
+        "type": "object",
+        "required": ["tables"],
+        "properties": {
+          "tables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicLobbyTableSummary"
+            }
+          }
+        }
+      },
+      "CreateTableRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode"],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["PUBLIC", "PRIVATE"],
+            "default": "PUBLIC"
+          },
+          "rulesetCode": {
+            "type": "string",
+            "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"]
+          },
+          "targetScore": {
+            "type": "integer",
+            "enum": [15, 30]
+          },
+          "flor": {
+            "type": "boolean"
+          },
+          "turnTimeoutMs": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 120000,
+            "default": 25000
+          }
+        }
+      },
+      "TableParticipantSeat": {
+        "type": "object",
+        "required": ["seat", "team", "occupied", "nickname", "isOwner", "isSelf"],
+        "properties": {
+          "seat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "team": {
+            "type": "integer",
+            "enum": [0, 1]
+          },
+          "occupied": {
+            "type": "boolean"
+          },
+          "nickname": {
+            "type": ["string", "null"]
+          },
+          "isOwner": {
+            "type": "boolean"
+          },
+          "isSelf": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TableDetailResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "roomId",
+          "mode",
+          "visibility",
+          "rulesetCode",
+          "targetScore",
+          "flor",
+          "turnTimeoutMs",
+          "status",
+          "ownerNickname",
+          "isOwner",
+          "mySeat",
+          "occupiedSeats",
+          "maxSeats",
+          "seats",
+          "joinCode",
+          "inviteToken",
+          "inviteExpiresAt",
+          "expiresAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "roomId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["PUBLIC", "PRIVATE"]
+          },
+          "rulesetCode": {
+            "type": "string",
+            "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"]
+          },
+          "targetScore": {
+            "type": "integer",
+            "enum": [15, 30]
+          },
+          "flor": {
+            "type": "boolean"
+          },
+          "turnTimeoutMs": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["WAITING", "IN_GAME", "FINISHED", "CLOSED", "EXPIRED"]
+          },
+          "ownerNickname": {
+            "type": "string"
+          },
+          "isOwner": {
+            "type": "boolean"
+          },
+          "mySeat": {
+            "type": ["integer", "null"]
+          },
+          "occupiedSeats": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "maxSeats": {
+            "type": "integer",
+            "enum": [2, 4]
+          },
+          "seats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TableParticipantSeat"
+            }
+          },
+          "joinCode": {
+            "type": ["string", "null"]
+          },
+          "inviteToken": {
+            "type": ["string", "null"]
+          },
+          "inviteExpiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "JoinByCodeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 6
+          },
+          "inviteToken": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 1024
+          },
+          "preferredSeat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          }
+        }
+      },
+      "JoinPublicTableRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "preferredSeat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          }
+        }
+      },
+      "TableInviteResponse": {
+        "type": "object",
+        "required": ["tableId", "joinCode", "inviteToken", "invitePath", "expiresAt"],
+        "properties": {
+          "tableId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "joinCode": {
+            "type": "string"
+          },
+          "inviteToken": {
+            "type": "string"
+          },
+          "invitePath": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LeaveTableResponse": {
+        "type": "object",
+        "required": ["left", "tableId", "tableStatus", "newOwnerNickname"],
+        "properties": {
+          "left": {
+            "type": "boolean",
+            "const": true
+          },
+          "tableId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tableStatus": {
+            "type": "string",
+            "enum": ["WAITING", "IN_GAME", "FINISHED", "CLOSED", "EXPIRED"]
+          },
+          "newOwnerNickname": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "DeleteTableResponse": {
+        "type": "object",
+        "required": ["deleted", "tableId"],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "const": true
+          },
+          "tableId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MatchmakingEnqueueRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode"],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "rulesetCode": {
+            "type": "string",
+            "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"],
+            "default": "ar-standard-v1"
+          }
+        }
+      },
+      "MatchmakingQueueStatusResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["IDLE", "QUEUED", "MATCHED"]
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "rulesetCode": {
+            "type": "string"
+          },
+          "enqueuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tableId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "roomId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mySeat": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "myTeam": {
+            "type": "integer",
+            "enum": [0, 1]
+          }
+        }
+      },
+      "MatchmakingCancelResponse": {
+        "type": "object",
+        "required": ["cancelled"],
+        "properties": {
+          "cancelled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Liveness probe",
+        "responses": {
+          "200": {
+            "description": "Servicio vivo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Readiness probe (verifica conectividad activa con PostgreSQL/PGlite)",
+        "responses": {
+          "200": {
+            "description": "Servicio listo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependencia no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/guest": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Crear cuenta invitada efímera con apodo criollo autogenerado",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sesión invitada creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/promote-guest": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Vincular cuenta invitada preservando user.id, progreso e historial",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteGuestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cuenta promovida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos inválidos o apodo bloqueado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email/apodo ocupado o cuenta no invitada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Registrar nueva cuenta con contraseña Argon2id y verificación de correo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Cuenta creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos inválidos, apodo bloqueado o captcha fallido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email o apodo ya en uso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Iniciar sesión con lockout progresivo por (cuenta + IP) y Captcha tras umbral por cuenta",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sesión iniciada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Captcha requerido o inválido tras fallos acumulados en la cuenta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciales inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Combinación (cuenta + IP) bloqueada temporalmente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit por IP o por (cuenta + IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Iniciar sesión o vincular cuenta mediante Google ID Token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleAuthRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sesión iniciada con Google",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ID Token inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Rotar refresh token; ante reutilización revoca toda la familia de sesiones",
+        "security": [
+          {
+            "refreshCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cookies rotadas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refresh ausente, expirado o reutilización detectada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Cerrar sesión actual o global y limpiar cookies",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sesión cerrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonEnumeratingAckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/sessions": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Listar sesiones/dispositivos activos propios",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesiones activas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/sessions/{sessionId}": {
+      "delete": {
+        "tags": ["Auth"],
+        "summary": "Revocar una sesión específica propia",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesión revocada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonEnumeratingAckResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "La sesión pertenece a otro usuario",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sesión inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/forgot": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Solicitar recuperación de contraseña (respuesta uniforme anti-enumeración)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailOnlyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Solicitud aceptada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonEnumeratingAckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/reset": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Restablecer contraseña mediante token de un solo uso",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contraseña actualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonEnumeratingAckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Token inválido o vencido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Confirmar dirección de correo electrónico",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verificado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonEnumeratingAckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Token inválido o vencido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/resend-verification": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Reenviar correo de verificación (anti-enumeración)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailOnlyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Solicitud aceptada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonEnumeratingAckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/ws-ticket": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Emitir ticket firmado efímero de un solo uso (jti + TTL 60 s) para Socket.IO contra game-server",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket WS emitido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WsTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión inválida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Obtener cuenta y perfil privados del usuario autenticado",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datos propios",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Users"],
+        "summary": "Actualizar apodo, avatar, bio o preferencias propias",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchMeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Perfil actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Users"],
+        "summary": "Eliminar cuenta propia y anonimizar datos personales (Ley 25.326)",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cuenta eliminada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteAccountResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/export": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Exportar copia portátil de datos personales, estadísticas y partidas recientes",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exportación JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountExportResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Obtener perfil estrictamente público de un jugador (sin PII)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Perfil público",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUserProfile"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Jugador no encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/stats": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Obtener estadísticas agregadas públicas de partidas de un jugador",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estadísticas públicas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/matches": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Listar historial público de partidas paginado por cursor",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de partidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMatchesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tables": {
+      "get": {
+        "tags": ["Lobby"],
+        "summary": "Listar mesas estrictamente públicas filtradas por modo, puntos, flor y estado",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["1v1", "2v2"]
+            }
+          },
+          {
+            "name": "targetScore",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [15, 30]
+            }
+          },
+          {
+            "name": "flor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "rulesetCode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["WAITING", "IN_GAME"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado público de mesas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicTableListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Lobby"],
+        "summary": "Crear mesa pública o privada y aprovisionar sala en game-server",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTableRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Mesa creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya participa en una mesa activa o cola de matchmaking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tables/join-by-code": {
+      "post": {
+        "tags": ["Lobby"],
+        "summary": "Unirse a una mesa mediante código corto de 6 caracteres (rate-limited por IP y cuenta) o inviteToken firmado",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinByCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ingreso confirmado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Token de invitación inválido o expirado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Código inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Mesa llena, iniciada o usuario ya en otra mesa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de intentos excedido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tables/{id}": {
+      "get": {
+        "tags": ["Lobby"],
+        "summary": "Consultar detalle de mesa (mesas privadas restringidas a integrantes)",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle de mesa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Mesa inexistente o privada ajena",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Lobby"],
+        "summary": "Cerrar mesa antes de que inicie la partida (solo dueño)",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mesa cerrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteTableResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No es el dueño de la mesa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La partida ya comenzó",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tables/{id}/join": {
+      "post": {
+        "tags": ["Lobby"],
+        "summary": "Unirse directamente a una mesa pública con reserva atómica de asiento",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinPublicTableRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Asiento reservado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDetailResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Mesa privada requiere código o invitación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Mesa llena o usuario ya activo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tables/{id}/invite": {
+      "post": {
+        "tags": ["Lobby"],
+        "summary": "Emitir enlace firmado de invitación con expiración para integrantes de la mesa",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Invitación firmada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableInviteResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No integra la mesa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tables/{id}/leave": {
+      "post": {
+        "tags": ["Lobby"],
+        "summary": "Abandonar mesa en espera (transfiere propiedad determinísticamente o cierra si vacía)",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Salida procesada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaveTableResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La partida ya comenzó",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matchmaking/queue": {
+      "get": {
+        "tags": ["Matchmaking"],
+        "summary": "Consultar estado actual en cola de matchmaking (IDLE, QUEUED o MATCHED)",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado de cola",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingQueueStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Matchmaking"],
+        "summary": "Encolarse en matchmaking rápido por modo (1v1 o 2v2)",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MatchmakingEnqueueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Encolado esperando cupo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingQueueStatusResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Emparejado y mesa creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingQueueStatusResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Usuario ya tiene mesa activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Matchmaking"],
+        "summary": "Cancelar búsqueda de partida de forma segura e idempotente",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelación procesada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingCancelResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

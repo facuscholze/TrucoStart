@@ -15,7 +15,8 @@
     "start": "node dist/main.js",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "perf:actions": "tsx scripts/perf-action-latency.ts"
   },
   "dependencies": {
     "@truco/engine": "workspace:*",

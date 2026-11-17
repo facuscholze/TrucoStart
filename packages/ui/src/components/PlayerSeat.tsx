@@ -19,6 +19,9 @@ export interface PlayerSeatProps {
   readonly foldedLabel?: string;
   readonly disconnectedLabel?: string;
   readonly selfBadgeLabel?: string;
+  /** `true` si el asiento lo ocupa un bot del servidor: se etiqueta siempre, nunca se simula humano. */
+  readonly isBot?: boolean;
+  readonly botLabel?: string;
   readonly compact?: boolean;
 }
 
@@ -38,6 +41,8 @@ export function PlayerSeat({
   foldedLabel = 'Al mazo',
   disconnectedLabel = 'Reconectando…',
   selfBadgeLabel = 'Vos',
+  isBot = false,
+  botLabel = 'Bot',
   compact = false,
 }: PlayerSeatProps) {
   const activeBorder = isActiveTurn
@@ -102,6 +107,7 @@ export function PlayerSeat({
             >
               {nickname}
             </strong>
+            {isBot && <Badge variant="neutral">{botLabel}</Badge>}
             {isSelf && <Badge variant="sky">{selfBadgeLabel}</Badge>}
             {isMano && <Badge variant="gold">{manoLabel}</Badge>}
           </div>

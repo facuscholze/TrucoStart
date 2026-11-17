@@ -55,6 +55,10 @@ export function useLiveGameRoom({
   const [eventFeed, setEventFeed] = useState<string[]>([]);
   const [matchEnded, setMatchEnded] = useState<MatchEndedSummary | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [practiceHint, setPracticeHint] = useState<{
+    explanation: string;
+    suggestedAction: string;
+  } | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const lastSeqRef = useRef<number>(0);
@@ -182,6 +186,13 @@ export function useLiveGameRoom({
               if (typeof p['yourSeat'] === 'number') {
                 myTeamRef.current = p['yourSeat'] % 2;
               }
+              break;
+            }
+            case 'practice.hint': {
+              setPracticeHint({
+                explanation: String(p['explanation'] ?? ''),
+                suggestedAction: String(p['suggestedAction'] ?? ''),
+              });
               break;
             }
             case 'game.dealt': {
@@ -357,6 +368,9 @@ export function useLiveGameRoom({
     eventFeed,
     matchEnded,
     toastMessage,
+    practiceHint,
+    onDismissHint: () => setPracticeHint(null),
+    onRequestHint: () => sendEnvelope('practice.hint', { roomId }),
     onDismissToast: () => setToastMessage(null),
     onRetryConnect: () => {
       socketRef.current?.connect();

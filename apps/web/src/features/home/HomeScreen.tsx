@@ -2,6 +2,7 @@ import { DEFAULT_APP_NAME, type AuthUserSummary } from '@truco/shared';
 import { Badge, CallButton, Card, Toast } from '@truco/ui';
 import { type FormEvent, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
+import { PracticeSetupPanel } from '../practice/PracticeSetupPanel.js';
 import {
   createTableRequest,
   enqueueMatchmakingRequest,
@@ -200,6 +201,17 @@ export function HomeScreen({
             </CallButton>
           </div>
         </section>
+
+        {/* Modo práctica: jugar contra la máquina */}
+        <PracticeSetupPanel
+          currentUserId={currentUser?.id ?? null}
+          onSessionChanged={() => {
+            void ensureGuestOrActiveSession()
+              .then(onSessionChanged)
+              .catch(() => undefined);
+          }}
+          onNavigate={onNavigate}
+        />
 
         {/* Mesa privada rápida + Unirse por código */}
         <section className="rounded-2xl bg-surface border border-ivory/20 p-5 space-y-3.5 shadow-lg">

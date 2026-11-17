@@ -84,6 +84,7 @@ describe('M5a GameTableView — Pure viewFor projection, legal-only CallTray, Re
             userId: 'u-0',
             nickname: 'FacuCordoba',
             ready: true,
+            isBot: false,
             connected: true,
           },
           {
@@ -92,6 +93,7 @@ describe('M5a GameTableView — Pure viewFor projection, legal-only CallTray, Re
             userId: 'u-1',
             nickname: 'LuciaDelSur',
             ready: true,
+            isBot: false,
             connected: true,
           },
         ]}
@@ -154,6 +156,7 @@ describe('M5a GameTableView — Pure viewFor projection, legal-only CallTray, Re
             userId: 'u-0',
             nickname: 'FacuCordoba',
             ready: false,
+            isBot: false,
             connected: true,
           },
           {
@@ -162,6 +165,7 @@ describe('M5a GameTableView — Pure viewFor projection, legal-only CallTray, Re
             userId: 'u-1',
             nickname: 'LuciaDelSur',
             ready: false,
+            isBot: false,
             connected: false,
           },
         ]}

@@ -51,6 +51,10 @@ export interface GameTableSessionProps {
   readonly eventFeed: readonly string[];
   readonly matchEnded: MatchEndedSummary | null;
   readonly toastMessage: string | null;
+  /** Pista de entrenamiento vigente (solo mesas de práctica). */
+  readonly practiceHint?: { readonly explanation: string; readonly suggestedAction: string } | null;
+  /** `true` si la mesa es de práctica contra la máquina. */
+  readonly isPractice?: boolean;
   readonly defaultCallTrayOpen?: boolean;
   readonly nowMsOverride?: number;
   readonly onDismissToast?: () => void;
@@ -63,6 +67,8 @@ export interface GameTableSessionProps {
   readonly onSendSignal: (signalId: string) => void;
   readonly onSendQuickChat: (phraseId: QuickChatPhraseId) => void;
   readonly onRequestRematch: () => void;
+  readonly onRequestHint?: () => void;
+  readonly onDismissHint?: () => void;
   readonly onLeaveTable: () => void;
 }
 
@@ -81,6 +87,8 @@ export function GameTableView({
   eventFeed,
   matchEnded,
   toastMessage,
+  practiceHint = null,
+  isPractice = false,
   defaultCallTrayOpen = false,
   nowMsOverride,
   onDismissToast,
@@ -93,6 +101,8 @@ export function GameTableView({
   onSendSignal,
   onSendQuickChat,
   onRequestRematch,
+  onRequestHint,
+  onDismissHint,
   onLeaveTable,
 }: GameTableSessionProps) {
   const [callTrayOpen, setCallTrayOpen] = useState<boolean>(defaultCallTrayOpen);
@@ -202,6 +212,8 @@ export function GameTableView({
         foldedLabel={messagesEsAr.mesa.foldedBadge}
         disconnectedLabel={messagesEsAr.mesa.disconnectedBadge}
         selfBadgeLabel={messagesEsAr.mesa.selfBadge}
+        isBot={info?.isBot ?? false}
+        botLabel={messagesEsAr.mesa.botBadge}
         compact={compact}
       />
     );
@@ -209,6 +221,31 @@ export function GameTableView({
 
   const isMySocketReconnecting =
     connectionStatus === 'reconnecting' || connectionStatus === 'disconnected';
+
+  const practiceHintBanner =
+    isPractice && practiceHint ? (
+      <div
+        role="status"
+        aria-live="polite"
+        className="rounded-2xl border-2 border-sky/50 bg-sky/10 px-4 py-3 flex items-start justify-between gap-3"
+      >
+        <div className="space-y-1">
+          <p className="text-xs uppercase tracking-wide font-bold text-sky">
+            {messagesEsAr.mesa.hintTitle}
+          </p>
+          <p className="text-sm text-ivory leading-relaxed" data-testid="practice-hint-text">
+            {practiceHint.explanation}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onDismissHint?.()}
+          className="min-h-[44px] min-w-[44px] rounded-xl bg-elevated border border-ivory/25 text-ivory text-sm font-bold"
+        >
+          {messagesEsAr.mesa.hintDismiss}
+        </button>
+      </div>
+    ) : null;
 
   const topBar = (
     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -241,6 +278,16 @@ export function GameTableView({
       </div>
 
       <div className="flex items-center gap-2">
+        {isPractice && (
+          <button
+            type="button"
+            onClick={() => onRequestHint?.()}
+            data-testid="practice-hint-button"
+            className="min-h-[44px] px-3 rounded-xl bg-sky text-surface font-bold text-xs"
+          >
+            {messagesEsAr.mesa.hintCta}
+          </button>
+        )}
         {joinCode && (
           <button
             type="button"
@@ -462,7 +509,12 @@ export function GameTableView({
   return (
     <div className="min-h-screen bg-surface text-ivory flex flex-col">
       <Table
-        topBar={topBar}
+        topBar={
+          <div className="space-y-2">
+            {topBar}
+            {practiceHintBanner}
+          </div>
+        }
         topSeat={renderSeatSlot(relSeats.topSeat, !isDesktopViewport)}
         leftSeat={renderSeatSlot(relSeats.leftSeat, true)}
         rightSeat={renderSeatSlot(relSeats.rightSeat, true)}

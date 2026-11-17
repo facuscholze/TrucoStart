@@ -192,10 +192,42 @@ describe('Pre-M5b Security Invariant — Zero rival signals or other players’ 
 
     const myView = viewFor(state, 0) as unknown as ServerPlayerView;
     const roomSeats: RoomSeatInfo[] = [
-      { seat: 0, team: 0, userId: 'u0', nickname: 'FacuCordoba', ready: true, connected: true },
-      { seat: 1, team: 1, userId: 'u1', nickname: 'RivalNorte', ready: true, connected: true },
-      { seat: 2, team: 0, userId: 'u2', nickname: 'CompaSur', ready: true, connected: true },
-      { seat: 3, team: 1, userId: 'u3', nickname: 'RivalOeste', ready: true, connected: true },
+      {
+        seat: 0,
+        team: 0,
+        userId: 'u0',
+        nickname: 'FacuCordoba',
+        ready: true,
+        isBot: false,
+        connected: true,
+      },
+      {
+        seat: 1,
+        team: 1,
+        userId: 'u1',
+        nickname: 'RivalNorte',
+        ready: true,
+        isBot: false,
+        connected: true,
+      },
+      {
+        seat: 2,
+        team: 0,
+        userId: 'u2',
+        nickname: 'CompaSur',
+        ready: true,
+        isBot: false,
+        connected: true,
+      },
+      {
+        seat: 3,
+        team: 1,
+        userId: 'u3',
+        nickname: 'RivalOeste',
+        ready: true,
+        isBot: false,
+        connected: true,
+      },
     ];
 
     for (const width of [360, 1280]) {
@@ -340,6 +372,7 @@ describe('Pre-M5b Security Invariant — Zero rival signals or other players’ 
               userId: '01950000-0000-7000-8000-000000000001',
               nickname: 'FacuCordoba',
               ready: true,
+              isBot: false,
               connected: true,
             },
             {
@@ -348,6 +381,7 @@ describe('Pre-M5b Security Invariant — Zero rival signals or other players’ 
               userId: 'u1',
               nickname: 'RivalUno',
               ready: true,
+              isBot: false,
               connected: true,
             },
             {
@@ -356,6 +390,7 @@ describe('Pre-M5b Security Invariant — Zero rival signals or other players’ 
               userId: 'u2',
               nickname: 'CompaDos',
               ready: true,
+              isBot: false,
               connected: true,
             },
             {
@@ -364,6 +399,7 @@ describe('Pre-M5b Security Invariant — Zero rival signals or other players’ 
               userId: 'u3',
               nickname: 'RivalTres',
               ready: true,
+              isBot: false,
               connected: true,
             },
           ],

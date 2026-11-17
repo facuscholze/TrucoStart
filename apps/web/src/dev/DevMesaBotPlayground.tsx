@@ -209,6 +209,7 @@ export default function DevMesaBotPlayground({ onExitHome }: { readonly onExitHo
     nickname: DEV_NICKNAMES[s.seat] ?? `Bot ${s.seat}`,
     ready: gameState.status !== 'FINISHED',
     connected: !(simulatedReconnecting && s.seat === 1),
+    isBot: true,
   }));
 
   const connectionStatus: WsConnectionStatus = simulatedReconnecting ? 'reconnecting' : 'connected';

@@ -6,6 +6,7 @@ import type {
 import { Badge, CallButton, Toast } from '@truco/ui';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
+import { PracticeSetupPanel } from '../practice/PracticeSetupPanel.js';
 import {
   cancelMatchmakingRequest,
   createTableRequest,
@@ -255,8 +256,15 @@ export function LobbyScreen({
       )}
 
       <div className="grid grid-cols-1 desktop:grid-cols-12 gap-5 items-start">
-        {/* Columna izquierda: Partida Rápida + Crear Mesa + Unirse por código */}
+        {/* Columna izquierda: Partida Rápida + Contra la máquina + Crear Mesa + Unirse por código */}
         <div className="desktop:col-span-5 space-y-5">
+          <PracticeSetupPanel
+            currentUserId={currentUser?.id ?? null}
+            onSessionChanged={(userId) => {
+              if (currentUser) onSessionChanged({ ...currentUser, id: userId });
+            }}
+            onNavigate={onNavigate}
+          />
           {/* Matchmaking */}
           <section className="rounded-2xl bg-surface border border-gold/35 p-4 tablet:p-5 space-y-3 shadow-lg">
             <h2 className="font-display text-lg font-bold text-gold">

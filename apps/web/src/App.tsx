@@ -42,7 +42,7 @@ const AuthScreenLazy = lazy(() =>
 
 type ParsedAppRoute =
   | { kind: 'dev-mesa' }
-  | { kind: 'live-mesa'; roomId: string; joinCode: string | null }
+  | { kind: 'live-mesa'; roomId: string; joinCode: string | null; isPractice: boolean }
   | { kind: 'waiting-room'; tableId: string }
   | { kind: 'lobby'; inviteOrCode: string | null }
   | { kind: 'profile' }
@@ -69,6 +69,7 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
       kind: 'live-mesa',
       roomId: mesaMatch[1],
       joinCode: params.get('code'),
+      isPractice: params.get('practice') === '1',
     };
   }
 
@@ -206,6 +207,7 @@ export function App() {
         <LiveMesaRouteLazy
           roomId={route.roomId}
           joinCode={route.joinCode}
+          isPractice={route.isPractice}
           onNavigateHome={() => navigate('/lobby')}
         />
       </Suspense>

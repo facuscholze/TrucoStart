@@ -206,16 +206,6 @@ jobs:
             exit 1
           fi
 
-      # TEMPORAL: los logs de Actions no son accesibles desde el entorno de desarrollo.
-      - name: Publish restore diagnostics as PR comment (temporal)
-        if: failure()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          { echo '```'; tail -50 restore-diag.txt; echo '```'; } > restore-comment.md
-          gh pr comment 1 --repo "${{ github.repository }}" --body-file restore-comment.md
-
       - name: Compare row counts after restore
         run: |
           for table in users matches match_events audit_logs; do

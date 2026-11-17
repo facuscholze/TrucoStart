@@ -134,9 +134,9 @@ Scripts: `infra/backups/backup-postgres.sh` y `infra/backups/restore-postgres.sh
 > servidor**. Con un cliente más nuevo (p. ej. 18 contra un servidor 16) el dump incluye
 > `SET transaction_timeout` (parámetro de PG 17+) y la restauración falla. En el drill de CI
 > los scripts se ejecutan dentro de la imagen `postgres:16-alpine` para garantizar la paridad.
-Prueba de restauración automatizada: job `backup-restore` de `.github/workflows/ci.yml`
-(migra, siembra, respalda, restaura en una base vacía y **compara conteos** de
-`users`, `matches`, `match_events`, `audit_logs`).
+> Prueba de restauración automatizada: job `backup-restore` de `.github/workflows/ci.yml`
+> (migra, siembra, respalda, restaura en una base vacía y **compara conteos** de
+> `users`, `matches`, `match_events`, `audit_logs`).
 
 ### 3.1 Respaldo
 

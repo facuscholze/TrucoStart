@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ADMIN_ROLE_PERMISSIONS, type AdminRole } from '@truco/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -271,4 +274,21 @@ describe('@truco/admin · panel M7', () => {
     expect(html).not.toContain('truco_admin_access');
     expect(NOW).toBeGreaterThan(0);
   });
+});
+
+describe('@truco/admin · datos demo fuera de producción', () => {
+  it('no importa el cliente demo de forma estática (permite tree-shaking)', () => {
+    const source = readFileSync(new URL('../src/AdminApp.tsx', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/^import .*from '\.\/lib\/demo\.js';$/m);
+    expect(source).toContain("import('./lib/demo.js')");
+    expect(source).toContain('VITE_ADMIN_DEMO');
+  });
+
+  it('el build de producción no contiene datos de ejemplo del panel', () => {
+    execFileSync('node', ['scripts/check-prod-bundle.mjs'], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      stdio: 'pipe',
+      timeout: 180_000,
+    });
+  }, 200_000);
 });

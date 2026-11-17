@@ -9,7 +9,7 @@ import {
   type AdminUserDetail,
   type AdminUserListItem,
 } from '@truco/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AuditView } from './components/AuditView.js';
 import { DashboardView } from './components/DashboardView.js';
 import { LoginView } from './components/LoginView.js';
@@ -18,7 +18,6 @@ import { ReportsView } from './components/ReportsView.js';
 import { UserDetailPanel, UsersView } from './components/UsersView.js';
 import { Button, StatusPill } from './components/primitives.js';
 import { AdminApiError, httpAdminClient, type AdminClient, type ReportFilters } from './lib/api.js';
-import { createDemoClient } from './lib/demo.js';
 
 type View =
   | { readonly name: 'dashboard' }
@@ -57,8 +56,10 @@ export function AdminApp({
 }: {
   readonly client?: AdminClient;
 } = {}) {
+  // El cliente con datos de ejemplo se carga con `import()` dinámico sólo si el flag
+  // existe en tiempo de build: en producción Vite lo elimina por completo del bundle.
   const demoMode = import.meta.env?.['VITE_ADMIN_DEMO'] === '1';
-  const activeClient = useMemo(() => (demoMode ? createDemoClient() : client), [client, demoMode]);
+  const [activeClient, setActiveClient] = useState<AdminClient | null>(demoMode ? null : client);
 
   const [session, setSession] = useState<AdminSessionSummary | null>(null);
   const [booting, setBooting] = useState(true);
@@ -78,6 +79,25 @@ export function AdminApp({
   const [auditEntries, setAuditEntries] = useState<readonly AdminAuditEntry[]>([]);
 
   useEffect(() => {
+    if (!demoMode) {
+      setActiveClient(client);
+      return;
+    }
+    let cancelled = false;
+    void import('./lib/demo.js')
+      .then((module) => {
+        if (!cancelled) setActiveClient(module.createDemoClient());
+      })
+      .catch(() => {
+        if (!cancelled) setActiveClient(client);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, demoMode]);
+
+  useEffect(() => {
+    if (!activeClient) return;
     let cancelled = false;
     void activeClient
       .me()
@@ -96,7 +116,7 @@ export function AdminApp({
   }, [activeClient]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !activeClient) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -151,6 +171,7 @@ export function AdminApp({
 
   const handleLogin = useCallback(
     (credentials: Parameters<AdminClient['login']>[0]) => {
+      if (!activeClient) return;
       setLoginPending(true);
       setLoginError(null);
       void activeClient
@@ -166,6 +187,7 @@ export function AdminApp({
   );
 
   const handleLogout = useCallback(() => {
+    if (!activeClient) return;
     void activeClient.logout().finally(() => {
       setSession(null);
       setNotice(null);
@@ -174,7 +196,7 @@ export function AdminApp({
     });
   }, [activeClient]);
 
-  if (booting) {
+  if (booting || !activeClient) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-surface text-ivory/70">
         Cargando panel…

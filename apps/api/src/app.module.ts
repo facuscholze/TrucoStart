@@ -10,6 +10,10 @@ import { AuthModule, type AuthModuleOptions } from './modules/auth/auth.module.j
 import { HealthModule } from './modules/health/health.module.js';
 import { LobbyModule, type LobbyModuleOptions } from './modules/lobby/lobby.module.js';
 import { MatchmakingModule } from './modules/matchmaking/matchmaking.module.js';
+import {
+  ModerationModule,
+  type ModerationModuleOptions,
+} from './modules/moderation/moderation.module.js';
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
@@ -18,9 +22,9 @@ export interface CreateAppModuleOptions {
   readonly authOptions?: AuthModuleOptions;
   readonly rateLimitOptions?: RateLimitModuleOptions;
   readonly lobbyOptions?: LobbyModuleOptions;
+  readonly moderationOptions?: ModerationModuleOptions;
 }
 
-// TODO(STATE-07): Incorporar ModerationModule y AdminModule en M7.
 // TODO(STATE-08): Incorporar MetricsModule (/v1/metrics) y trazas OpenTelemetry en M8.
 @Module({})
 export class AppModule {
@@ -59,6 +63,13 @@ export class AppModule {
           },
         }),
         MatchmakingModule,
+        ModerationModule.register({
+          ...options.moderationOptions,
+          runtimeConfig: {
+            ...options.moderationOptions?.runtimeConfig,
+            ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
+          },
+        }),
         HealthModule,
         OpenApiModule,
       ],

@@ -2,6 +2,10 @@ import '@fastify/cookie';
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { ACCESS_COOKIE_NAME, type UserRole } from '@truco/shared';
 import type { FastifyRequest } from 'fastify';
+import {
+  describeBlockedAccount,
+  resolveEffectiveAccountStatus,
+} from '../../../common/account-status.js';
 import { DomainApiException } from '../../../common/api-exception.js';
 import {
   AUTH_RUNTIME_CONFIG,
@@ -20,6 +24,8 @@ export interface AuthenticatedPrincipal {
   readonly isGuest: boolean;
   readonly emailVerified: boolean;
   readonly role: UserRole;
+  /** Fin del silencio vigente, si lo hay (bloquea chat rápido y señas). */
+  readonly mutedUntil?: string | null;
 }
 
 export interface AuthenticatedFastifyRequest extends FastifyRequest {
@@ -65,13 +71,24 @@ export class SessionAuthGuard implements CanActivate {
       );
     }
 
-    const user = await this.authRepository.findUserById(claims.userId);
-    if (!user || user.deletedAt !== null) {
+    const storedUser = await this.authRepository.findUserById(claims.userId);
+    if (!storedUser || storedUser.deletedAt !== null) {
       throw new DomainApiException(401, 'UNAUTHORIZED', 'La cuenta ya no se encuentra activa.');
     }
-    if (user.status !== 'ACTIVE') {
-      throw new DomainApiException(403, 'FORBIDDEN', 'Esta cuenta se encuentra suspendida.', {
-        reason: 'ACCOUNT_SUSPENDED',
+
+    // Estado autoritativo: una suspensión vencida se levanta en el acto y se persiste.
+    const effective = resolveEffectiveAccountStatus(storedUser, new Date(nowMs));
+    const user = effective.expiredSuspensionLifted
+      ? ((await this.authRepository.reactivateExpiredSuspension(storedUser.id, new Date(nowMs))) ??
+        storedUser)
+      : storedUser;
+
+    if (effective.status !== 'ACTIVE') {
+      throw new DomainApiException(403, 'FORBIDDEN', describeBlockedAccount(effective), {
+        reason: effective.status === 'BANNED' ? 'ACCOUNT_BANNED' : 'ACCOUNT_SUSPENDED',
+        accountStatus: effective.status,
+        statusReason: effective.reason,
+        statusExpiresAt: effective.expiresAt?.toISOString() ?? null,
       });
     }
 
@@ -84,6 +101,7 @@ export class SessionAuthGuard implements CanActivate {
       isGuest: user.isGuest,
       emailVerified: user.emailVerifiedAt !== null,
       role: user.role,
+      mutedUntil: effective.mutedUntil?.toISOString() ?? null,
     };
 
     return true;

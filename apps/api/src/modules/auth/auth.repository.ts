@@ -52,6 +52,21 @@ export class AuthRepository {
     return row ?? null;
   }
 
+  /** Levanta una suspensión temporal ya vencida (estado autoritativo en API). */
+  async reactivateExpiredSuspension(userId: string, now: Date): Promise<UserRow | null> {
+    const [row] = await this.db
+      .update(usersTable)
+      .set({
+        status: 'ACTIVE',
+        statusReason: null,
+        statusExpiresAt: null,
+        updatedAt: now,
+      })
+      .where(and(eq(usersTable.id, userId), eq(usersTable.status, 'SUSPENDED')))
+      .returning();
+    return row ?? null;
+  }
+
   async findUserByEmail(emailLower: string): Promise<UserRow | null> {
     const [row] = await this.db
       .select()

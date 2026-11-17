@@ -10,6 +10,10 @@ import {
   type RegisterRequest,
   validateNickname,
 } from '@truco/shared';
+import {
+  describeBlockedAccount,
+  resolveEffectiveAccountStatus,
+} from '../../common/account-status.js';
 import { DomainApiException } from '../../common/api-exception.js';
 import type { UserRow } from '../../db/schema/index.js';
 import { AuditRepository } from '../audit/audit.repository.js';
@@ -330,8 +334,27 @@ export class AuthService {
       );
     }
 
-    if (user.status !== 'ACTIVE') {
-      throw new DomainApiException(403, 'FORBIDDEN', 'Esta cuenta está suspendida.');
+    const effective = resolveEffectiveAccountStatus(user, now);
+    if (effective.status !== 'ACTIVE') {
+      await this.audit.record({
+        actorId: user.id,
+        action: 'AUTH_LOGIN_BLOCKED_BY_SANCTION',
+        entity: 'user',
+        entityId: user.id,
+        afterState: {
+          accountStatus: effective.status,
+          statusReason: effective.reason,
+          statusExpiresAt: effective.expiresAt?.toISOString() ?? null,
+        },
+        ip: meta.ip,
+        now,
+      });
+      throw new DomainApiException(403, 'FORBIDDEN', describeBlockedAccount(effective), {
+        reason: effective.status === 'BANNED' ? 'ACCOUNT_BANNED' : 'ACCOUNT_SUSPENDED',
+        accountStatus: effective.status,
+        statusReason: effective.reason,
+        statusExpiresAt: effective.expiresAt?.toISOString() ?? null,
+      });
     }
 
     await this.rateLimiter.clearLoginFailuresOnSuccess(emailLower, meta.ip);

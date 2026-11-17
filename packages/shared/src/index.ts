@@ -6,6 +6,7 @@ export * from './errors/error-codes.js';
 export * from './http/health.schema.js';
 export * from './lobby/lobby.schema.js';
 export * from './lobby/table-invite.js';
+export * from './moderation/moderation.schema.js';
 export * from './tutorial/tutorial.schema.js';
 export * from './users/users.schema.js';
 export * from './ws/client-events.schema.js';

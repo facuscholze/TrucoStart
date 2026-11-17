@@ -24,6 +24,12 @@ export const usersTable = pgTable(
     isGuest: boolean('is_guest').notNull().default(false),
     role: varchar('role', { length: 16 }).$type<UserRole>().notNull().default('PLAYER'),
     status: varchar('status', { length: 16 }).$type<AccountStatus>().notNull().default('ACTIVE'),
+    /** Motivo visible para el jugador cuando `status != ACTIVE` (lo escribe la moderación). */
+    statusReason: text('status_reason'),
+    /** Vencimiento de la suspensión; `null` = sin vencimiento (solo bloqueo permanente). */
+    statusExpiresAt: timestamp('status_expires_at', { withTimezone: true }),
+    /** Fin del silencio (chat rápido y emotes bloqueados hasta entonces). */
+    mutedUntil: timestamp('muted_until', { withTimezone: true }),
     failedLoginCount: integer('failed_login_count').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     lastFailedLoginAt: timestamp('last_failed_login_at', { withTimezone: true }),
@@ -102,7 +108,45 @@ export const authTokensTable = pgTable(
   (t) => [index('auth_tokens_user_purpose_idx').on(t.userId, t.purpose)],
 );
 
+/** Sesión del panel administrativo: cookie separada de la de jugador y TTL corto. */
+export const adminSessionsTable = pgTable(
+  'admin_sessions',
+  {
+    id: uuid('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    totpVerifiedAt: timestamp('totp_verified_at', { withTimezone: true }).notNull(),
+    ipAddress: varchar('ip_address', { length: 64 }),
+    userAgent: varchar('user_agent', { length: 512 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('admin_sessions_user_idx').on(t.userId)],
+);
+
+/** Secreto TOTP del panel (cifrado con AES-256-GCM) y códigos de recuperación (SHA-256). */
+export const adminTwoFactorTable = pgTable('admin_two_factor', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => usersTable.id, { onDelete: 'cascade' }),
+  secretEncrypted: text('secret_encrypted').notNull(),
+  /** Códigos de recuperación de un solo uso (hash + uso). */
+  recoveryCodes: jsonb('recovery_codes')
+    .$type<Array<{ hash: string; usedAt: string | null }>>()
+    .notNull()
+    .default([]),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  lastUsedStep: integer('last_used_step'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type UserRow = typeof usersTable.$inferSelect;
+export type AdminSessionRow = typeof adminSessionsTable.$inferSelect;
+export type AdminTwoFactorRow = typeof adminTwoFactorTable.$inferSelect;
 export type ProfileRow = typeof profilesTable.$inferSelect;
 export type SessionRow = typeof sessionsTable.$inferSelect;
 export type AuthTokenRow = typeof authTokensTable.$inferSelect;

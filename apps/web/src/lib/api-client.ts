@@ -15,6 +15,7 @@ import type {
   MeResponse,
   NonEnumeratingAckResponse,
   PatchMeRequest,
+  PublicUserProfile,
   PromoteGuestRequest,
   PublicTableListResponse,
   RegisterRequest,
@@ -27,6 +28,9 @@ import type {
   UserStatsResponse,
   VerifyEmailRequest,
   WsTicketResponse,
+  CreateReportRequest,
+  CreateReportResponse,
+  MyModerationState,
   TutorialProgressResponse,
   TutorialProgressUpdateRequest,
 } from '@truco/shared';
@@ -189,6 +193,12 @@ export async function deleteOwnAccountRequest(password?: string): Promise<Delete
   });
 }
 
+export async function getPublicUserProfileRequest(userId: string): Promise<PublicUserProfile> {
+  return requestJson<PublicUserProfile>(`/v1/users/${encodeURIComponent(userId)}`, {
+    method: 'GET',
+  });
+}
+
 export async function getUserStatsRequest(userId: string): Promise<UserStatsResponse> {
   return requestJson<UserStatsResponse>(`/v1/users/${encodeURIComponent(userId)}/stats`, {
     method: 'GET',
@@ -206,6 +216,19 @@ export async function getUserMatchesRequest(
     `/v1/users/${encodeURIComponent(userId)}/matches?${qs.toString()}`,
     { method: 'GET' },
   );
+}
+
+export async function createReportRequest(
+  input: CreateReportRequest,
+): Promise<CreateReportResponse> {
+  return requestJson<CreateReportResponse>('/v1/me/reports', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getMyModerationStateRequest(): Promise<MyModerationState> {
+  return requestJson<MyModerationState>('/v1/me/moderation', { method: 'GET' });
 }
 
 export interface PublicLobbyFilters {

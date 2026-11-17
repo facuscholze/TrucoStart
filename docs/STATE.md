@@ -2,7 +2,7 @@
 
 - **Última actualización:** 2026-11-13
 - **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M6 cerrado** — partida contra IA, práctica, entrenamiento y tutorial interactivo completos (⏸ a la espera de confirmación para iniciar **M7**)
+- **Módulo actual:** **M7 cerrado** — moderación (reportes, sanciones, 2FA admin, `audit_logs` inmutable) y `apps/admin` mínimo con RBAC, replay auditable y sesiones separadas (⏸ a la espera de confirmación para iniciar **M8**)
 
 ---
 
@@ -18,7 +18,7 @@
 | **M5a** | `packages/ui` (design system + baraja española SVG propia) + mesa responsive en `apps/web` (`/mesa/:roomId`, `/dev/mesa`) | ⏸    | **Completado** | Tokens WCAG AA, 40 cartas SVG originales + dorso, 12 componentes accesibles (`>=44px`), mesa WS autoritativa (`ws-ticket` single-use por conexión + `game.rejoin`), `/dev/mesa` excluida en prod (`109.4 KB` gzip < `200 KB`) y 12 capturas en `docs/screenshots/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | **M5b** | Pantallas restantes de `apps/web`: Lobby en vivo, Auth/Perfil, `/aprender`, `/anotador`, PWA offline y E2E Playwright     | ⏸    | **Completado** | `es-AR` centralizado, `AppShell` responsive (4/5/6 cols), onboarding, Auth (login/registro/promoción invitado/recuperación), Home, Lobby `/lobby` WS, Sala de espera `/sala/:tableId`, Perfil con estadísticas e historial reales, `/aprender`, `/anotador` offline y PWA instalable; E2E Playwright multi-cliente 2/2 en verde (Desktop `1280x800` + Mobile `360x800`), 20 capturas en `docs/screenshots/` y cobertura DOM de registro, recuperación de clave y ajustes (sonido/animaciones, sesiones y dispositivos, exportar y eliminar cuenta). Entrada `101.09 KB` gzip (< `200 KB`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **M6**  | Partida contra IA, entrenamiento y tutorial interactivo                                                                   | —    | **Completado** | **IA (BL-010):** fácil/medio/difícil con parámetros explícitos (`bot/difficulty.ts` + `bot/knowledge.ts`), Monte Carlo de mano desde `PlayerView`, reglas obligatorias en `tests/bot-m6.spec.ts` y benchmark de 2.000 partidas/enfrentamiento con IC 95% en `docs/PERF.md` (**difícil 62,9% vs bot M1**, IC `[60,8%, 65,0%]`, umbral > 60% cumplido). **Bots como asientos:** `room-actor` decide desde `PlayerView` con demora humana configurable (600–1800 ms) y asiento `isBot` visible en la mesa. **Práctica:** panel "Jugar contra la máquina" (1v1 / 2v2 con compañero bot, dificultad y puntos) en Home y Lobby; mesas `PRIVATE` + `tables.is_practice` y sin broadcast público. **Entrenamiento:** pista server-side solo en práctica con explicación rioplatense (rechazada fuera de práctica). **Tutorial:** 6 lecciones con repartos fijos, corrección amable, salteo y progreso persistido en la cuenta (`GET/PUT /v1/me/tutorial`). **Bots de reemplazo** detrás de flag (`replaceDisconnectedWithBot`, default `off`). Verificado con `practice-bots.spec.ts` (5/5), `m6-practice-and-tutorial.spec.ts` (2/2), `m6-practice-stats.spec.ts` (2/2), `apps/web/tests/tutorial-flow.spec.ts` (3/3) y `apps/web/e2e/m6-practice.spec.ts` (2/2: 1v1 completa + 2v2 en 360 px); log de decisiones en `docs/BOT_DECISION_LOG.md` y capturas `m6-*.png` 360/1200. |
-| **M7**  | Moderación (reportes, sanciones) y `apps/admin` mínimo con RBAC, 2FA y replay auditable                                   | —    | Pendiente      | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **M7**  | Moderación (reportes, sanciones) y `apps/admin` mínimo con RBAC, 2FA y replay auditable                                   | ⏸    | **Completado** | Reportes del jugador con motivo, `matchId`/log y rate limit; sanciones (advertencia, silencio, suspensión, bloqueo) aplicadas en API **y** game-server; `apps/admin` separado con 2FA TOTP obligatorio, códigos de recuperación de un solo uso, RBAC verificado por endpoint, sesiones separadas de 30 min, replay desde `match_events` auditado y `audit_logs` inmutable por trigger. 3 suites nuevas: `admin.spec.ts` (7/7), `reports.spec.ts` (5/5), `internal-moderation.spec.ts` (4/4) + `moderation-enforcement.spec.ts` (4/4) + `audit-immutability.spec.ts` (3/3) + `apps/admin/tests/admin.spec.tsx` (11/11). |
 | **M8**  | Observabilidad, endurecimiento de seguridad, carga k6 (100 y 1.000), staging, `PERF.md`, `THREAT_MODEL.md`, `RUNBOOKS.md` | ⏸    | Pendiente      | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ---
@@ -29,7 +29,6 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 | ID         | Ubicación principal                                                            | Descripción                                                                                                                | Módulo objetivo      |
 | ---------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `STATE-07` | `apps/admin`, `apps/api` (moderation/admin)                                    | Reportes, sanciones con motivo obligatorio, 2FA administrativo, `audit_logs` y visor de replay.                            | **M7**               |
 | `STATE-08` | `infra/`, `apps/*`, `docs/PERF.md`, `docs/THREAT_MODEL.md`, `docs/RUNBOOKS.md` | OpenTelemetry, Sentry, `/v1/metrics` Prometheus, pruebas de carga k6 (100/1.000 usuarios) y runbooks operativos.           | **M8**               |
 | `STATE-09` | `docs/THREAT_MODEL.md`                                                         | Revisión legal formal de tratamiento, retención y supresión de datos personales bajo Ley 25.326 (República Argentina).     | **Pre-Prod / Legal** |
 | `STATE-10` | `apps/api/src/modules/auth/providers/email.provider.ts`                        | `ConsoleEmailProvider` simulado en dev/test; adaptador productivo (`Resend` / `SMTP`) pendiente de credenciales reales.    | **Pre-Prod / Infra** |
@@ -53,7 +52,8 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 | `PRE-M6-1`  | Revisión de registro, recuperación de contraseña y ajustes (sesiones y dispositivos, exportar/eliminar cuenta, sonido, animaciones): implementados en M5b, cubiertos por `apps/web/tests/pre-m6-auth-and-settings.spec.tsx` y capturas 360/1200 (`203d265`).                                                           | **Pre-M6**     |
 | `PRE-M6-2`  | Salas inactivas destruidas a los 10 min (`IDLE_ROOM_TTL_MS`) con barrido cada 60 s (`IDLE_ROOM_SWEEP_MS`), evento `room.expired` y tabla sincronizada a `CLOSED`/`IDLE_TIMEOUT` (`a4ef32f`).                                                                                                                           | **Pre-M6**     |
 | `STATE-06`  | Partida contra IA con 3 dificultades (difícil 62,9% vs bot M1, IC 95%), bots como asientos del `game-server` (solo `PlayerView`), modo práctica 1v1/2v2, pista de entrenamiento exclusiva de práctica, tutorial interactivo con 6 lecciones y progreso en la cuenta, y bots de reemplazo detrás de flag (default off). | **M6**         |
-| `PRE-M6-3`  | E2E reproducible: semilla de reparto fija en el stack de pruebas (`E2E_DEAL_SEED_HEX`), cartas y compromiso commit-reveal deterministas (`5f57b2a`).                                                                                                                                                                   | **Pre-M6**     |
+| `PRE-M6-3`  | E2E reproducible: semilla de reparto fija en el stack de pruebas (`E2E_DEAL_SEED_HEX`), cartas y compromiso commit-reveal deterministas (`5f57b2a`).
+| `STATE-07`  | Moderación completa: reportes del jugador (`/v1/me/reports`) con rate limit, duplicados y tope de abiertos; sanciones con motivo + vencimiento aplicadas en API y game-server; `apps/admin` separado con 2FA TOTP obligatorio, RBAC por endpoint, sesiones `truco_admin_access` de 30 min, replay auditado y `audit_logs` inmutable a nivel de base de datos. | **M7**         |                                                                                                                                                                   | **Pre-M6**     |
 
 ---
 
@@ -84,7 +84,106 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ---
 
+## Confirmación previa a M7 (5 puntos pedidos)
+
+| # | Punto | Estado | Evidencia |
+| - | ----- | ------ | --------- |
+| 1 | Registro de jugadores | **Implementado y verificado** | `POST /v1/auth/register` (Argon2id, alias único, invitado sin email), pantalla `/registro` en `apps/web`; `apps/web/tests/pre-m6-auth-and-settings.spec.tsx`, capturas `m5b-registro-{360,1200}.png`. |
+| 2 | Recuperación de contraseña | **Implementado y verificado** (envío simulado) | `POST /v1/auth/password/forgot` + `/reset` con token de un solo uso y `ConsoleEmailProvider` (`STATE-10`); pantalla `/recuperar`, capturas `m5b-recuperar-{360,1200}.png`. En producción falta el proveedor real de email. |
+| 3 | Ajustes: sesiones y dispositivos, exportar y eliminar cuenta | **Implementado y verificado** | `/v1/me/sessions` (listado y revocación por dispositivo), `/v1/me/export` y `DELETE /v1/me` con anonimización; UI en `/ajustes`; capturas `m5b-ajustes-{360,1200}.png` y tests `pre-m6-auth-and-settings.spec.tsx`. |
+| 4 | Limpieza de salas por inactividad | **Implementado y verificado** | `IDLE_ROOM_TTL_MS` 10 min + barrido `IDLE_ROOM_SWEEP_MS` 60 s, evento `room.expired` y tabla a `CLOSED`/`IDLE_TIMEOUT` (`a4ef32f`); `apps/game-server/tests/idle-room-ttl.spec.ts`, `apps/api/src/modules/lobby/tests/room-expired-consistency.spec.ts`. |
+| 5 | Semilla fija en los E2E | **Implementado y verificado** | `E2E_DEAL_SEED_HEX` en el stack de pruebas (`5f57b2a`); `apps/game-server/tests/deterministic-deal.spec.ts` y `apps/web/e2e/m5b-multiclient.spec.ts` reproducibles. |
+
+---
+
+## M7 — matriz de roles y permisos
+
+`ADMIN_ROLE_PERMISSIONS` en `packages/shared/src/moderation/moderation.schema.ts` es la **única** fuente de verdad; el servidor la evalúa en cada endpoint con `@RequirePermission` (nunca se confía en la UI).
+
+| Permiso | SOPORTE | MODERADOR | ADMIN |
+| ------- | :-----: | :-------: | :---: |
+| `dashboard:read` | ✅ | ✅ | ✅ |
+| `users:read` | ✅ | ✅ | ✅ |
+| `reports:read` | ✅ | ✅ | ✅ |
+| `reports:claim` | ✅ | ✅ | ✅ |
+| `audit:read` | ✅ | ✅ | ✅ |
+| `reports:resolve` | — | ✅ | ✅ |
+| `sanctions:issue` | — | ✅ | ✅ |
+| `nickname:force_change` | — | ✅ | ✅ |
+| `matches:replay` | — | ✅ | ✅ |
+| `users:read_pii` | — | — | ✅ |
+| `sanctions:issue_ban` | — | — | ✅ |
+| `admins:manage` | — | — | ✅ |
+
+## M7 — endpoints nuevos
+
+**Jugador** (`apps/api`, cookie de jugador):
+
+| Método | Ruta | Notas |
+| ------ | ---- | ----- |
+| `POST` | `/v1/me/reports` | Motivo obligatorio, `matchId` y `eventLogRef` automáticos, dedupe, tope de abiertos y rate limit por cuenta |
+| `GET` | `/v1/me/moderation` | Estado propio (suspendido/bloqueado/silenciado) con motivo y vencimiento |
+
+**Administración** (`apps/api`, cookie `truco_admin_access`, `Path=/v1/admin`, TTL 30 min):
+
+| Método | Ruta | Permiso |
+| ------ | ---- | ------- |
+| `POST` | `/v1/admin/auth/login` | público (email + contraseña + TOTP obligatorio) |
+| `POST` | `/v1/admin/auth/logout` | sesión admin |
+| `GET` | `/v1/admin/auth/me` | sesión admin |
+| `GET` | `/v1/admin/session/permissions` | sesión admin |
+| `GET` | `/v1/admin/dashboard` | `dashboard:read` |
+| `GET` | `/v1/admin/users` | `users:read` |
+| `GET` | `/v1/admin/users/:userId?reason=` | `users:read` (motivo obligatorio, auditado) |
+| `POST` | `/v1/admin/users/:userId/sanctions` | `sanctions:issue` (`BAN` exige `sanctions:issue_ban`) |
+| `POST` | `/v1/admin/users/:userId/nickname-reset` | `nickname:force_change` |
+| `GET` | `/v1/admin/reports` | `reports:read` |
+| `GET` | `/v1/admin/reports/:reportId` | `reports:read` |
+| `POST` | `/v1/admin/reports/:reportId/claim` | `reports:claim` (versión optimista) |
+| `POST` | `/v1/admin/reports/:reportId/resolve` | `reports:resolve` (`409 REPORT_VERSION_CONFLICT`) |
+| `GET` | `/v1/admin/matches/:matchId/replay?reason=` | `matches:replay` (motivo obligatorio, auditado) |
+| `GET` | `/v1/admin/audit` | `audit:read` |
+
+**Interno** (sin cookie, secreto compartido `x-internal-secret`):
+
+| Método | Ruta | Consumidor |
+| ------ | ---- | ---------- |
+| `GET` | `/v1/internal/moderation/:userId` | `apps/game-server` (`createHttpModerationLookup`, cache 15 s) |
+
+## M7 — verificación por ítem
+
+| Ítem | Implementación | Verificación |
+| ---- | -------------- | ------------ |
+| Botón "Reportar" en mesa, resultado y perfil | `apps/web/src/features/moderation/ReportDialog.tsx` + `ReportButton` | `apps/web/tests/report-flow.spec.tsx`, capturas `m5b-*`/`m7-reporte-*.png` |
+| Reportes con `matchId` y referencia al log | `apps/api/src/modules/moderation/moderation.service.ts` (`ReportEventLogRef`) | `reports.spec.ts` › "crea un reporte con motivo…" |
+| Rate limit + tope de abiertos + dedupe | `REPORT_LIMITS` en `@truco/shared` | `reports.spec.ts` (5/5: 429 al cuarto envío, tope de abiertos, fusión de duplicados) |
+| Suspendido/bloqueado no inicia sesión y pierde sesiones | `resolveEffectiveAccountStatus` + revocación en `AdminService` | `admin.spec.ts` › "suspende… revoca sesiones" (login `403 ACCOUNT_SUSPENDED`) |
+| Sanciones aplicadas también en el juego | `apps/game-server/src/rooms/moderation.ts` + `RoomActor` (`table.join`, `game.rejoin`, `chat.quick`, `game.signal`) | `moderation-enforcement.spec.ts` (4/4) |
+| 2FA TOTP obligatorio + códigos de recuperación | `security/totp.ts` (RFC 6238), `bootstrapTwoFactor`, `admin-auth.service.ts` | `admin.spec.ts` › "exige 2FA"; vector `287082` @ t=59 s |
+| Alta del primer admin solo por CLI | `apps/api/scripts/admin-create.ts` (`pnpm --filter @truco/api admin:create`) | Comando documentado en `README.md`; ningún endpoint crea administradores |
+| RBAC verificado por endpoint | `@RequirePermission` + `AdminAuthGuard` | `admin.spec.ts` › "un moderador no puede banear", "no puede sancionarse a sí mismo" |
+| Sesiones de admin separadas y cortas | Cookie `truco_admin_access` (`Path=/v1/admin`, `SameSite=Strict`, 30 min) | `admin.spec.ts` › logout deja 401; `me` devuelve `permissions` |
+| Concurrencia en reportes | `version` optimista en claim/resolve | `admin.spec.ts` › `409 REPORT_VERSION_CONFLICT` |
+| Replay solo de partidas terminadas y auditado | `admin/replay.ts` (motor) + `audit_logs` | `admin.spec.ts` › replay 409 en curso, 400 sin motivo, `ADMIN_REPLAY_ACCESSED` con actor/motivo |
+| `audit_logs` inmutable | Trigger `audit_logs_no_update`/`audit_logs_no_delete` (migración `0003`) | `apps/api/src/db/tests/audit-immutability.spec.ts` (3/3) |
+| Datos personales mínimos | `maskEmail` + permiso `users:read_pii` | `admin.spec.ts` › máscara por rol (`p***a@truco.ar`) |
+| El jugador nunca ve datos del panel | Rutas `/v1/admin/*` con cookie separada | `admin.spec.ts` › sin cookie admin → 401; `apps/admin/tests/admin.spec.tsx` |
+| UI del panel | `apps/admin/src/{AdminApp.tsx,components/*,lib/api.ts}` | `apps/admin/tests/admin.spec.tsx` (11/11: login 2FA, dashboard, filtros, gating por rol, PII, auditoría) |
+
+**Capturas M7:** `m7-panel-login-1200.png`, `m7-panel-dashboard-1200.png`, `m7-panel-reportes-1200.png`, `m7-panel-reporte-detalle-1200.png`, `m7-panel-usuarios-1200.png`, `m7-panel-usuario-detalle-1200.png`, `m7-panel-auditoria-1200.png` y `m7-panel-reporte-360.png` (pantalla de reporte a 360 px). Todas en `docs/screenshots/`.
+
+## M7 — qué quedó simulado
+
+| Elemento | Por qué | Dónde |
+| -------- | ------- | ----- |
+| Capturas del panel con datos de ejemplo | No hay backend desplegado en el sandbox para generar meses de actividad | `apps/admin/src/lib/demo.ts` (`VITE_ADMIN_DEMO=1`, nunca activo en producción) |
+| Notificación al jugador sancionado (email/push) | Depende del proveedor real de email (`STATE-10`) | La sanción sí se aplica y se ve en `/v1/me/moderation` |
+| Reconstrucción de replay desde `match_events` | Verifica integridad y resume manos/puntajes; no es un reproductor cuadro a cuadro | `apps/api/src/modules/admin/replay.ts` (`reconstructed.note`) |
+| Recuperación de 2FA perdido | Sólo códigos de recuperación de un solo uso; no hay reset por soporte (evita backdoors) | `admin-auth.service.ts` |
+
+---
+
 ## Próximos pasos inmediatos
 
-1. **M6 cerrado** ⏸ — esperando confirmación del usuario para arrancar **M7**.
-2. **M7:** moderación (reportes con motivo obligatorio, sanciones, 2FA admin, `audit_logs`) y `apps/admin` mínimo con RBAC y replay auditable.
+1. **M7 cerrado** ⏸ — esperando confirmación del usuario para arrancar **M8** (observabilidad, endurecimiento, carga k6, staging, `PERF.md`/`THREAT_MODEL.md`/`RUNBOOKS.md`).
+2. Antes de M8: revisión legal de datos personales (`STATE-09`) y proveedores reales de email/Google/Captcha (`STATE-10`..`STATE-12`), que hoy son adaptadores simulados.

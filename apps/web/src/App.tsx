@@ -27,6 +27,11 @@ const WaitingRoomScreenLazy = lazy(() =>
     default: m.WaitingRoomScreen,
   })),
 );
+const PlayerProfileScreenLazy = lazy(() =>
+  import('./features/profile/PlayerProfileScreen.js').then((m) => ({
+    default: m.PlayerProfileScreen,
+  })),
+);
 const ProfileScreenLazy = lazy(() =>
   import('./features/profile/ProfileScreen.js').then((m) => ({ default: m.ProfileScreen })),
 );
@@ -46,6 +51,7 @@ type ParsedAppRoute =
   | { kind: 'waiting-room'; tableId: string }
   | { kind: 'lobby'; inviteOrCode: string | null }
   | { kind: 'profile' }
+  | { kind: 'player-profile'; userId: string }
   | { kind: 'learn' }
   | { kind: 'scorer' }
   | {
@@ -87,6 +93,11 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
 
   if (pathname === '/perfil') {
     return { kind: 'profile' };
+  }
+
+  const jugadorMatch = /^\/jugador\/([a-zA-Z0-9_-]{3,64})$/.exec(pathname);
+  if (jugadorMatch?.[1]) {
+    return { kind: 'player-profile', userId: jugadorMatch[1] };
   }
 
   if (pathname === '/aprender') {
@@ -209,6 +220,7 @@ export function App() {
           joinCode={route.joinCode}
           isPractice={route.isPractice}
           onNavigateHome={() => navigate('/lobby')}
+          onNavigate={navigate}
         />
       </Suspense>
     );
@@ -240,7 +252,7 @@ export function App() {
         ? 'learn'
         : route.kind === 'scorer'
           ? 'scorer'
-          : route.kind === 'profile'
+          : route.kind === 'profile' || route.kind === 'player-profile'
             ? 'profile'
             : route.kind === 'auth'
               ? 'auth'
@@ -272,6 +284,14 @@ export function App() {
           <ProfileScreenLazy
             currentUser={currentUser}
             onSessionChanged={(u) => setCurrentUser(u)}
+            onNavigate={navigate}
+          />
+        )}
+
+        {route.kind === 'player-profile' && (
+          <PlayerProfileScreenLazy
+            userId={route.userId}
+            currentUserId={currentUser?.id ?? null}
             onNavigate={navigate}
           />
         )}

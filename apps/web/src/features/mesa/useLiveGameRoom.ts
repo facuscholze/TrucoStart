@@ -11,6 +11,7 @@ import type { SpanishCardId } from '@truco/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io as createSocketIoClient, type Socket } from 'socket.io-client';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
+import { getMyModerationStateRequest } from '../../lib/api-client.js';
 import {
   decodeSessionIdFromWsTicket,
   ensureGuestOrActiveSession,
@@ -54,6 +55,8 @@ export function useLiveGameRoom({
   );
   const [eventFeed, setEventFeed] = useState<string[]>([]);
   const [matchEnded, setMatchEnded] = useState<MatchEndedSummary | null>(null);
+  const [matchId, setMatchId] = useState<string | null>(null);
+  const [mutedUntil, setMutedUntil] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [practiceHint, setPracticeHint] = useState<{
     explanation: string;
@@ -175,6 +178,7 @@ export function useLiveGameRoom({
             case 'table.state': {
               setTableStatus(p['status'] as TableStatus);
               setSeats((p['seats'] as RoomSeatInfo[]) ?? []);
+              setMatchId(typeof p['matchId'] === 'string' ? p['matchId'] : null);
               break;
             }
             case 'game.started': {
@@ -352,6 +356,20 @@ export function useLiveGameRoom({
     };
   }, [appendFeed, pushBubble, roomId, wsBaseUrl]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void getMyModerationStateRequest()
+      .then((state) => {
+        if (!cancelled) setMutedUntil(state.mutedUntil);
+      })
+      .catch(() => {
+        // Sin sesión o sin red: el servidor de juego sigue siendo la autoridad.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return {
     roomId,
     joinCode,
@@ -367,6 +385,8 @@ export function useLiveGameRoom({
     speechBubblesBySeat,
     eventFeed,
     matchEnded,
+    matchId,
+    mutedUntil,
     toastMessage,
     practiceHint,
     onDismissHint: () => setPracticeHint(null),

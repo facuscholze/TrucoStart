@@ -50,6 +50,7 @@ export const messagesEsAr = {
     waitingTurnBanner: (nickname: string) => `Turno de ${nickname}…`,
     turnTimerLabel: (sec: number) => `${sec}s`,
     leaveTable: 'Salir de la mesa',
+    reportPlayer: 'Reportar',
     copyJoinCode: (code: string) => `Código: ${code}`,
     copiedJoinCode: '¡Código copiado!',
     waitingRoomTitle: 'Sala lista para barajar',
@@ -132,6 +133,9 @@ export const messagesEsAr = {
     rematchCta: 'Pedir revancha',
     rematchWaitingCta: 'Revancha pedida · esperando rival…',
     exitToHomeCta: 'Volver al inicio',
+    reportHeading: '¿Algo no estuvo bien en la mesa?',
+    reportHint:
+      'Podés reportar abandono reiterado, señas fuera del sistema, apodos ofensivos o maltrato.',
   },
   devMesa: {
     ribbonBadge: 'MODO DESARROLLO',

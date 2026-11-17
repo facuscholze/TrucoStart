@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
 import { loadClientPreferences } from '../../lib/preferences.js';
 import { playTableSoundCue } from '../../lib/sound-fx.js';
+import { ReportButton } from '../moderation/ReportButton.js';
 import { CallTray } from './CallTray.js';
 import { type MatchEndedSummary, MatchResultModal } from './MatchResultModal.js';
 import {
@@ -50,6 +51,10 @@ export interface GameTableSessionProps {
   readonly speechBubblesBySeat: ReadonlyMap<number, string>;
   readonly eventFeed: readonly string[];
   readonly matchEnded: MatchEndedSummary | null;
+  /** Partida en curso/terminada de la mesa, adjunta al reportar. */
+  readonly matchId?: string | null;
+  /** Vencimiento del silencio vigente del propio jugador (`null` si no está silenciado). */
+  readonly mutedUntil?: string | null;
   readonly toastMessage: string | null;
   /** Pista de entrenamiento vigente (solo mesas de práctica). */
   readonly practiceHint?: { readonly explanation: string; readonly suggestedAction: string } | null;
@@ -70,6 +75,8 @@ export interface GameTableSessionProps {
   readonly onRequestHint?: () => void;
   readonly onDismissHint?: () => void;
   readonly onLeaveTable: () => void;
+  /** Abre el perfil público de otro jugador (desde el asiento). */
+  readonly onOpenPlayerProfile?: (userId: string) => void;
 }
 
 export function GameTableView({
@@ -86,6 +93,8 @@ export function GameTableView({
   speechBubblesBySeat,
   eventFeed,
   matchEnded,
+  matchId = null,
+  mutedUntil = null,
   toastMessage,
   practiceHint = null,
   isPractice = false,
@@ -104,6 +113,7 @@ export function GameTableView({
   onRequestHint,
   onDismissHint,
   onLeaveTable,
+  onOpenPlayerProfile,
 }: GameTableSessionProps) {
   const [callTrayOpen, setCallTrayOpen] = useState<boolean>(defaultCallTrayOpen);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
@@ -135,6 +145,12 @@ export function GameTableView({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  const isMuted = mutedUntil !== null && Date.parse(mutedUntil) > clockMs;
+
+  const reportTargets = seats
+    .filter((s) => s.userId !== null && !s.isBot)
+    .map((s) => ({ userId: s.userId ?? '', nickname: s.nickname ?? 'Jugador' }));
 
   const nicknameBySeat = new Map<number, string>();
   for (const s of seats) {
@@ -193,10 +209,19 @@ export function GameTableView({
     const pubSeat = view?.seats.find((s) => s.seat === seatIdx);
     const nickname = info?.nickname ?? `Asiento ${seatIdx + 1}`;
     const isActiveTurn = view?.hand.activeSeat === seatIdx && view.status === 'IN_PROGRESS';
+    const profileUserId = info?.userId ?? null;
+    const canOpenProfile =
+      Boolean(onOpenPlayerProfile) &&
+      profileUserId !== null &&
+      profileUserId !== myUserId &&
+      !(info?.isBot ?? false);
 
     return (
       <PlayerSeat
         seat={seatIdx}
+        {...(canOpenProfile && profileUserId && onOpenPlayerProfile
+          ? { onOpenProfile: () => onOpenPlayerProfile(profileUserId) }
+          : {})}
         nickname={nickname}
         team={info?.team ?? seatIdx % 2}
         isSelf={seatIdx === mySeatIndex}
@@ -304,7 +329,15 @@ export function GameTableView({
           </button>
         )}
 
+        <ReportButton
+          targets={reportTargets}
+          matchId={matchId}
+          myUserId={myUserId}
+          label={messagesEsAr.mesa.reportPlayer}
+        />
+
         <QuickChat
+          disabled={isMuted}
           phrases={QUICK_CHAT_PHRASES}
           triggerLabel={messagesEsAr.mesa.quickChatTrigger}
           panelLabel={messagesEsAr.mesa.quickChatDialogLabel}
@@ -324,6 +357,15 @@ export function GameTableView({
 
   const centerBanner = (
     <div className="w-full max-w-lg space-y-2">
+      {isMuted && (
+        <div
+          role="status"
+          className="rounded-xl border border-danger/50 bg-danger/10 p-3 text-xs text-danger"
+        >
+          Estás silenciado hasta el {new Date(mutedUntil as string).toLocaleString('es-AR')}: no
+          podés usar el chat rápido ni enviar señas. Podés seguir jugando.
+        </div>
+      )}
       {isMySocketReconnecting && (
         <div
           role="alert"
@@ -588,6 +630,9 @@ export function GameTableView({
         myTeam={myTeam}
         summary={matchEnded}
         rematchRequested={Boolean(mySeatFromLobby?.ready && tableStatus === 'FINISHED')}
+        reportTargets={reportTargets}
+        matchId={matchId}
+        myUserId={myUserId}
         onRequestRematch={onRequestRematch}
         onExitToHome={onLeaveTable}
       />

@@ -23,6 +23,8 @@ export interface PlayerSeatProps {
   readonly isBot?: boolean;
   readonly botLabel?: string;
   readonly compact?: boolean;
+  /** Si se define, el apodo se vuelve un enlace accesible al perfil público. */
+  readonly onOpenProfile?: () => void;
 }
 
 export function PlayerSeat({
@@ -44,6 +46,7 @@ export function PlayerSeat({
   isBot = false,
   botLabel = 'Bot',
   compact = false,
+  onOpenProfile,
 }: PlayerSeatProps) {
   const activeBorder = isActiveTurn
     ? isTurnWarning
@@ -96,17 +99,40 @@ export function PlayerSeat({
 
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-            <strong
-              style={{
-                fontSize: compact ? '0.82rem' : '0.9rem',
-                fontWeight: 700,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {nickname}
-            </strong>
+            {onOpenProfile ? (
+              <button
+                type="button"
+                onClick={onOpenProfile}
+                aria-label={`Ver perfil de ${nickname}`}
+                style={{
+                  fontSize: compact ? '0.82rem' : '0.9rem',
+                  fontWeight: 700,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  textDecoration: 'underline dotted',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  color: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                {nickname}
+              </button>
+            ) : (
+              <strong
+                style={{
+                  fontSize: compact ? '0.82rem' : '0.9rem',
+                  fontWeight: 700,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {nickname}
+              </strong>
+            )}
             {isBot && <Badge variant="neutral">{botLabel}</Badge>}
             {isSelf && <Badge variant="sky">{selfBadgeLabel}</Badge>}
             {isMano && <Badge variant="gold">{manoLabel}</Badge>}

@@ -112,6 +112,9 @@ jobs:
     name: Respaldo y restauración de PostgreSQL
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
 
     services:
       postgres:
@@ -208,6 +211,14 @@ jobs:
           name: restore-diagnostics
           path: restore-diag.txt
           retention-days: 3
+
+      # TEMPORAL: los logs/artefactos de Actions no son accesibles desde el entorno de
+      # desarrollo; se publica el diagnóstico como comentario del PR para poder leerlo.
+      - name: Publish restore diagnostics as PR comment (temporal)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 1 --repo "${{ github.repository }}" --body-file restore-diag.txt
 
       - name: Compare row counts after restore
         run: |

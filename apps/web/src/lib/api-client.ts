@@ -27,6 +27,8 @@ import type {
   UserStatsResponse,
   VerifyEmailRequest,
   WsTicketResponse,
+  TutorialProgressResponse,
+  TutorialProgressUpdateRequest,
 } from '@truco/shared';
 
 export class WebApiError extends Error {
@@ -228,6 +230,19 @@ export async function listPublicTablesRequest(
 export async function createTableRequest(body: CreateTableRequest): Promise<TableDetailResponse> {
   return requestJson<TableDetailResponse>('/v1/tables', {
     method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getTutorialProgressRequest(): Promise<TutorialProgressResponse> {
+  return requestJson<TutorialProgressResponse>('/v1/me/tutorial', { method: 'GET' });
+}
+
+export async function putTutorialProgressRequest(
+  body: TutorialProgressUpdateRequest,
+): Promise<TutorialProgressResponse> {
+  return requestJson<TutorialProgressResponse>('/v1/me/tutorial', {
+    method: 'PUT',
     body: JSON.stringify(body),
   });
 }

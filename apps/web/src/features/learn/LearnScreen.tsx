@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
 import { playTableSoundCue } from '../../lib/sound-fx.js';
 import { CallTray } from '../mesa/CallTray.js';
+import { TutorialScreen } from './TutorialScreen.js';
 import { groupServerLegalActions, type ServerPlayerView } from '../mesa/mesa-view-model.js';
 
 type LearnTab = 'rules' | 'hierarchy' | 'signals' | 'tutorial';
@@ -281,6 +282,12 @@ export function LearnScreen() {
       )}
 
       {/* Pestaña 4: Tutorial interactivo guiado contra Gaucho Bot */}
+      {tab === 'tutorial' && (
+        <div className="mb-5">
+          <TutorialScreen syncWithAccount />
+        </div>
+      )}
+
       {tab === 'tutorial' && (
         <section className="rounded-2xl bg-surface border border-gold/40 p-4 tablet:p-6 space-y-5 shadow-xl">
           <div className="flex items-start justify-between gap-3 flex-wrap">

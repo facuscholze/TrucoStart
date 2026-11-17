@@ -34,9 +34,17 @@ export const TutorialProgressUpdateRequestSchema = z
 export type TutorialProgressUpdateRequest = z.infer<typeof TutorialProgressUpdateRequestSchema>;
 
 /** Cartas de un reparto fijo: ids del motor (`rank-suit`). */
+export interface TutorialPreludeAction {
+  readonly seat: number;
+  /** Acción codificada (`PLAY_CARD:7-oros`, `CALL_TRUCO:TRUCO`). */
+  readonly code: string;
+}
+
 export interface TutorialDeal {
   readonly hands: Readonly<Record<string, readonly string[]>>;
   readonly manoSeat: number;
+  /** Acciones que la app aplica antes de habilitar al jugador (guion de la lección). */
+  readonly prelude: readonly TutorialPreludeAction[];
   /** Acciones legales esperadas como "paso correcto" (`PLAY_CARD:1-espadas`, `CALL_ENVIDO:ENVIDO`). */
   readonly correctActions: readonly string[];
 }
@@ -76,6 +84,7 @@ const LESSONS: readonly TutorialLesson[] = [
     deal: {
       hands: { '0': ['1-espadas', '5-copas', '4-bastos'], '1': ['7-oros', '6-oros', '3-copas'] },
       manoSeat: 1,
+      prelude: [{ seat: 1, code: 'PLAY_CARD:7-oros' }],
       correctActions: ['PLAY_CARD:1-espadas'],
     },
   },
@@ -84,15 +93,16 @@ const LESSONS: readonly TutorialLesson[] = [
     title: 'Ganar la mano',
     objective: 'Ganá dos de las tres bazas para llevarte los puntos de la mano.',
     steps: [
-      'La primera baza la ganó tu rival con el 12 de espadas.',
-      'Tenés el 1 de bastos: es más fuerte y te devuelve la mano.',
-      'Guardá el 6 de copas para la tercera baza.',
+      'Tu rival abrió la baza con el 12 de espadas.',
+      'Tenés el 1 de bastos: es más fuerte y te lleva a ganar la baza.',
+      'Guardá el 6 de copas para la próxima.',
     ],
     gentleCorrection: 'Con el 1 de bastos ganás seguro esa baza: probá con esa carta.',
     mode: '1v1',
     deal: {
       hands: { '0': ['1-bastos', '6-copas', '4-oros'], '1': ['12-espadas', '5-bastos', '3-oros'] },
-      manoSeat: 0,
+      manoSeat: 1,
+      prelude: [{ seat: 1, code: 'PLAY_CARD:12-espadas' }],
       correctActions: ['PLAY_CARD:1-bastos'],
     },
   },
@@ -110,6 +120,7 @@ const LESSONS: readonly TutorialLesson[] = [
     deal: {
       hands: { '0': ['7-oros', '6-oros', '4-copas'], '1': ['5-bastos', '3-espadas', '2-copas'] },
       manoSeat: 0,
+      prelude: [],
       correctActions: ['CALL_ENVIDO:ENVIDO', 'CALL_ENVIDO:REAL_ENVIDO'],
     },
   },
@@ -130,6 +141,7 @@ const LESSONS: readonly TutorialLesson[] = [
         '1': ['7-oros', '6-espadas', '5-bastos'],
       },
       manoSeat: 1,
+      prelude: [{ seat: 1, code: 'CALL_TRUCO:TRUCO' }],
       correctActions: ['RESPOND_TRUCO:QUIERO'],
     },
   },
@@ -147,6 +159,7 @@ const LESSONS: readonly TutorialLesson[] = [
     deal: {
       hands: { '0': ['7-copas', '5-copas', '2-copas'], '1': ['1-espadas', '6-bastos', '4-oros'] },
       manoSeat: 0,
+      prelude: [],
       correctActions: ['CALL_FLOR:FLOR'],
     },
   },
@@ -169,6 +182,7 @@ const LESSONS: readonly TutorialLesson[] = [
         '3': ['5-oros', '4-oros', '3-espadas'],
       },
       manoSeat: 0,
+      prelude: [],
       correctActions: ['SEND_SIGNAL:guino_ojo'],
     },
   },

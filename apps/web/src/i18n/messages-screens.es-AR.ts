@@ -44,6 +44,18 @@ export const screenMessagesEsAr = {
     heroTitle: '¿Sale un Truco?',
     heroSubtitle:
       'Elegí partida rápida, entrá al lobby público en tiempo real o pasale un código de 6 letras a tu compañero.',
+    machineSectionTitle: 'Jugar contra la máquina',
+    machineSectionBody:
+      'Modo práctica: la mesa arranca al toque, podés pedir pistas y la partida no cuenta para estadísticas ni rankings.',
+    machineModeLabel: 'Modalidad',
+    machineDifficultyLabel: 'Dificultad',
+    machineDifficultyEasy: 'Fácil',
+    machineDifficultyMedium: 'Medio',
+    machineDifficultyHard: 'Difícil',
+    machinePointsLabel: 'Puntos',
+    machineCta: 'Jugar contra la máquina',
+    machineCtaBusy: 'Preparando la mesa…',
+    machineBotNote: 'Los rivales son bots y están identificados como tales en la mesa.',
     quickPlaySectionTitle: 'Partida rápida',
     quickPlay1v1Title: 'Buscar rival 1 vs 1',
     quickPlay1v1Sub: 'Emparejamiento automático a 30 puntos',
@@ -245,6 +257,25 @@ export const screenMessagesEsAr = {
     deleteConfirmActionCta: 'Sí, eliminar mi cuenta',
     deleteCancelCta: 'Cancelar',
   },
+  tutorial: {
+    title: 'Tutorial interactivo',
+    subtitle:
+      'Lecciones cortas con repartos fijos: probá la jugada correcta, recibí una corrección amable y guardá tu avance en la cuenta.',
+    lessonListAria: 'Lecciones del tutorial',
+    lessonDoneBadge: 'Hecha',
+    objectiveLabel: 'Objetivo',
+    yourHandLabel: 'Tus cartas',
+    callPrefix: 'Cantar',
+    respondPrefix: 'Responder',
+    signalPrefix: 'Mandar seña',
+    successFeedback: '¡Bien ahí! Esa es la jugada.',
+    skippedFeedback: 'Lección salteada: podés volver cuando quieras.',
+    nextLessonCta: 'Siguiente lección',
+    skipCta: 'Saltear lección',
+    backToLearnCta: 'Volver a Aprender',
+    progressLabel: (done: number, total: number) => `Progreso: ${done} de ${total} lecciones`,
+    guestProgressNote: 'Entrá con tu cuenta para guardar el avance entre dispositivos.',
+  },
   learn: {
     title: 'Aprender a jugar al Truco Argentino',
     subtitle:
@@ -253,6 +284,7 @@ export const screenMessagesEsAr = {
     tabHierarchy: 'Escala de cartas',
     tabSignals: 'Señas oficiales',
     tabTutorial: 'Tutorial interactivo',
+    openInteractiveTutorialCta: 'Abrir el tutorial interactivo',
     rulesBlocks: [
       {
         title: 'Objetivo y reparto (Malas y Buenas)',

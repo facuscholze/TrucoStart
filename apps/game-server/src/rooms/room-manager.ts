@@ -89,6 +89,7 @@ export class RoomManager {
         rulesetCode: spec.rulesetCode,
         ruleset: validation.value,
         turnTimeoutMs: spec.turnTimeoutMs,
+        ...(spec.practice ? { practice: spec.practice } : {}),
       },
       this.actorDeps,
     );

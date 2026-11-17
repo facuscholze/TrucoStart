@@ -11,6 +11,7 @@ export const ClientEventTypeSchema = z.enum([
   'game.signal',
   'chat.quick',
   'game.rejoin',
+  'practice.hint',
 ]);
 
 export const ServerEventTypeSchema = z.enum([
@@ -29,6 +30,7 @@ export const ServerEventTypeSchema = z.enum([
   'player.reconnected',
   'game.resync',
   'chat.quickMessage',
+  'practice.hint',
   'error',
 ]);
 

@@ -29,6 +29,18 @@ export const JoinCodeSchema = z
   .toUpperCase()
   .regex(joinCodeRegex, 'Código de mesa inválido');
 
+/** Dificultad declarada de los bots de práctica / entrenamiento. */
+export const BotDifficultySchema = z.enum(['EASY', 'MEDIUM', 'HARD']);
+export type BotDifficulty = z.infer<typeof BotDifficultySchema>;
+
+/** Configuración de una mesa de práctica: los asientos libres los ocupan bots. */
+export const PracticeConfigSchema = z
+  .object({
+    difficulty: BotDifficultySchema,
+  })
+  .strict();
+export type PracticeConfig = z.infer<typeof PracticeConfigSchema>;
+
 export const CreateTableRequestSchema = z
   .object({
     mode: GameModeSchema,
@@ -37,6 +49,8 @@ export const CreateTableRequestSchema = z
     targetScore: z.union([z.literal(15), z.literal(30)]).optional(),
     flor: z.boolean().optional(),
     turnTimeoutMs: z.number().int().min(500).max(120_000).optional().default(25_000),
+    /** Si viene, la mesa se crea como práctica y los asientos restantes son bots. */
+    practice: PracticeConfigSchema.optional(),
   })
   .strict();
 export type CreateTableRequest = z.infer<typeof CreateTableRequestSchema>;
@@ -157,6 +171,8 @@ export const TableDetailResponseSchema = z.object({
   inviteExpiresAt: z.string().nullable(),
   expiresAt: z.string(),
   createdAt: z.string(),
+  /** `true` para mesas de práctica contra la máquina (excluidas de estadísticas y rankings). */
+  isPractice: z.boolean(),
 });
 export type TableDetailResponse = z.infer<typeof TableDetailResponseSchema>;
 
@@ -252,6 +268,8 @@ export const RoomProvisionSpecSchema = z
     targetScore: z.union([z.literal(15), z.literal(30)]),
     florEnabled: z.boolean(),
     turnTimeoutMs: z.number().int().min(500).max(120_000),
+    /** Presente solo en mesas de práctica: los asientos no humanos son bots. */
+    practice: PracticeConfigSchema.nullable().optional(),
   })
   .strict();
 export type RoomProvisionSpec = z.infer<typeof RoomProvisionSpecSchema>;
@@ -261,6 +279,8 @@ export type RoomProvisionSpec = z.infer<typeof RoomProvisionSpecSchema>;
  */
 export const MatchStartedLifecycleEventSchema = z.object({
   kind: z.literal('match.started'),
+  /** `true` en mesas de práctica: la partida no cuenta para estadísticas ni rankings. */
+  practice: z.boolean().optional(),
   roomId: z.string().min(3).max(64),
   matchId: z.string().uuid(),
   startedAtMs: z.number().int().positive(),
@@ -299,6 +319,8 @@ export const MatchCompletedSequencedEventSchema = z.object({
 
 export const MatchCompletedLifecycleEventSchema = z.object({
   kind: z.literal('match.completed'),
+  /** `true` en mesas de práctica: no se persiste como partida competitiva. */
+  practice: z.boolean().optional(),
   matchId: z.string().uuid(),
   roomId: z.string().min(3).max(64),
   mode: GameModeSchema,

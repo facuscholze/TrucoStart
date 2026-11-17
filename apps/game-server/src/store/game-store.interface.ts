@@ -1,6 +1,7 @@
 import type { GameState, RuleSet } from '@truco/engine';
 import type {
   GameMode,
+  PracticeConfig,
   RulesetCode,
   ServerEventType,
   TableStatus,
@@ -17,6 +18,8 @@ export interface PersistedSeatBinding {
   readonly connected: boolean;
   readonly disconnectedAt: number | null;
   readonly graceDeadline: number | null;
+  /** `true` si el asiento lo ocupa un bot del servidor (mesas de práctica). */
+  readonly isBot: boolean;
 }
 
 export type EventAudience =
@@ -52,6 +55,8 @@ export interface PersistedRoomSnapshot {
   readonly turnDeadline: number | null;
   readonly processedEventIds: readonly string[];
   readonly updatedAt: number;
+  /** Presente en mesas de práctica: los asientos no humanos son bots. */
+  readonly practice?: PracticeConfig;
 }
 
 export interface GameStore {

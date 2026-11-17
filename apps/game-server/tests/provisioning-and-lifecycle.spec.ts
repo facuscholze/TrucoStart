@@ -339,6 +339,7 @@ describe('M4 Room Provisioning Contract & Match Lifecycle Publisher (Memory + Bu
       try {
         await publisher.publish({
           kind: 'match.started',
+          practice: false,
           roomId: '019a7e40-0000-7000-8000-000000000888',
           matchId: '019a7e40-0000-7000-8000-000000000889',
           startedAtMs: Date.now(),

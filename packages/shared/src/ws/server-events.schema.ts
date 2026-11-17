@@ -15,6 +15,8 @@ export const RoomSeatInfoSchema = z.object({
   nickname: z.string().nullable(),
   ready: z.boolean(),
   connected: z.boolean(),
+  /** `true` si el asiento lo ocupa un bot del servidor (nunca se presenta como humano). */
+  isBot: z.boolean(),
 });
 export type RoomSeatInfo = z.infer<typeof RoomSeatInfoSchema>;
 
@@ -175,3 +177,17 @@ export const WsErrorPayloadSchema = z.object({
   refEventId: z.string().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
 });
+
+/**
+ * Pista de entrenamiento (`practice.hint`): solo se emite en mesas de práctica.
+ * `suggestedAction` es un código estable de la jugada recomendada y `explanation`
+ * la frase rioplatense de una línea que se muestra al jugador.
+ */
+export const PracticeHintPayloadSchema = z.object({
+  roomId: RoomIdSchema,
+  seat: z.number().int().nonnegative(),
+  suggestedAction: z.string().min(1).max(64),
+  explanation: z.string().min(1).max(280),
+  difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']),
+});
+export type PracticeHintPayload = z.infer<typeof PracticeHintPayloadSchema>;

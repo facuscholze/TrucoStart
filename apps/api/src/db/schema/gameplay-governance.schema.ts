@@ -49,6 +49,8 @@ export const tablesTable = pgTable(
     joinCode: varchar('join_code', { length: 12 }).unique(),
     status: varchar('status', { length: 16 }).notNull().default('WAITING'),
     closedReason: varchar('closed_reason', { length: 32 }),
+    /** `true` en mesas de práctica contra la máquina (sin bots registrados, sin estadísticas). */
+    isPractice: boolean('is_practice').notNull().default(false),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -174,3 +176,15 @@ export const auditLogsTable = pgTable(
   },
   (t) => [index('audit_logs_actor_created_idx').on(t.actorId, t.createdAt)],
 );
+
+/**
+ * Progreso del tutorial interactivo por cuenta (lecciones completadas).
+ * Se guarda en la cuenta para que el avance sobreviva a cambios de dispositivo.
+ */
+export const tutorialProgressTable = pgTable('tutorial_progress', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => usersTable.id, { onDelete: 'cascade' }),
+  completedLessons: jsonb('completed_lessons').$type<string[]>().notNull().default([]),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

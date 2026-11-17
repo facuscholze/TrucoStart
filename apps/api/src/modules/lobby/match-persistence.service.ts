@@ -72,6 +72,8 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
 
   private async handleMatchStarted(event: MatchStartedLifecycleEvent): Promise<void> {
     if (!UUID_REGEX.test(event.roomId)) return;
+    // Defensa en profundidad: las partidas de práctica (bots) nunca se persisten como competitivas.
+    if (event.practice === true) return;
     const now = new Date(event.startedAtMs);
 
     const updated = await this.db.transaction(async (tx) => {
@@ -243,6 +245,8 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
   }
 
   private async handleMatchCompleted(event: MatchCompletedLifecycleEvent): Promise<void> {
+    // Práctica/entrenamiento: fuera de estadísticas, rankings y logros.
+    if (event.practice === true) return;
     const isUuidRoom = UUID_REGEX.test(event.roomId);
     const ruleset = resolveRuleSetByCode(event.rulesetCode);
     const rulesetRow = await this.lobbyRepository.ensureRulesetRow(ruleset);

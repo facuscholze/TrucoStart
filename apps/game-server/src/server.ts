@@ -7,6 +7,7 @@ import {
   type HealthResponse,
   type RoomProvisionSpec,
   verifyWsAuthTicket,
+  type BotDifficulty,
   type WsAuthTicketClaims,
   type WsEnvelope,
   WsEnvelopeSchema,
@@ -50,6 +51,13 @@ export interface GameServerOptions {
    * Debe permanecer sin definir en producción: el reparto usa `randomBytes(32)`.
    */
   readonly dealSeedHex?: string;
+  /** Rango de demora humana simulada de los bots (600–1.800 ms por defecto). */
+  readonly botDecisionMinDelayMs?: number;
+  readonly botDecisionMaxDelayMs?: number;
+  /** Reemplazo de jugadores desconectados por un bot (desactivado por defecto). */
+  readonly replaceDisconnectedWithBot?: boolean;
+  /** Dificultad del bot de reemplazo (por defecto `MEDIUM`). */
+  readonly botReplacementDifficulty?: BotDifficulty;
 }
 
 export interface GameServerInstance {
@@ -116,6 +124,18 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
     ...(options.ownerLeaseTtlMs !== undefined ? { ownerLeaseTtlMs: options.ownerLeaseTtlMs } : {}),
     ...(options.idleRoomTtlMs !== undefined ? { idleRoomTtlMs: options.idleRoomTtlMs } : {}),
     ...(options.dealSeedHex !== undefined ? { dealSeedHex: options.dealSeedHex } : {}),
+    ...(options.botDecisionMinDelayMs !== undefined
+      ? { botDecisionMinDelayMs: options.botDecisionMinDelayMs }
+      : {}),
+    ...(options.botDecisionMaxDelayMs !== undefined
+      ? { botDecisionMaxDelayMs: options.botDecisionMaxDelayMs }
+      : {}),
+    ...(options.replaceDisconnectedWithBot !== undefined
+      ? { replaceDisconnectedWithBot: options.replaceDisconnectedWithBot }
+      : {}),
+    ...(options.botReplacementDifficulty !== undefined
+      ? { botReplacementDifficulty: options.botReplacementDifficulty }
+      : {}),
     nowFn,
   });
 

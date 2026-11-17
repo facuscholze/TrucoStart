@@ -7,6 +7,9 @@ import {
   normalizeNicknameLower,
   type PatchMeRequest,
   type PublicUserProfile,
+  TUTORIAL_LESSON_IDS,
+  type TutorialProgressResponse,
+  type TutorialProgressUpdateRequest,
   type UserMatchesResponse,
   type UserStatsResponse,
   validateNickname,
@@ -142,6 +145,38 @@ export class UsersService {
       xp: found.profile.xp,
       bio: found.profile.bio,
       createdAt: found.user.createdAt.toISOString(),
+    };
+  }
+
+  async getTutorialProgress(principal: AuthenticatedPrincipal): Promise<TutorialProgressResponse> {
+    const progress = await this.usersRepo.getTutorialProgress(principal.userId);
+    return {
+      completedLessons: progress.completedLessons as TutorialProgressResponse['completedLessons'],
+      totalLessons: TUTORIAL_LESSON_IDS.length,
+      updatedAt: progress.updatedAt ? progress.updatedAt.toISOString() : null,
+    };
+  }
+
+  async saveTutorialProgress(
+    principal: AuthenticatedPrincipal,
+    input: TutorialProgressUpdateRequest,
+    meta: RequestClientMeta,
+  ): Promise<TutorialProgressResponse> {
+    const unique = Array.from(new Set(input.completedLessons));
+    const updatedAt = await this.usersRepo.saveTutorialProgress(principal.userId, unique);
+    await this.audit.record({
+      actorId: principal.userId,
+      action: 'users.tutorial.progress',
+      entity: 'user',
+      entityId: principal.userId,
+      ip: meta.ip,
+      now: new Date(),
+      afterState: { completedLessons: unique },
+    });
+    return {
+      completedLessons: unique,
+      totalLessons: TUTORIAL_LESSON_IDS.length,
+      updatedAt: updatedAt.toISOString(),
     };
   }
 

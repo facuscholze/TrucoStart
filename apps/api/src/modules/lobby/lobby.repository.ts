@@ -89,6 +89,7 @@ export class LobbyRepository {
     readonly now: Date;
     readonly expiresAt: Date;
     readonly participants: readonly InitialSeatParticipant[];
+    readonly isPractice?: boolean;
   }): Promise<TableAggregate> {
     return this.db.transaction(async (tx) => {
       const participantIds = input.participants.map((p) => p.userId);
@@ -133,6 +134,7 @@ export class LobbyRepository {
             visibility: input.visibility,
             joinCode,
             status: 'WAITING',
+            isPractice: input.isPractice ?? false,
             expiresAt: input.expiresAt,
             createdAt: input.now,
             updatedAt: input.now,

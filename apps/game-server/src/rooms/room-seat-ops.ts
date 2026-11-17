@@ -2,12 +2,14 @@ import type { RuleSet } from '@truco/engine';
 import type {
   ErrorCode,
   GameMode,
+  PracticeConfig,
   RulesetCode,
   TableStatus,
   TableVisibility,
   WsAuthTicketClaims,
 } from '@truco/shared';
 import type { PersistedRoomSnapshot, PersistedSeatBinding } from '../store/game-store.interface.js';
+import { buildBotSeats } from './bot-seats.js';
 
 export function createEmptySeatBinding(seat: number): PersistedSeatBinding {
   return {
@@ -20,6 +22,7 @@ export function createEmptySeatBinding(seat: number): PersistedSeatBinding {
     connected: false,
     disconnectedAt: null,
     graceDeadline: null,
+    isBot: false,
   };
 }
 
@@ -31,8 +34,12 @@ export function buildEmptyRoomSnapshot(params: {
   readonly ruleset?: RuleSet;
   readonly turnTimeoutMs: number;
   readonly nowMs: number;
+  readonly practice?: PracticeConfig | undefined;
 }): PersistedRoomSnapshot {
   const numSeats = params.mode === '2v2' ? 4 : 2;
+  const seats = params.practice
+    ? buildBotSeats({ mode: params.mode, difficulty: params.practice.difficulty })
+    : Array.from({ length: numSeats }, (_, idx) => createEmptySeatBinding(idx));
   return {
     roomId: params.roomId,
     status: 'WAITING',
@@ -41,7 +48,8 @@ export function buildEmptyRoomSnapshot(params: {
     rulesetCode: params.rulesetCode,
     ...(params.ruleset !== undefined ? { ruleset: params.ruleset } : {}),
     turnTimeoutMs: params.turnTimeoutMs,
-    seats: Array.from({ length: numSeats }, (_, idx) => createEmptySeatBinding(idx)),
+    seats,
+    ...(params.practice !== undefined ? { practice: params.practice } : {}),
     matchId: null,
     matchStartedAtMs: null,
     seedCommitment: null,
@@ -61,14 +69,16 @@ export function prepareRecoveredSnapshot(
   graceMs: number,
 ): PersistedRoomSnapshot {
   const adjustedSeats = snapshot.seats.map((s) =>
-    s.userId !== null && snapshot.status === 'IN_GAME'
-      ? {
-          ...s,
-          connected: false,
-          disconnectedAt: s.disconnectedAt ?? nowMs,
-          graceDeadline: s.graceDeadline ?? nowMs + graceMs,
-        }
-      : { ...s, connected: false },
+    s.isBot
+      ? { ...s, connected: true }
+      : s.userId !== null && snapshot.status === 'IN_GAME'
+        ? {
+            ...s,
+            connected: false,
+            disconnectedAt: s.disconnectedAt ?? nowMs,
+            graceDeadline: s.graceDeadline ?? nowMs + graceMs,
+          }
+        : { ...s, connected: false },
   );
   return { ...snapshot, seats: adjustedSeats };
 }
@@ -83,7 +93,7 @@ export function evaluateSeatJoin(
   claims: WsAuthTicketClaims,
   preferredSeat?: number,
 ): JoinSeatOutcome {
-  const existingSeat = seats.findIndex((s) => s.userId === claims.userId);
+  const existingSeat = seats.findIndex((s) => s.userId === claims.userId && !s.isBot);
   if (existingSeat !== -1) {
     seats[existingSeat] = { ...seats[existingSeat]!, connected: true };
     return { ok: true, seatIdx: existingSeat, alreadySeated: true };

@@ -27,6 +27,7 @@ export function classifyClientEventCategory(eventType: ClientEventType): WsRateL
     case 'game.call':
     case 'game.respond':
     case 'game.foldHand':
+    case 'practice.hint':
     case 'game.signal':
       return 'action';
   }

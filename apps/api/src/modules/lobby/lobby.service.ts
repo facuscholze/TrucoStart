@@ -175,6 +175,8 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       targetScore: body.targetScore,
       flor: body.flor,
     });
+    // Las mesas de práctica son siempre privadas y efímeras: no aparecen en el lobby público.
+    const visibility: TableVisibility = body.practice ? 'PRIVATE' : body.visibility;
     const rulesetRow = await this.lobbyRepository.ensureRulesetRow(ruleset);
     const turnTimeoutMs = body.turnTimeoutMs ?? this.config.defaultTurnTimeoutMs;
     const nowMs = this.config.nowFn();
@@ -188,7 +190,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       tableId,
       ownerId: principal.userId,
       mode: body.mode,
-      visibility: body.visibility,
+      visibility,
       rulesetId: rulesetRow.id,
       rulesetCode,
       targetScore,
@@ -204,18 +206,20 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
           team: 0,
         },
       ],
+      isPractice: Boolean(body.practice),
     });
 
     try {
       await this.provisioner.provisionRoom({
         roomId: tableId,
         mode: body.mode,
-        visibility: body.visibility,
+        visibility,
         rulesetCode,
         ruleset: ruleset as unknown as Record<string, unknown>,
         targetScore,
         florEnabled: ruleset.flor.enabled,
         turnTimeoutMs,
+        ...(body.practice ? { practice: body.practice } : {}),
       });
     } catch (err) {
       await this.lobbyRepository.rollbackCreatedTable(tableId).catch(() => undefined);
@@ -231,18 +235,21 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       now,
       afterState: {
         mode: body.mode,
-        visibility: body.visibility,
+        visibility,
         rulesetCode,
         targetScore,
         florEnabled: ruleset.flor.enabled,
         turnTimeoutMs,
+        ...(body.practice ? { practice: body.practice.difficulty } : {}),
       },
     });
 
-    this.realtimeGateway.broadcastTableUpsert(
-      aggregate.row.visibility as TableVisibility,
-      toPublicTableSummary(aggregate),
-    );
+    if (!body.practice) {
+      this.realtimeGateway.broadcastTableUpsert(
+        aggregate.row.visibility as TableVisibility,
+        toPublicTableSummary(aggregate),
+      );
+    }
 
     const invite = this.mintInviteForAggregate(aggregate);
     return TableDetailResponseSchema.parse(

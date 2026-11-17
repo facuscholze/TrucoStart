@@ -9,6 +9,7 @@ import {
   type ProfileRow,
   profilesTable,
   sessionsTable,
+  tutorialProgressTable,
   type UserRow,
   usersTable,
 } from '../../db/schema/index.js';
@@ -88,6 +89,35 @@ export class UsersRepository {
       .where(eq(profilesTable.userId, userId))
       .returning();
     return updated!;
+  }
+
+  async getTutorialProgress(
+    userId: string,
+  ): Promise<{ completedLessons: string[]; updatedAt: Date | null }> {
+    const rows = await this.db
+      .select({
+        completedLessons: tutorialProgressTable.completedLessons,
+        updatedAt: tutorialProgressTable.updatedAt,
+      })
+      .from(tutorialProgressTable)
+      .where(eq(tutorialProgressTable.userId, userId))
+      .limit(1);
+    const row = rows[0];
+    return row
+      ? { completedLessons: row.completedLessons, updatedAt: row.updatedAt }
+      : { completedLessons: [], updatedAt: null };
+  }
+
+  async saveTutorialProgress(userId: string, completedLessons: string[]): Promise<Date> {
+    const rows = await this.db
+      .insert(tutorialProgressTable)
+      .values({ userId, completedLessons, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: tutorialProgressTable.userId,
+        set: { completedLessons, updatedAt: new Date() },
+      })
+      .returning({ updatedAt: tutorialProgressTable.updatedAt });
+    return rows[0]!.updatedAt;
   }
 
   async computeUserStats(userId: string): Promise<UserStatsResponse> {

@@ -29,14 +29,16 @@ export async function emitMatchStartedLifecycle(params: {
   readonly matchId: string;
   readonly startedAtMs: number;
   readonly seats: readonly PersistedSeatBinding[];
+  readonly practice?: boolean;
 }): Promise<void> {
   await params.publisher.publish({
     kind: 'match.started',
+    practice: params.practice ?? false,
     roomId: params.roomId,
     matchId: params.matchId,
     startedAtMs: params.startedAtMs,
     seats: params.seats
-      .filter((s): s is PersistedSeatBinding & { userId: string } => s.userId !== null)
+      .filter((s): s is PersistedSeatBinding & { userId: string } => s.userId !== null && !s.isBot)
       .map((s) => ({
         seat: s.seat,
         team: s.team,
@@ -75,6 +77,7 @@ export async function emitMatchCompletedLifecycle(params: {
   readonly finalState: GameState;
   readonly triggeringAction: Action;
   readonly seats: readonly PersistedSeatBinding[];
+  readonly practice?: boolean;
 }): Promise<void> {
   const {
     publisher,
@@ -102,7 +105,7 @@ export async function emitMatchCompletedLifecycle(params: {
   }
 
   const players = seats
-    .filter((s): s is PersistedSeatBinding & { userId: string } => s.userId !== null)
+    .filter((s): s is PersistedSeatBinding & { userId: string } => s.userId !== null && !s.isBot)
     .map((s) => {
       let outcome: MatchOutcome;
       if (abandonedSeat !== null && s.seat === abandonedSeat) {
@@ -136,6 +139,7 @@ export async function emitMatchCompletedLifecycle(params: {
 
   await publisher.publish({
     kind: 'match.completed',
+    practice: params.practice ?? false,
     matchId,
     roomId,
     mode,

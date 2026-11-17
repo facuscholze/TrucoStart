@@ -143,6 +143,11 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('game.rejoin'),
     payload: GameRejoinPayloadSchema,
   }),
+  z.object({
+    ...BaseClientFields,
+    type: z.literal('practice.hint'),
+    payload: z.object({ roomId: RoomIdSchema }),
+  }),
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

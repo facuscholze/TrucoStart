@@ -9,6 +9,7 @@ import {
   Inject,
   Param,
   Patch,
+  Put,
   Query,
   Req,
   Res,
@@ -21,6 +22,8 @@ import {
   type MeResponse,
   PatchMeRequestSchema,
   type PublicUserProfile,
+  type TutorialProgressResponse,
+  TutorialProgressUpdateRequestSchema,
   type UserMatchesResponse,
   type UserStatsResponse,
 } from '@truco/shared';
@@ -66,6 +69,25 @@ export class UsersController {
   ): Promise<MeResponse> {
     const input = parseWithZod(PatchMeRequestSchema, rawBody);
     return this.usersService.updateOwnProfile(principal, input, extractClientMeta(req));
+  }
+
+  @Get('me/tutorial')
+  @UseGuards(SessionAuthGuard)
+  async getTutorialProgress(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+  ): Promise<TutorialProgressResponse> {
+    return this.usersService.getTutorialProgress(principal);
+  }
+
+  @Put('me/tutorial')
+  @UseGuards(SessionAuthGuard)
+  async putTutorialProgress(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Body() rawBody: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<TutorialProgressResponse> {
+    const input = parseWithZod(TutorialProgressUpdateRequestSchema, rawBody);
+    return this.usersService.saveTutorialProgress(principal, input, extractClientMeta(req));
   }
 
   @Get('me/export')

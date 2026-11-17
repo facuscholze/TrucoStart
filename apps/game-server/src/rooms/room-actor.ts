@@ -1,11 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { type Action, applyAction, type GameState, type RuleSet, viewFor } from '@truco/engine';
+import {
+  type Action,
+  applyAction,
+  buildCardKnowledge,
+  BOT_DEFAULT_DIFFICULTY,
+  estimateHandWinRate,
+  type GameState,
+  scoreEnvido,
+  type RuleSet,
+  viewFor,
+} from '@truco/engine';
 import {
   type ClientMessage,
   DEFAULT_RECONNECT_GRACE_MS,
   DEFAULT_TURN_TIMEOUT_MS,
   type ErrorCode,
+  type BotDifficulty,
   type GameMode,
+  type PracticeConfig,
   QUICK_CHAT_PHRASES,
   type RoomSeatInfo,
   type RulesetCode,
@@ -27,6 +39,8 @@ import type {
   PersistedSequencedEvent,
 } from '../store/game-store.interface.js';
 import { mapClientMessageToEngineAction } from './action-mapper.js';
+import { botNicknameFor, botUserId, decideBotActionForSeat, pickBotDelayMs } from './bot-seats.js';
+import { buildPracticeHint } from './practice-hint.js';
 import {
   buildSequencedEvent,
   isEventVisibleToSeat,
@@ -63,6 +77,15 @@ export interface RoomActorDeps {
   readonly nowFn?: () => number;
   /** Semilla de reparto fija para tests/E2E reproducibles (nunca en producción). */
   readonly dealSeedHex?: string;
+  /** Rango de la demora humana simulada de los bots (por defecto 600–1.800 ms). */
+  readonly botDecisionMinDelayMs?: number;
+  readonly botDecisionMaxDelayMs?: number;
+  /** Reemplazo automático de jugadores desconectados por un bot (desactivado por defecto). */
+  readonly replaceDisconnectedWithBot?: boolean;
+  /** Dificultad del bot de reemplazo (por defecto `MEDIUM`). */
+  readonly botReplacementDifficulty?: BotDifficulty;
+  /** PRNG para la demora de los bots (inyectable en tests para determinismo). */
+  readonly botRandomFn?: () => number;
 }
 
 export interface RoomCreateParams {
@@ -72,6 +95,8 @@ export interface RoomCreateParams {
   readonly rulesetCode: RulesetCode;
   readonly ruleset?: RuleSet;
   readonly turnTimeoutMs?: number;
+  /** Configuración de práctica: los asientos no humanos son bots. */
+  readonly practice?: PracticeConfig;
 }
 
 export class RoomActor {
@@ -96,8 +121,30 @@ export class RoomActor {
   private turnWarningAt: number | null;
   private readonly processedEventIds: string[];
 
-  private readonly deps: Required<Omit<RoomActorDeps, 'dealSeedHex'>> &
-    Pick<RoomActorDeps, 'dealSeedHex'>;
+  private readonly deps: Required<
+    Omit<
+      RoomActorDeps,
+      | 'dealSeedHex'
+      | 'botDecisionMinDelayMs'
+      | 'botDecisionMaxDelayMs'
+      | 'replaceDisconnectedWithBot'
+      | 'botReplacementDifficulty'
+      | 'botRandomFn'
+    >
+  > &
+    Pick<
+      RoomActorDeps,
+      | 'dealSeedHex'
+      | 'botDecisionMinDelayMs'
+      | 'botDecisionMaxDelayMs'
+      | 'replaceDisconnectedWithBot'
+      | 'botReplacementDifficulty'
+      | 'botRandomFn'
+    >;
+  private readonly practice: PracticeConfig | undefined;
+  private readonly botDifficultyBySeat = new Map<number, BotDifficulty>();
+  private botTimer: ReturnType<typeof setTimeout> | null = null;
+  private botTurnCounter = 0;
   private readonly timers = new RoomTimerController();
   private readonly socketsBySeat = new Map<number, Socket>();
   private writeChain: Promise<void> = Promise.resolve();
@@ -117,6 +164,12 @@ export class RoomActor {
     this.status = snapshot.status;
     this.mode = snapshot.mode;
     this.visibility = snapshot.visibility;
+    this.practice = snapshot.practice;
+    for (const seat of snapshot.seats) {
+      if (seat.isBot && snapshot.practice) {
+        this.botDifficultyBySeat.set(seat.seat, snapshot.practice.difficulty);
+      }
+    }
     this.rulesetCode = snapshot.rulesetCode;
     this.ruleset = snapshot.ruleset;
     this.turnTimeoutMs = snapshot.turnTimeoutMs;
@@ -143,6 +196,19 @@ export class RoomActor {
       reconnectGraceMs: this.reconnectGraceMs,
       nowFn: deps.nowFn ?? Date.now,
       ...(deps.dealSeedHex !== undefined ? { dealSeedHex: deps.dealSeedHex } : {}),
+      ...(deps.botDecisionMinDelayMs !== undefined
+        ? { botDecisionMinDelayMs: deps.botDecisionMinDelayMs }
+        : {}),
+      ...(deps.botDecisionMaxDelayMs !== undefined
+        ? { botDecisionMaxDelayMs: deps.botDecisionMaxDelayMs }
+        : {}),
+      ...(deps.replaceDisconnectedWithBot !== undefined
+        ? { replaceDisconnectedWithBot: deps.replaceDisconnectedWithBot }
+        : {}),
+      ...(deps.botReplacementDifficulty !== undefined
+        ? { botReplacementDifficulty: deps.botReplacementDifficulty }
+        : {}),
+      ...(deps.botRandomFn !== undefined ? { botRandomFn: deps.botRandomFn } : {}),
     };
   }
 
@@ -182,6 +248,7 @@ export class RoomActor {
 
   dispose(): void {
     this.timers.clearAll();
+    this.clearBotTimer();
     this.socketsBySeat.clear();
   }
 
@@ -191,7 +258,7 @@ export class RoomActor {
 
   async clearAllSeatedUsers(): Promise<void> {
     for (const s of this.seats) {
-      if (s.userId) {
+      if (s.userId && !s.isBot) {
         await this.deps.store.clearUserActiveRoom(s.userId, this.roomId);
       }
     }
@@ -214,6 +281,7 @@ export class RoomActor {
       nickname: s.nickname,
       ready: s.ready,
       connected: s.connected,
+      isBot: s.isBot,
     }));
   }
 
@@ -237,6 +305,7 @@ export class RoomActor {
       turnDeadline: this.turnDeadline,
       processedEventIds: [...this.processedEventIds],
       updatedAt: nowMs,
+      ...(this.practice !== undefined ? { practice: this.practice } : {}),
     };
   }
 
@@ -330,6 +399,7 @@ export class RoomActor {
       if (msg.type === 'table.leave') return this.onTableLeave(seatIdx);
       if (msg.type === 'table.ready') return this.onTableReady(seatIdx, msg.payload.ready);
       if (msg.type === 'chat.quick') return this.onChatQuick(seatIdx, msg.payload.phraseId);
+      if (msg.type === 'practice.hint') return this.onPracticeHint(socket, seatIdx, msg.eventId);
       return this.onPlayerGameIntent(socket, seatIdx, msg);
     });
   }
@@ -361,6 +431,12 @@ export class RoomActor {
     if (!outcome.alreadySeated) await this.deps.store.setUserActiveRoom(claims.userId, this.roomId);
     const now = this.deps.nowFn();
     await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
+
+    // Mesa de práctica: los bots ya están listos, así que el humano arranca jugando al entrar.
+    if (this.practice && this.status !== 'IN_GAME') {
+      this.seats[outcome.seatIdx] = { ...this.seats[outcome.seatIdx]!, ready: true };
+      await this.startMatchIfAllReady(now);
+    }
   }
 
   private async onTableLeave(seatIdx: number): Promise<void> {
@@ -393,10 +469,19 @@ export class RoomActor {
       await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
       return;
     }
+    await this.startMatchIfAllReady(now);
+  }
+
+  private async startMatchIfAllReady(now: number): Promise<void> {
+    if (this.status === 'IN_GAME' || this.gameState) return;
+    if (!this.seats.every((s) => s.userId !== null && s.ready)) {
+      await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
+      return;
+    }
 
     this.status = 'IN_GAME';
     for (const s of this.seats) {
-      if (s.userId) {
+      if (s.userId && !s.isBot) {
         await this.deps.store.setUserActiveRoom(s.userId, this.roomId);
       }
     }
@@ -427,13 +512,17 @@ export class RoomActor {
     this.gameState = started.gameState;
     this.refreshTurnTimers(now);
     await this.persistAndEmit(now, started.events);
-    await emitMatchStartedLifecycle({
-      publisher: this.deps.lifecyclePublisher,
-      roomId: this.roomId,
-      matchId: started.matchId,
-      startedAtMs: now,
-      seats: this.seats,
-    });
+    if (!this.practice) {
+      await emitMatchStartedLifecycle({
+        publisher: this.deps.lifecyclePublisher,
+        roomId: this.roomId,
+        matchId: started.matchId,
+        startedAtMs: now,
+        seats: this.seats,
+        practice: false,
+      });
+    }
+    this.scheduleBotTurnIfNeeded();
   }
 
   private async onChatQuick(seatIdx: number, phraseId: string): Promise<void> {
@@ -511,7 +600,7 @@ export class RoomActor {
       for (let i = 0; i < this.seats.length; i++) {
         const s = this.seats[i]!;
         this.seats[i] = { ...s, ready: false };
-        if (s.userId) await this.deps.store.clearUserActiveRoom(s.userId, this.roomId);
+        if (s.userId && !s.isBot) await this.deps.store.clearUserActiveRoom(s.userId, this.roomId);
       }
     } else {
       this.refreshTurnTimers(now);
@@ -531,7 +620,16 @@ export class RoomActor {
     });
     await this.persistAndEmit(now, outbound);
 
-    if (matchJustFinished && this.matchId && this.seedCommitment && this.revealedSeed) {
+    if (!matchJustFinished) this.scheduleBotTurnIfNeeded();
+
+    // Las mesas de práctica son efímeras: no generan partidas ni estadísticas competitivas.
+    if (
+      !this.practice &&
+      matchJustFinished &&
+      this.matchId &&
+      this.seedCommitment &&
+      this.revealedSeed
+    ) {
       await emitMatchCompletedLifecycle({
         publisher: this.deps.lifecyclePublisher,
         store: this.deps.store,
@@ -546,8 +644,135 @@ export class RoomActor {
         finalState: this.gameState,
         triggeringAction: action,
         seats: snapshotSeatsAtEnd,
+        practice: false,
       });
     }
+  }
+
+  /**
+   * Reemplazo de un jugador desconectado por un bot (feature opt-in, desactivada por defecto).
+   * El bot ocupa el asiento con la dificultad configurada y sigue jugando desde `PlayerView`.
+   */
+  private async convertSeatToBot(seatIdx: number, nowMs: number): Promise<void> {
+    const seat = this.seats[seatIdx];
+    if (!seat || seat.isBot || !seat.userId) return;
+    const previousUserId = seat.userId;
+    const difficulty: BotDifficulty =
+      this.practice?.difficulty ?? this.deps.botReplacementDifficulty ?? BOT_DEFAULT_DIFFICULTY;
+    this.botDifficultyBySeat.set(seatIdx, difficulty);
+    this.seats[seatIdx] = {
+      ...seat,
+      userId: botUserId(seatIdx),
+      nickname: botNicknameFor(difficulty, seatIdx),
+      sessionId: null,
+      ready: true,
+      connected: true,
+      disconnectedAt: null,
+      graceDeadline: null,
+      isBot: true,
+    };
+    this.timers.clearDisconnectGrace(seatIdx);
+    await this.deps.store.clearUserActiveRoom(previousUserId, this.roomId);
+    await this.persistAndEmit(nowMs, [this.buildTableStateEvent(nowMs)]);
+    this.scheduleBotTurnIfNeeded();
+  }
+
+  private clearBotTimer(): void {
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
+  }
+
+  private botDifficultyForSeat(seat: number): BotDifficulty {
+    return (
+      this.botDifficultyBySeat.get(seat) ?? this.practice?.difficulty ?? BOT_DEFAULT_DIFFICULTY
+    );
+  }
+
+  /**
+   * Programa la próxima decisión de un bot con demora humana simulada.
+   * La decisión se toma SIEMPRE desde `viewFor(state, seat)` (nunca del estado completo).
+   */
+  private scheduleBotTurnIfNeeded(): void {
+    this.clearBotTimer();
+    if (this.status !== 'IN_GAME' || !this.gameState) return;
+    if (this.gameState.status !== 'IN_PROGRESS') return;
+
+    const seat = this.gameState.hand.activeSeat;
+    const binding = this.seats[seat];
+    if (!binding?.isBot) return;
+
+    const difficulty = this.botDifficultyForSeat(seat);
+    const random = this.deps.botRandomFn ?? Math.random;
+    const delay = pickBotDelayMs({
+      minMs: this.deps.botDecisionMinDelayMs ?? 600,
+      maxMs: this.deps.botDecisionMaxDelayMs ?? 1_800,
+      random01: random(),
+    });
+
+    this.botTimer = setTimeout(
+      () => {
+        this.botTimer = null;
+        void this.enqueue(() => this.runBotTurn(seat, difficulty));
+      },
+      Math.max(1, delay),
+    );
+  }
+
+  private async runBotTurn(seat: number, difficulty: BotDifficulty): Promise<void> {
+    if (this.status !== 'IN_GAME' || !this.gameState) return;
+    if (this.gameState.status !== 'IN_PROGRESS') return;
+    if (this.gameState.hand.activeSeat !== seat) return;
+    if (!this.seats[seat]?.isBot) return;
+
+    const view = viewFor(this.gameState, seat);
+    const action = decideBotActionForSeat({
+      view,
+      difficulty,
+      seed: this.botTurnCounter++ + this.seq * 7919,
+    });
+    await this.applyEngineActionInternal(action);
+  }
+
+  private async onPracticeHint(socket: Socket, seatIdx: number, refEventId: string): Promise<void> {
+    if (!this.practice) {
+      this.sendSocketError(
+        socket,
+        'FORBIDDEN',
+        'Las pistas de entrenamiento solo existen en partidas de práctica',
+        refEventId,
+      );
+      return;
+    }
+    if (this.status !== 'IN_GAME' || !this.gameState) {
+      this.sendSocketError(socket, 'INVALID_STATE', 'No hay una partida activa', refEventId);
+      return;
+    }
+    if (this.gameState.status !== 'IN_PROGRESS') return;
+
+    const view = viewFor(this.gameState, seatIdx);
+    const hint = buildPracticeHint({
+      view,
+      envidoTanto: scoreEnvido(view.hand.myInitialCards),
+      handStrength: estimateHandWinRate(view, buildCardKnowledge(view)),
+    });
+    const now = this.deps.nowFn();
+    await this.persistAndEmit(now, [
+      buildSequencedEvent(
+        this.allocateSeq,
+        now,
+        'practice.hint',
+        {
+          roomId: this.roomId,
+          seat: seatIdx,
+          suggestedAction: hint.suggestedAction,
+          explanation: hint.explanation,
+          difficulty: this.practice.difficulty,
+        },
+        { kind: 'SEAT', seat: seatIdx },
+      ),
+    ]);
   }
 
   async handleDisconnect(socket: Socket, userId: string): Promise<void> {
@@ -560,6 +785,11 @@ export class RoomActor {
       if (this.status !== 'IN_GAME') {
         this.seats[seatIdx] = { ...this.seats[seatIdx]!, connected: false };
         await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
+        return;
+      }
+
+      if (this.deps.replaceDisconnectedWithBot) {
+        await this.convertSeatToBot(seatIdx, now);
         return;
       }
 
@@ -584,7 +814,10 @@ export class RoomActor {
         seat: seatIdx,
         delayMs: this.reconnectGraceMs,
         enqueue: (t) => this.enqueue(t),
-        shouldAbandon: () => this.status === 'IN_GAME' && !this.seats[seatIdx]?.connected,
+        shouldAbandon: () =>
+          this.status === 'IN_GAME' &&
+          !this.seats[seatIdx]?.connected &&
+          !this.seats[seatIdx]?.isBot,
         applySystemAction: (a) => this.applyEngineActionInternal(a),
       });
     });

@@ -57,6 +57,7 @@ function defineGameStoreContractSuite(
             connected: true,
             disconnectedAt: null,
             graceDeadline: null,
+            isBot: false,
           },
           {
             seat: 1,
@@ -68,6 +69,7 @@ function defineGameStoreContractSuite(
             connected: true,
             disconnectedAt: null,
             graceDeadline: null,
+            isBot: false,
           },
         ],
         matchId: 'match-contract-1',

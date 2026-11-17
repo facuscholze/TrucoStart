@@ -15,6 +15,13 @@
       "when": 1794844560104,
       "tag": "0001_rare_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794844560999,
+      "tag": "0002_practice_tables_and_tutorial_progress",
+      "breakpoints": true
     }
   ]
 }

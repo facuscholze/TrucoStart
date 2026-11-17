@@ -105,6 +105,7 @@ export function toTableDetailResponse(
     joinCode: options.includeJoinCredentials ? agg.row.joinCode : null,
     inviteToken: options.includeJoinCredentials ? (options.inviteToken ?? null) : null,
     inviteExpiresAt: options.includeJoinCredentials ? (options.inviteExpiresAt ?? null) : null,
+    isPractice: agg.row.isPractice,
     expiresAt: agg.row.expiresAt.toISOString(),
     createdAt: agg.row.createdAt.toISOString(),
   };

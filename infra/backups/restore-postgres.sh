@@ -18,7 +18,8 @@ fi
 
 if [ -f "${dump}.sha256" ]; then
   echo "[restore] Verificando checksum"
-  (cd "$(dirname "$dump")" && sha256sum --check "$(basename "$dump").sha256")
+  # `-c` es la forma corta compatible con GNU coreutils y con BusyBox (alpine).
+  (cd "$(dirname "$dump")" && sha256sum -c "$(basename "$dump").sha256")
 fi
 
 # `--single-transaction` y `--clean` no se llevan bien: al restaurar sobre una base vacía

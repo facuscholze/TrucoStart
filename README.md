@@ -102,7 +102,29 @@ pnpm build         # Compilación de todos los paquetes y aplicaciones
 # E2E y capturas de la PWA (apps/web)
 pnpm --filter @truco/web test:e2e        # Playwright multi-cliente (Desktop + Mobile)
 pnpm --filter @truco/web screenshots:m5b # Regenera docs/screenshots/m5b-*.png
+
+# Panel administrativo (apps/admin)
+pnpm --filter @truco/admin dev           # http://localhost:5174 (proxy /v1 -> API :3001)
+pnpm --filter @truco/admin test          # Suite del panel (login 2FA, RBAC, PII, auditoría)
 ```
+
+### Crear el primer administrador (sin contraseñas por defecto)
+
+No existe ningún endpoint que cree administradores: el alta inicial se hace por CLI y el comando
+imprime **una sola vez** el secreto TOTP, la URI `otpauth://` y los códigos de recuperación de un solo uso.
+
+```bash
+pnpm --filter @truco/api admin:create -- \
+  --email admin@truco.ar --nickname AdminPrincipal \
+  --password 'UnaClaveMuyLarga123' --role ADMIN
+```
+
+Roles válidos: `SUPPORT`, `MODERATOR`, `ADMIN`. El 2FA (TOTP) es obligatorio para los tres.
+El ingreso del panel usa la cookie `truco_admin_access` (`Path=/v1/admin`, `SameSite=Strict`, 30 min),
+separada de las cookies de jugador.
+
+> Las capturas del panel (`docs/screenshots/m7-panel-*.png`) se generan con `VITE_ADMIN_DEMO=1`,
+> un cliente de demostración con datos de ejemplo que **nunca** se activa en producción.
 
 ---
 

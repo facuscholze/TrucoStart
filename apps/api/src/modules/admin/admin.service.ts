@@ -15,6 +15,7 @@ import {
   type SanctionItem,
   type SanctionType,
   maskEmail,
+  SANCTION_TYPE_LABELS_ES_AR,
 } from '@truco/shared';
 import { DomainApiException } from '../../common/api-exception.js';
 import { generateUuidV7 } from '../../common/uuidv7.js';
@@ -23,6 +24,7 @@ import type { AdminPrincipal } from './admin-auth.service.js';
 import { ADMIN_RUNTIME_CONFIG, type AdminRuntimeConfig } from './admin.config.js';
 import { AdminRepository } from './admin.repository.js';
 import { summarizeReplay, toReplayEvents } from './replay.js';
+import { USER_EVICTION, type UserEvictionPort } from './ports/user-eviction.js';
 
 const NEUTRAL_NICKNAME_PREFIX = 'Jugador';
 
@@ -32,6 +34,7 @@ export class AdminService {
     @Inject(ADMIN_RUNTIME_CONFIG) private readonly config: AdminRuntimeConfig,
     @Inject(AdminRepository) private readonly repo: AdminRepository,
     @Inject(AuditRepository) private readonly audit: AuditRepository,
+    @Inject(USER_EVICTION) private readonly eviction: UserEvictionPort,
   ) {}
 
   private canSeePii(principal: AdminPrincipal): boolean {
@@ -286,6 +289,15 @@ export class AdminService {
       sessionsRevoked += await this.repo.revokeAllAdminSessionsForUser(userId, now);
     }
 
+    // Expulsión inmediata del game-server: no espera al caché de moderación (15 s).
+    const eviction = await this.eviction
+      .evict({
+        userId,
+        reason: `Sanción: ${SANCTION_TYPE_LABELS_ES_AR[input.type]} — ${input.reason}`,
+        disconnect: input.type === 'SUSPEND' || input.type === 'BAN',
+      })
+      .catch(() => ({ evicted: false, rooms: [] }));
+
     await this.audit.record({
       actorId: principal.userId,
       action: 'ADMIN_SANCTION_ISSUED',
@@ -299,6 +311,7 @@ export class AdminService {
         expiresAt: expiresAt?.toISOString() ?? null,
         reportId: input.reportId ?? null,
         sessionsRevoked,
+        roomsEvicted: eviction.rooms,
       },
       ip,
       now,

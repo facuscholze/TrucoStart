@@ -1,8 +1,8 @@
-import { INTERNAL_SECRET_HEADER, ModerationSnapshotSchema } from '@truco/shared';
+import { ModerationSnapshotSchema, signInternalRequestHeaders } from '@truco/shared';
 import type { ModerationLookup, ModerationSnapshot } from './moderation.js';
 
 export interface HttpModerationLookupOptions {
-  /** URL base interna de `apps/api` (p. ej. `http://api:3001/v1`). */
+  /** URL raíz interna de `apps/api` (p. ej. `http://api:3001`); el path incluye `/v1`. */
   readonly baseUrl: string;
   readonly internalSecret: string;
   readonly timeoutMs?: number;
@@ -16,20 +16,23 @@ export interface HttpModerationLookupOptions {
 export function createHttpModerationLookup(options: HttpModerationLookupOptions): ModerationLookup {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 1_500;
-  const base = options.baseUrl.replace(/\/$/, '');
+  const base = options.baseUrl.replace(/\/$/, '').replace(/\/v1$/, '');
 
   return async (userId: string): Promise<ModerationSnapshot | null> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetchImpl(
-        `${base}/internal/moderation/${encodeURIComponent(userId)}`,
-        {
+      // Ruta interna de la API (con prefijo /v1): la firma cubre método, path y timestamp.
+      const path = `/v1/internal/moderation/${encodeURIComponent(userId)}`;
+      const response = await fetchImpl(`${base}${path}`, {
+        method: 'GET',
+        headers: signInternalRequestHeaders({
           method: 'GET',
-          headers: { [INTERNAL_SECRET_HEADER]: options.internalSecret },
-          signal: controller.signal,
-        },
-      );
+          path,
+          secret: options.internalSecret,
+        }),
+        signal: controller.signal,
+      });
       if (!response.ok) return null;
       const parsed = ModerationSnapshotSchema.safeParse(await response.json());
       if (!parsed.success) return null;

@@ -18,6 +18,7 @@ import {
   NoopMatchLifecyclePublisher,
 } from './events/match-lifecycle-publisher.js';
 import { tryHandleInternalProvisioningRoute } from './http/internal-provisioning-handler.js';
+import { tryHandleInternalUserRoutes } from './http/internal-user-routes.js';
 import { emitRoomExpiredLifecycle } from './rooms/room-lifecycle-notifier.js';
 import type { ModerationLookup } from './rooms/moderation.js';
 import { RoomManager } from './rooms/room-manager.js';
@@ -184,7 +185,7 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       return;
     }
 
-    void tryHandleInternalProvisioningRoute({
+    const rpcOptions = {
       req,
       res,
       internalSecret,
@@ -194,12 +195,14 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       ...(options.internalRpcMaxSkewMs !== undefined
         ? { maxSkewMs: options.internalRpcMaxSkewMs }
         : {}),
-    }).then((handled) => {
-      if (!handled) {
-        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Ruta no encontrada' } }));
-      }
-    });
+    };
+
+    void (async () => {
+      if (await tryHandleInternalProvisioningRoute(rpcOptions)) return;
+      if (await tryHandleInternalUserRoutes(rpcOptions)) return;
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Ruta no encontrada' } }));
+    })();
   });
 
   const io = new SocketIOServer<

@@ -259,6 +259,44 @@ export class RoomManager {
     }
   }
 
+  /**
+   * Expulsa a un jugador de todas las salas de este game-server.
+   * Devuelve cuántas salas y sockets se vieron afectados (para auditar/loguear).
+   */
+  async evictUser(
+    userId: string,
+    reason: string,
+    disconnect: boolean,
+  ): Promise<{ rooms: string[]; sockets: number }> {
+    const affected: string[] = [];
+    const socketIds = new Set<string>();
+    for (const [socketId, tracked] of this.socketToRooms) {
+      if (tracked.userId === userId) socketIds.add(socketId);
+    }
+
+    for (const [roomId, actor] of this.rooms) {
+      const evicted = await actor.evictUser(userId, reason, disconnect);
+      if (evicted) affected.push(roomId);
+    }
+
+    if (disconnect) {
+      for (const socketId of socketIds) {
+        const tracked = this.socketToRooms.get(socketId);
+        this.socketToRooms.delete(socketId);
+        if (tracked) {
+          for (const roomId of tracked.rooms) {
+            if (!this.hasConnectedSockets(roomId)) this.idleSinceByRoom.set(roomId, this.now());
+          }
+        }
+      }
+      await this.store.clearUserActiveRoom(userId, affected[0] ?? '');
+    } else {
+      for (const actor of this.rooms.values()) actor.invalidateModerationCache(userId);
+    }
+
+    return { rooms: affected, sockets: socketIds.size };
+  }
+
   private now(): number {
     return (this.actorDeps.nowFn ?? Date.now)();
   }

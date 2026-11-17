@@ -1,4 +1,5 @@
 import { type DynamicModule, Module } from '@nestjs/common';
+import { InternalNonceStoreService } from '../../common/internal-rpc/nonce-store.js';
 import { InternalModerationController } from './internal-moderation.controller.js';
 import { ModerationController } from './moderation.controller.js';
 import { ModerationRepository } from './moderation.repository.js';
@@ -40,6 +41,7 @@ export class ModerationModule {
       module: ModerationModule,
       controllers: [ModerationController, InternalModerationController],
       providers: [
+        InternalNonceStoreService,
         ModerationRepository,
         ModerationService,
         { provide: MODERATION_RUNTIME_CONFIG, useValue: config },

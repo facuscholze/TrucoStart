@@ -25,7 +25,7 @@ export const ServerEnvSchema = z
     GAME_SERVER_PORT: PositiveIntFromEnv.max(65535).default(3002),
     GAME_SERVER_INTERNAL_URL: z.string().url().optional().default('http://127.0.0.1:3002'),
     /** URL interna de la API usada por el game-server para consultar moderación. */
-    API_INTERNAL_URL: z.string().url().optional().default('http://127.0.0.1:3001/v1'),
+    API_INTERNAL_URL: z.string().url().optional().default('http://127.0.0.1:3001'),
 
     DATABASE_URL: z
       .string()

@@ -527,6 +527,44 @@ export class RoomActor {
     }
   }
 
+  /**
+   * Expulsión inmediata disparada por una sanción (API → game-server, RPC firmado).
+   * Avisa al socket con el motivo, abandona la partida en curso y libera el asiento.
+   * No espera al caché de moderación: el efecto es inmediato.
+   */
+  async evictUser(userId: string, reason: string, disconnect: boolean): Promise<boolean> {
+    this.moderationCache.delete(userId);
+    const seatIdx = this.seats.findIndex((s) => s.userId === userId);
+    if (seatIdx === -1) return false;
+
+    const socket = this.socketsBySeat.get(seatIdx);
+    if (socket) {
+      this.sendSocketError(socket, 'FORBIDDEN', reason);
+      if (disconnect) {
+        socket.disconnect(true);
+        this.socketsBySeat.delete(seatIdx);
+      }
+    }
+
+    if (!disconnect) {
+      // Silencio: se corta el chat pero el jugador sigue en la mesa.
+      await this.persistAndEmit(this.deps.nowFn(), [this.buildTableStateEvent(this.deps.nowFn())]);
+      return true;
+    }
+
+    await this.onTableLeave(seatIdx);
+    return true;
+  }
+
+  /** Invalida el caché de moderación (p. ej. al aplicarse un silencio). */
+  invalidateModerationCache(userId?: string): void {
+    if (userId) {
+      this.moderationCache.delete(userId);
+      return;
+    }
+    this.moderationCache.clear();
+  }
+
   private async onTableReady(seatIdx: number, ready: boolean): Promise<void> {
     if (this.status === 'IN_GAME') return;
     const now = this.deps.nowFn();

@@ -15,6 +15,15 @@ const INTERNAL_RPC_DOMAIN_PREFIX = 'internal-rpc-v1:';
 const INTERNAL_RPC_REPLAY_SAFE_PREFIX = 'internal-rpc-v2:';
 
 export const DEFAULT_INTERNAL_RPC_MAX_SKEW_MS = 30_000;
+
+/** Nonce aleatorio base64url (128 bits) para las cabeceras `x-internal-nonce`. */
+export function randomBytesB64Url(byteLength = 16): string {
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return globalThis.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 const NONCE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 
 export const TableInviteClaimsSchema = z.object({
@@ -159,6 +168,31 @@ export function buildSignedInternalRpcHeaders(
     'x-internal-nonce': params.nonce,
     'x-internal-signature': signInternalRpcRequest(params, secret),
   };
+}
+
+/**
+ * Conveniencia para llamadas internas firmadas: genera timestamp y nonce frescos y
+ * devuelve las cabeceras anti-replay listas para usar con `fetch`.
+ */
+export function signInternalRequestHeaders(params: {
+  readonly method: string;
+  readonly path: string;
+  readonly rawBody?: string;
+  readonly secret: string;
+  readonly nowMs?: number;
+  readonly nonce?: string;
+}): SignedInternalRpcHeaders {
+  const nonce = params.nonce ?? randomBytesB64Url(16);
+  return buildSignedInternalRpcHeaders(
+    {
+      method: params.method,
+      path: params.path,
+      timestampMs: params.nowMs ?? Date.now(),
+      nonce,
+      rawBody: params.rawBody ?? '',
+    },
+    params.secret,
+  );
 }
 
 export function verifyInternalRpcSignatureAndWindow(params: {

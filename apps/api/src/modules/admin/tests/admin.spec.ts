@@ -36,6 +36,7 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
   const clockMs = Date.UTC(2026, 10, 21, 15, 0, 0);
   const hasher = new PasswordHasher();
   const secrets = new Map<string, string>();
+  const evictions: Array<{ userId: string; reason: string; disconnect: boolean }> = [];
 
   beforeAll(async () => {
     dbHandle = await createAdaptiveTestDatabase();
@@ -47,6 +48,15 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
         rateLimitConfig: { maxPerIp: 900, maxPerAccount: 900, nowFn: () => clockMs },
       },
       adminOptions: {
+        userEviction: {
+          evict: (request) => {
+            evictions.push(request);
+            return Promise.resolve({
+              evicted: true,
+              rooms: ['019a7e40-0000-7000-8000-000000000e01'],
+            });
+          },
+        },
         runtimeConfig: {
           totpEncryptionKey: TOTP_KEY,
           nowFn: () => clockMs,
@@ -394,6 +404,12 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
     expect(sanction.statusCode).toBe(201);
     expect(sanction.json().appliedStatus).toBe('SUSPENDED');
     expect(sanction.json().sessionsRevoked).toBeGreaterThanOrEqual(1);
+
+    // La suspensión avisa al game-server para expulsar al jugador sin esperar al caché.
+    const eviction = evictions.find((entry) => entry.userId === playerId);
+    expect(eviction).toBeDefined();
+    expect(eviction?.disconnect).toBe(true);
+    expect(eviction?.reason).toMatch(/Suspensión temporal/);
 
     // La sesión de jugador quedó revocada al instante y no puede unirse a mesas.
     const playerCookie = buildCookieHeader(

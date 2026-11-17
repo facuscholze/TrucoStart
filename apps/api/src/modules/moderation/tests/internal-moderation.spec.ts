@@ -1,4 +1,5 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { signInternalRequestHeaders } from '@truco/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApiApp } from '../../../bootstrap.js';
@@ -38,6 +39,16 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     await dbHandle.close();
   });
 
+  function signedHeaders(method: string, path: string, rawBody = '') {
+    return signInternalRequestHeaders({
+      method,
+      path,
+      rawBody,
+      secret: INTERNAL_SECRET,
+      nowMs: clockMs,
+    });
+  }
+
   async function registerUser(email: string, nickname: string) {
     const res = await app.inject({
       method: 'POST',
@@ -51,21 +62,56 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     };
   }
 
-  it('rechaza el acceso sin secreto interno o con uno inválido', async () => {
+  it('rechaza llamadas sin firma, con firma inválida o fuera de la ventana de reloj', async () => {
     const user = await registerUser('interna1@truco.ar', 'InternoUno');
+    const path = `/v1/internal/moderation/${user.id}`;
 
-    const noSecret = await app.inject({
-      method: 'GET',
-      url: `/v1/internal/moderation/${user.id}`,
-    });
-    expect(noSecret.statusCode).toBe(401);
+    const unsigned = await app.inject({ method: 'GET', url: path });
+    expect(unsigned.statusCode).toBe(401);
 
-    const wrong = await app.inject({
+    const wrongSecret = await app.inject({
       method: 'GET',
-      url: `/v1/internal/moderation/${user.id}`,
-      headers: { 'x-internal-secret': 'secreto-incorrecto-de-32-caracteres!!' },
+      url: path,
+      headers: signInternalRequestHeaders({
+        method: 'GET',
+        path,
+        secret: 'secreto-incorrecto-de-32-caracteres!!',
+        nowMs: clockMs,
+      }),
     });
-    expect(wrong.statusCode).toBe(401);
+    expect(wrongSecret.statusCode).toBe(401);
+
+    // Timestamp fuera de la ventana de ±30 s.
+    const stale = await app.inject({
+      method: 'GET',
+      url: path,
+      headers: signInternalRequestHeaders({
+        method: 'GET',
+        path,
+        secret: INTERNAL_SECRET,
+        nowMs: clockMs - 120_000,
+      }),
+    });
+    expect(stale.statusCode).toBe(401);
+    expect(stale.json().error?.message ?? '').toMatch(/Timestamp|ventana/i);
+  });
+
+  it('rechaza la reutilización de un nonce (anti-replay)', async () => {
+    const user = await registerUser('interna4@truco.ar', 'InternoCuatro');
+    const path = `/v1/internal/moderation/${user.id}`;
+    const headers = signInternalRequestHeaders({
+      method: 'GET',
+      path,
+      secret: INTERNAL_SECRET,
+      nowMs: clockMs,
+    });
+
+    const first = await app.inject({ method: 'GET', url: path, headers });
+    expect(first.statusCode).toBe(200);
+
+    const replay = await app.inject({ method: 'GET', url: path, headers });
+    expect(replay.statusCode).toBe(401);
+    expect(replay.json().error?.message ?? '').toMatch(/Replay|nonce/i);
   });
 
   it('devuelve el estado ACTIVE y refleja un silencio vigente', async () => {
@@ -74,7 +120,7 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     const initial = await app.inject({
       method: 'GET',
       url: `/v1/internal/moderation/${user.id}`,
-      headers: { 'x-internal-secret': INTERNAL_SECRET },
+      headers: signedHeaders('GET', `/v1/internal/moderation/${user.id}`),
     });
     expect(initial.statusCode).toBe(200);
     expect(initial.json().accountStatus).toBe('ACTIVE');
@@ -90,7 +136,7 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     const muted = await app.inject({
       method: 'GET',
       url: `/v1/internal/moderation/${user.id}`,
-      headers: { 'x-internal-secret': INTERNAL_SECRET },
+      headers: signedHeaders('GET', `/v1/internal/moderation/${user.id}`),
     });
     expect(muted.json().mutedUntil).toBe(until);
 
@@ -120,7 +166,7 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/internal/moderation/${user.id}`,
-      headers: { 'x-internal-secret': INTERNAL_SECRET },
+      headers: signedHeaders('GET', `/v1/internal/moderation/${user.id}`),
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
@@ -134,7 +180,7 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/internal/moderation/019a7e40-0000-7000-8000-0000000000ff',
-      headers: { 'x-internal-secret': INTERNAL_SECRET },
+      headers: signedHeaders('GET', '/v1/internal/moderation/019a7e40-0000-7000-8000-0000000000ff'),
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().accountStatus).toBe('DELETED');

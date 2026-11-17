@@ -10,9 +10,18 @@ import {
   buildAdminRuntimeConfig,
 } from './admin.config.js';
 import { AdminAuthGuard } from './guards/admin-auth.guard.js';
+import {
+  HttpUserEvictionClient,
+  USER_EVICTION,
+  type UserEvictionPort,
+} from './ports/user-eviction.js';
 
 export interface AdminModuleOptions {
   readonly runtimeConfig?: AdminRuntimeConfigOverrides;
+  /** Permite inyectar un doble de prueba en lugar del cliente HTTP real. */
+  readonly userEviction?: UserEvictionPort;
+  readonly gameServerInternalUrl?: string;
+  readonly internalSecret?: string;
 }
 
 @Module({})
@@ -23,6 +32,22 @@ export class AdminModule {
       controllers: [AdminAuthController, AdminController],
       providers: [
         { provide: ADMIN_RUNTIME_CONFIG, useValue: buildAdminRuntimeConfig(options.runtimeConfig) },
+        {
+          provide: USER_EVICTION,
+          useValue:
+            options.userEviction ??
+            new HttpUserEvictionClient({
+              baseUrl:
+                options.gameServerInternalUrl ??
+                process.env['GAME_SERVER_INTERNAL_URL'] ??
+                'http://127.0.0.1:3002',
+              internalSecret:
+                options.internalSecret ??
+                process.env['INTERNAL_RPC_SECRET'] ??
+                process.env['SESSION_SECRET'] ??
+                '',
+            }),
+        },
         AdminRepository,
         AdminAuthService,
         AdminService,

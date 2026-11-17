@@ -21,14 +21,25 @@ if [ -f "${dump}.sha256" ]; then
   (cd "$(dirname "$dump")" && sha256sum --check "$(basename "$dump").sha256")
 fi
 
+# `--single-transaction` y `--clean` no se llevan bien: al restaurar sobre una base vacía
+# pg_restore intenta DROP de objetos inexistentes y aborta la transacción (bug conocido).
+#   RESTORE_ATOMIC=1 -> base vacía: transacción única, sin limpieza.
+#   por defecto      -> limpieza con --if-exists antes de recrear objetos.
+restore_args=(
+  --dbname="$TARGET_DATABASE_URL"
+  --no-owner
+  --no-acl
+  --exit-on-error
+)
+if [ "${RESTORE_ATOMIC:-0}" = "1" ]; then
+  restore_args+=(--single-transaction)
+  echo "[restore] Modo atómico: sin --clean (la base destino debe estar vacía)"
+else
+  restore_args+=(--clean --if-exists)
+fi
+
 echo "[restore] Restaurando ${dump}"
-pg_restore \
-  --dbname="$TARGET_DATABASE_URL" \
-  --clean --if-exists \
-  --no-owner --no-acl \
-  --exit-on-error \
-  --single-transaction \
-  "$dump"
+pg_restore "${restore_args[@]}" "$dump"
 
 echo "[restore] Verificando tablas críticas"
 psql "$TARGET_DATABASE_URL" --no-psqlrc -v ON_ERROR_STOP=1 <<'SQL'

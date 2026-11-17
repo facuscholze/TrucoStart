@@ -158,7 +158,12 @@ TARGET_DATABASE_URL=postgresql://truco:clave@db:5432/truco_restore \
 ```
 
 - Verifica el `.sha256` antes de restaurar.
-- `--clean --if-exists --single-transaction`: si algo falla, no deja la base a medias.
+- **Base vacía (ensayo/recuperación limpia):** `RESTORE_ATOMIC=1` restaura en una sola
+  transacción y sin `--clean`. Ojo: `pg_restore` no acepta `--clean` + `--single-transaction`
+  sobre una base vacía (intenta borrar objetos que no existen), por eso están separados.
+- **Base con datos (sobrescribir):** modo por defecto, `--clean --if-exists`: limpia los
+  objetos del dump y los recrea; si algo falla queda a medias, así que restaurá siempre
+  contra una base descartable.
 - El script imprime el conteo de tablas críticas para comparar contra el origen.
 - **Recuperación real:** frenar API y game-server → renombrar la base dañada → restaurar en
   la base nueva → actualizar `DATABASE_URL` → arrancar y verificar `/v1/ready`.

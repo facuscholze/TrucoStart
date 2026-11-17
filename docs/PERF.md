@@ -58,3 +58,7 @@
 | `usesCardMemory`                                |    no |    sí |      sí |
 
 Los umbrales se obtuvieron por descenso coordenado sobre semillas de tuning (`700k+`, 500 partidas por punto) y se validaron después en semillas independientes (`20260101`, 2.000 partidas). Los valores son explicables: aceptar un Truco es barato porque rechazarlo igual entrega los puntos ya cantados (`P > ~0,3` ya es rentable), mientras que subir el canto exige `P` alta para que el rival acepte; por eso `trucoAcceptStrength` baja y `trucoRaiseStrength` queda cerca de `0,8`.
+
+## Log de decisiones del bot difícil (M6)
+
+El detalle turno por turno de una partida difícil vs difícil (qué ve el bot desde su `PlayerView`, tanto de envido, marcador, canto pendiente y acción elegida) se genera con `node packages/truco-engine/scripts/m6-decision-log.mjs` y queda en [`docs/BOT_DECISION_LOG.md`](./BOT_DECISION_LOG.md).

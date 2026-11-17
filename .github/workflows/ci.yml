@@ -80,9 +80,6 @@ jobs:
       - name: Scan tracked files for secrets
         run: node scripts/scan-secrets.mjs
 
-      - name: Ensure no secret leaks into production bundles
-        run: node scripts/check-bundles-no-secrets.mjs
-
       - name: Check formatting
         run: pnpm format:check
 
@@ -97,6 +94,10 @@ jobs:
 
       - name: Build all packages and applications
         run: pnpm build
+
+      # Se corre después del build: necesita `apps/web/dist` y `apps/admin/dist`.
+      - name: Ensure no secret leaks into production bundles
+        run: node scripts/check-bundles-no-secrets.mjs
 
       - name: Validate docker-compose configuration
         run: docker compose config -q
@@ -170,7 +171,17 @@ jobs:
       - name: Restore into the empty database
         env:
           TARGET_DATABASE_URL: postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore
-        run: ./infra/backups/restore-postgres.sh "$(ls -1t backups/truco-*.dump | head -1)"
+        run: |
+          dump="$(ls -1t backups/truco-*.dump | head -1)"
+          echo "Restaurando ${dump}"
+          if ! bash -x ./infra/backups/restore-postgres.sh "${dump}"; then
+            echo "::error::Falló la restauración; diagnóstico:"
+            pg_restore --list "${dump}" | head -20
+            pg_restore --list "${dump}" | tail -5
+            psql "postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore" -c '\dt' || true
+            psql "postgresql://truco_backup:truco_backup_password@localhost:5432/truco_restore" -c '\dn' || true
+            exit 1
+          fi
 
       - name: Compare row counts after restore
         run: |

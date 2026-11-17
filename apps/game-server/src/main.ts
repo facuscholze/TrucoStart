@@ -1,6 +1,7 @@
 import { parseServerEnv } from '@truco/shared';
 import pino from 'pino';
 import { BullMqMatchLifecyclePublisher } from './events/match-lifecycle-publisher.js';
+import { createHttpModerationLookup } from './rooms/http-moderation-lookup.js';
 import { createGameServer } from './server.js';
 import { RedisGameStore } from './store/redis-game-store.js';
 
@@ -27,6 +28,11 @@ async function main(): Promise<void> {
       actionMax: env.RATE_LIMIT_WS_ACTION_MAX,
       chatMax: env.RATE_LIMIT_WS_CHAT_MAX,
     },
+    // Sanciones autoritativas: la API dice suspendido/silenciado y el juego lo aplica.
+    moderationLookup: createHttpModerationLookup({
+      baseUrl: env.API_INTERNAL_URL,
+      internalSecret: env.INTERNAL_RPC_SECRET || env.SESSION_SECRET,
+    }),
   });
 
   const port = await server.listen(env.GAME_SERVER_PORT, env.GAME_SERVER_HOST);

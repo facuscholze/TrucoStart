@@ -19,6 +19,7 @@ import {
 } from './events/match-lifecycle-publisher.js';
 import { tryHandleInternalProvisioningRoute } from './http/internal-provisioning-handler.js';
 import { emitRoomExpiredLifecycle } from './rooms/room-lifecycle-notifier.js';
+import type { ModerationLookup } from './rooms/moderation.js';
 import { RoomManager } from './rooms/room-manager.js';
 import { WsConnectionRateLimiter, type WsRateLimiterConfig } from './security/rate-limiter.js';
 import type { GameStore } from './store/game-store.interface.js';
@@ -58,6 +59,8 @@ export interface GameServerOptions {
   readonly replaceDisconnectedWithBot?: boolean;
   /** Dificultad del bot de reemplazo (por defecto `MEDIUM`). */
   readonly botReplacementDifficulty?: BotDifficulty;
+  /** Estado de moderación (suspendidos no entran, silenciados no chatean). */
+  readonly moderationLookup?: ModerationLookup;
 }
 
 export interface GameServerInstance {
@@ -135,6 +138,9 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       : {}),
     ...(options.botReplacementDifficulty !== undefined
       ? { botReplacementDifficulty: options.botReplacementDifficulty }
+      : {}),
+    ...(options.moderationLookup !== undefined
+      ? { moderationLookup: options.moderationLookup }
       : {}),
     nowFn,
   });

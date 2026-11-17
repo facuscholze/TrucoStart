@@ -28,6 +28,13 @@ import {
 } from '@truco/shared';
 import type { Socket } from 'socket.io';
 import {
+  describeBlockedStatus,
+  isMutedSnapshot,
+  MODERATION_CACHE_TTL_MS,
+  type ModerationLookup,
+  type ModerationSnapshot,
+} from './moderation.js';
+import {
   type MatchLifecyclePublisher,
   NoopMatchLifecyclePublisher,
 } from '../events/match-lifecycle-publisher.js';
@@ -86,6 +93,11 @@ export interface RoomActorDeps {
   readonly botReplacementDifficulty?: BotDifficulty;
   /** PRNG para la demora de los bots (inyectable en tests para determinismo). */
   readonly botRandomFn?: () => number;
+  /**
+   * Consulta del estado de moderación (suspendido / bloqueado / silenciado).
+   * Si no se define, el servidor de juego no aplica restricciones (tests antiguos).
+   */
+  readonly moderationLookup?: ModerationLookup;
 }
 
 export interface RoomCreateParams {
@@ -130,6 +142,7 @@ export class RoomActor {
       | 'replaceDisconnectedWithBot'
       | 'botReplacementDifficulty'
       | 'botRandomFn'
+      | 'moderationLookup'
     >
   > &
     Pick<
@@ -140,7 +153,12 @@ export class RoomActor {
       | 'replaceDisconnectedWithBot'
       | 'botReplacementDifficulty'
       | 'botRandomFn'
+      | 'moderationLookup'
     >;
+  private readonly moderationCache = new Map<
+    string,
+    { readonly atMs: number; readonly snapshot: ModerationSnapshot | null }
+  >();
   private readonly practice: PracticeConfig | undefined;
   private readonly botDifficultyBySeat = new Map<number, BotDifficulty>();
   private botTimer: ReturnType<typeof setTimeout> | null = null;
@@ -209,6 +227,7 @@ export class RoomActor {
         ? { botReplacementDifficulty: deps.botReplacementDifficulty }
         : {}),
       ...(deps.botRandomFn !== undefined ? { botRandomFn: deps.botRandomFn } : {}),
+      ...(deps.moderationLookup !== undefined ? { moderationLookup: deps.moderationLookup } : {}),
     };
   }
 
@@ -398,10 +417,56 @@ export class RoomActor {
       }
       if (msg.type === 'table.leave') return this.onTableLeave(seatIdx);
       if (msg.type === 'table.ready') return this.onTableReady(seatIdx, msg.payload.ready);
-      if (msg.type === 'chat.quick') return this.onChatQuick(seatIdx, msg.payload.phraseId);
+      if (msg.type === 'chat.quick')
+        return this.onChatQuick(socket, seatIdx, msg.payload.phraseId, msg.eventId);
+      if (msg.type === 'game.signal' && (await this.isSeatMuted(seatIdx))) {
+        this.sendSocketError(
+          socket,
+          'FORBIDDEN',
+          'Estás silenciado: no podés enviar señas ni emotes.',
+          msg.eventId,
+        );
+        return;
+      }
       if (msg.type === 'practice.hint') return this.onPracticeHint(socket, seatIdx, msg.eventId);
       return this.onPlayerGameIntent(socket, seatIdx, msg);
     });
+  }
+
+  /** Estado de moderación con cache corto (autoritativo en `apps/api`). */
+  private async getModerationSnapshot(userId: string): Promise<ModerationSnapshot | null> {
+    if (!this.deps.moderationLookup) return null;
+    const now = this.deps.nowFn();
+    const cached = this.moderationCache.get(userId);
+    if (cached && now - cached.atMs < MODERATION_CACHE_TTL_MS) return cached.snapshot;
+    let snapshot: ModerationSnapshot | null = null;
+    try {
+      snapshot = await this.deps.moderationLookup(userId);
+    } catch {
+      // Si la API no responde, no se bloquea al jugador por una falla de red.
+      snapshot = null;
+    }
+    this.moderationCache.set(userId, { atMs: now, snapshot });
+    return snapshot;
+  }
+
+  /** Suspendidos y bloqueados no pueden entrar ni reconectarse a la mesa. */
+  private async assertAccountCanPlay(
+    socket: Socket,
+    userId: string,
+    refEventId?: string,
+  ): Promise<boolean> {
+    const snapshot = await this.getModerationSnapshot(userId);
+    if (!snapshot || snapshot.accountStatus === 'ACTIVE') return true;
+    this.sendSocketError(socket, 'FORBIDDEN', describeBlockedStatus(snapshot), refEventId);
+    return false;
+  }
+
+  private async isSeatMuted(seatIdx: number): Promise<boolean> {
+    const userId = this.seats[seatIdx]?.userId;
+    if (!userId) return false;
+    const snapshot = await this.getModerationSnapshot(userId);
+    return isMutedSnapshot(snapshot, this.deps.nowFn());
   }
 
   private async onTableJoin(
@@ -410,6 +475,7 @@ export class RoomActor {
     msg: Extract<ClientMessage, { type: 'table.join' }>,
   ): Promise<void> {
     if (!this.recordEventId(msg.eventId)) return;
+    if (!(await this.assertAccountCanPlay(socket, claims.userId, msg.eventId))) return;
     const activeOtherRoom = await this.deps.store.getUserActiveRoom(claims.userId);
     if (activeOtherRoom && activeOtherRoom !== this.roomId) {
       this.sendSocketError(
@@ -525,7 +591,21 @@ export class RoomActor {
     this.scheduleBotTurnIfNeeded();
   }
 
-  private async onChatQuick(seatIdx: number, phraseId: string): Promise<void> {
+  private async onChatQuick(
+    socket: Socket,
+    seatIdx: number,
+    phraseId: string,
+    refEventId?: string,
+  ): Promise<void> {
+    if (await this.isSeatMuted(seatIdx)) {
+      this.sendSocketError(
+        socket,
+        'FORBIDDEN',
+        'Estás silenciado: no podés usar el chat rápido ni los emotes.',
+        refEventId,
+      );
+      return;
+    }
     const phrase = QUICK_CHAT_PHRASES.find((p) => p.id === phraseId);
     if (!phrase) return;
     const now = this.deps.nowFn();
@@ -828,6 +908,7 @@ export class RoomActor {
     claims: WsAuthTicketClaims,
     msg: Extract<ClientMessage, { type: 'game.rejoin' }>,
   ): Promise<void> {
+    if (!(await this.assertAccountCanPlay(socket, claims.userId, msg.eventId))) return;
     const seatIdx = this.seats.findIndex((s) => s.userId === claims.userId);
     if (seatIdx === -1 || this.seats[seatIdx]?.sessionId !== msg.payload.sessionId) {
       this.sendSocketError(socket, 'FORBIDDEN', 'Sesión de reconexión inválida', msg.eventId);

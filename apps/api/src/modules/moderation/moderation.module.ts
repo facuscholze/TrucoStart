@@ -1,4 +1,5 @@
 import { type DynamicModule, Module } from '@nestjs/common';
+import { InternalModerationController } from './internal-moderation.controller.js';
 import { ModerationController } from './moderation.controller.js';
 import { ModerationRepository } from './moderation.repository.js';
 import {
@@ -9,8 +10,9 @@ import {
 } from './moderation.service.js';
 
 export interface ModerationModuleOptions {
-  readonly runtimeConfig?: Partial<Omit<ModerationRuntimeConfig, 'nowFn'>> & {
+  readonly runtimeConfig?: Partial<Omit<ModerationRuntimeConfig, 'nowFn' | 'internalSecret'>> & {
     readonly nowFn?: () => number;
+    readonly internalSecret?: string;
   };
 }
 
@@ -20,6 +22,11 @@ export class ModerationModule {
     const nowFn = options.runtimeConfig?.nowFn ?? Date.now;
     const config: ModerationRuntimeConfig = {
       nowFn,
+      internalSecret:
+        options.runtimeConfig?.internalSecret ??
+        process.env['INTERNAL_RPC_SECRET'] ??
+        process.env['SESSION_SECRET'] ??
+        '',
       maxOpenReportsPerReporter:
         options.runtimeConfig?.maxOpenReportsPerReporter ??
         DEFAULT_MODERATION_CONFIG.maxOpenReportsPerReporter,
@@ -31,7 +38,7 @@ export class ModerationModule {
 
     return {
       module: ModerationModule,
-      controllers: [ModerationController],
+      controllers: [ModerationController, InternalModerationController],
       providers: [
         ModerationRepository,
         ModerationService,

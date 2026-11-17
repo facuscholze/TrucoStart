@@ -77,6 +77,11 @@ export class AppModule {
           runtimeConfig: {
             ...options.moderationOptions?.runtimeConfig,
             ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
+            // El secreto interno explícito manda; si no, se reutiliza el de sesión.
+            ...(options.moderationOptions?.runtimeConfig?.internalSecret === undefined &&
+            sharedSessionSecret !== undefined
+              ? { internalSecret: sharedSessionSecret }
+              : {}),
           },
         }),
         HealthModule,

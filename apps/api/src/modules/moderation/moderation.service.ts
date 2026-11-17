@@ -22,17 +22,20 @@ export const MODERATION_RUNTIME_CONFIG = Symbol('MODERATION_RUNTIME_CONFIG');
 
 export interface ModerationRuntimeConfig {
   readonly nowFn: () => number;
+  /** Secreto compartido con `apps/game-server` para el endpoint interno. */
+  readonly internalSecret: string;
   /** Límites configurables (tests los bajan para forzar rate limit). */
   readonly maxOpenReportsPerReporter: number;
   readonly reportsPerWindow: number;
   readonly rateLimitWindowMs: number;
 }
 
-export const DEFAULT_MODERATION_CONFIG: Omit<ModerationRuntimeConfig, 'nowFn'> = Object.freeze({
-  maxOpenReportsPerReporter: REPORT_LIMITS.maxOpenReportsPerReporter,
-  reportsPerWindow: REPORT_LIMITS.reportsPerWindow,
-  rateLimitWindowMs: REPORT_LIMITS.rateLimitWindowMs,
-});
+export const DEFAULT_MODERATION_CONFIG: Omit<ModerationRuntimeConfig, 'nowFn' | 'internalSecret'> =
+  Object.freeze({
+    maxOpenReportsPerReporter: REPORT_LIMITS.maxOpenReportsPerReporter,
+    reportsPerWindow: REPORT_LIMITS.reportsPerWindow,
+    rateLimitWindowMs: REPORT_LIMITS.rateLimitWindowMs,
+  });
 
 @Injectable()
 export class ModerationService {

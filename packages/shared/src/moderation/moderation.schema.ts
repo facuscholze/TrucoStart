@@ -77,6 +77,17 @@ export const MyModerationStateSchema = z.object({
 });
 export type MyModerationState = z.infer<typeof MyModerationStateSchema>;
 
+/** Respuesta interna (`/v1/internal/moderation/:userId`) que consume el game-server. */
+export const ModerationSnapshotSchema = z.object({
+  accountStatus: z.enum(['ACTIVE', 'SUSPENDED', 'BANNED', 'DELETED']),
+  statusReason: z.string().nullable(),
+  statusExpiresAt: z.string().nullable(),
+  mutedUntil: z.string().nullable(),
+});
+export type ModerationSnapshot = z.infer<typeof ModerationSnapshotSchema>;
+
+export const INTERNAL_SECRET_HEADER = 'x-internal-secret';
+
 export const REPORT_LIMITS = Object.freeze({
   /** Máximo de reportes abiertos por cuenta. */
   maxOpenReportsPerReporter: 10,

@@ -8,6 +8,8 @@ export interface RecordAuditLogInput {
   readonly action: string;
   readonly entity: string;
   readonly entityId?: string | null;
+  readonly reason?: string | null;
+  readonly adminSessionId?: string | null;
   readonly beforeState?: Record<string, unknown> | null;
   readonly afterState?: Record<string, unknown> | null;
   readonly ip?: string | null;
@@ -26,6 +28,8 @@ export class AuditRepository {
       action: input.action,
       entity: input.entity,
       entityId: input.entityId ?? null,
+      reason: input.reason ?? null,
+      adminSessionId: input.adminSessionId ?? null,
       beforeState: input.beforeState ?? null,
       afterState: input.afterState ?? null,
       ip: input.ip ?? null,

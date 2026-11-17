@@ -5,6 +5,7 @@ import {
 } from './common/rate-limit/rate-limit.module.js';
 import { DatabaseModule } from './db/database.module.js';
 import type { DatabaseConnectionHandle } from './db/database.provider.js';
+import { AdminModule, type AdminModuleOptions } from './modules/admin/admin.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule, type AuthModuleOptions } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
@@ -23,6 +24,7 @@ export interface CreateAppModuleOptions {
   readonly rateLimitOptions?: RateLimitModuleOptions;
   readonly lobbyOptions?: LobbyModuleOptions;
   readonly moderationOptions?: ModerationModuleOptions;
+  readonly adminOptions?: AdminModuleOptions;
 }
 
 // TODO(STATE-08): Incorporar MetricsModule (/v1/metrics) y trazas OpenTelemetry en M8.
@@ -52,6 +54,13 @@ export class AppModule {
           ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
         }),
         AuditModule,
+        AdminModule.register({
+          ...options.adminOptions,
+          runtimeConfig: {
+            ...options.adminOptions?.runtimeConfig,
+            ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
+          },
+        }),
         AuthModule.register(options.authOptions),
         UsersModule,
         LobbyModule.register({

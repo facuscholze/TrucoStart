@@ -30,6 +30,8 @@ export const usersTable = pgTable(
     statusExpiresAt: timestamp('status_expires_at', { withTimezone: true }),
     /** Fin del silencio (chat rápido y emotes bloqueados hasta entonces). */
     mutedUntil: timestamp('muted_until', { withTimezone: true }),
+    /** La moderación forzó el cambio de apodo: la web lo exige en el próximo ingreso. */
+    nicknameMustChange: boolean('nickname_must_change').notNull().default(false),
     failedLoginCount: integer('failed_login_count').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     lastFailedLoginAt: timestamp('last_failed_login_at', { withTimezone: true }),

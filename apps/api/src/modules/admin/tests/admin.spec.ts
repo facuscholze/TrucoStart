@@ -1,0 +1,630 @@
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { ADMIN_ROLE_PERMISSIONS, ADMIN_SESSION_COOKIE_NAME } from '@truco/shared';
+import { and, eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createApiApp } from '../../../bootstrap.js';
+import { generateUuidV7 } from '../../../common/uuidv7.js';
+import {
+  createAdaptiveTestDatabase,
+  type DatabaseConnectionHandle,
+} from '../../../db/database.provider.js';
+import {
+  adminTwoFactorTable,
+  auditLogsTable,
+  matchEventsTable,
+  matchPlayersTable,
+  matchesTable,
+  profilesTable,
+  usersTable,
+} from '../../../db/schema/index.js';
+import { PasswordHasher } from '../../auth/security/password-hasher.js';
+import { buildCookieHeader, extractAuthCookies } from '../../auth/tests/test-cookie-jar.js';
+import { encryptTotpSecret, generateTotpCode, generateTotpSecret } from '../security/totp.js';
+
+const SESSION_SECRET = 'm7-admin-panel-secret-minimo-32-chars!!!!';
+const TOTP_KEY = 'm7-admin-totp-encryption-key-32-chars!!';
+const ADMIN_PASSWORD = 'ClavePanel2026!';
+
+describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría', () => {
+  let dbHandle: DatabaseConnectionHandle;
+  let app: NestFastifyApplication;
+  const clockMs = Date.UTC(2026, 10, 21, 15, 0, 0);
+  const hasher = new PasswordHasher();
+  const secrets = new Map<string, string>();
+
+  beforeAll(async () => {
+    dbHandle = await createAdaptiveTestDatabase();
+    app = await createApiApp({
+      dbHandle,
+      trustProxy: true,
+      authOptions: {
+        runtimeConfig: { sessionSecret: SESSION_SECRET, nowFn: () => clockMs },
+        rateLimitConfig: { maxPerIp: 900, maxPerAccount: 900, nowFn: () => clockMs },
+      },
+      adminOptions: {
+        runtimeConfig: {
+          totpEncryptionKey: TOTP_KEY,
+          nowFn: () => clockMs,
+          cookieSecure: false,
+          loginMaxPerMinute: 500,
+        },
+      },
+      moderationOptions: { runtimeConfig: { nowFn: () => clockMs } },
+    });
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await dbHandle.close();
+  });
+
+  async function createUser(input: {
+    email: string;
+    nickname: string;
+    role?: 'PLAYER' | 'SUPPORT' | 'MODERATOR' | 'ADMIN';
+    withTotp?: boolean;
+    status?: 'ACTIVE' | 'SUSPENDED' | 'BANNED';
+  }) {
+    const now = new Date(clockMs);
+    const id = generateUuidV7(clockMs);
+    await dbHandle.db.insert(usersTable).values({
+      id,
+      email: input.email,
+      emailVerifiedAt: now,
+      passwordHash: await hasher.hashPassword(ADMIN_PASSWORD),
+      nickname: input.nickname,
+      nicknameLower: input.nickname.toLowerCase(),
+      isGuest: false,
+      role: input.role ?? 'PLAYER',
+      status: input.status ?? 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await dbHandle.db.insert(profilesTable).values({ userId: id, createdAt: now, updatedAt: now });
+    if (input.withTotp) {
+      const secret = generateTotpSecret();
+      secrets.set(id, secret);
+      await dbHandle.db.insert(adminTwoFactorTable).values({
+        userId: id,
+        secretEncrypted: encryptTotpSecret(secret, TOTP_KEY),
+        recoveryCodes: [],
+        confirmedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    return id;
+  }
+
+  async function adminCookie(userId: string, email: string): Promise<string> {
+    const secret = secrets.get(userId)!;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: {
+        email,
+        password: ADMIN_PASSWORD,
+        totpCode: generateTotpCode(secret, clockMs),
+      },
+    });
+    expect(res.statusCode, JSON.stringify(res.json())).toBe(200);
+    return buildCookieHeader(extractAuthCookies(res.headers['set-cookie']).map);
+  }
+
+  it('exige 2FA configurado y código válido, y rechaza a jugadores', async () => {
+    await createUser({ email: 'no2fa@truco.ar', nickname: 'SinDos' + 'Fa', role: 'MODERATOR' });
+    const without2fa = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: { email: 'no2fa@truco.ar', password: ADMIN_PASSWORD, totpCode: '123456' },
+    });
+    expect(without2fa.statusCode).toBe(403);
+    expect(without2fa.json().error.details.reason).toBe('ADMIN_2FA_NOT_CONFIGURED');
+
+    const playerId = await createUser({
+      email: 'jugador@truco.ar',
+      nickname: 'JugadorComun',
+      role: 'PLAYER',
+      withTotp: true,
+    });
+    void playerId;
+    const player = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: {
+        email: 'jugador@truco.ar',
+        password: ADMIN_PASSWORD,
+        totpCode: generateTotpCode(secrets.get(playerId)!, clockMs),
+      },
+    });
+    expect(player.statusCode).toBe(401);
+
+    const modId = await createUser({
+      email: 'mod@truco.ar',
+      nickname: 'ModeradorUno',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const badCode = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: { email: 'mod@truco.ar', password: ADMIN_PASSWORD, totpCode: '000000' },
+    });
+    expect(badCode.statusCode).toBe(401);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: {
+        email: 'mod@truco.ar',
+        password: ADMIN_PASSWORD,
+        totpCode: generateTotpCode(secrets.get(modId)!, clockMs),
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const cookie = extractAuthCookies(res.headers['set-cookie']);
+    const adminCookieHeader = cookie.parsed.find((c) => c.name === ADMIN_SESSION_COOKIE_NAME)!;
+    expect(adminCookieHeader).toBeDefined();
+    expect(adminCookieHeader.attributes['httponly']).toBe(true);
+    expect(String(adminCookieHeader.attributes['samesite']).toLowerCase()).toBe('strict');
+    expect(adminCookieHeader.attributes['path']).toBe('/v1/admin');
+    // La cookie de jugador no se emite en el login del panel.
+    expect(cookie.map['truco_access']).toBeUndefined();
+
+    // Un código ya usado no se puede reutilizar (anti-replay del TOTP).
+    const replayCode = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/login',
+      payload: {
+        email: 'mod@truco.ar',
+        password: ADMIN_PASSWORD,
+        totpCode: generateTotpCode(secrets.get(modId)!, clockMs),
+      },
+    });
+    expect(replayCode.statusCode).toBe(401);
+  });
+
+  it('valida permisos por rol en el servidor (no solo en la UI)', async () => {
+    const supportId = await createUser({
+      email: 'soporte@truco.ar',
+      nickname: 'SoporteUno',
+      role: 'SUPPORT',
+      withTotp: true,
+    });
+    const modId = await createUser({
+      email: 'moderador2@truco.ar',
+      nickname: 'ModeradorDos',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const adminId = await createUser({
+      email: 'admin@truco.ar',
+      nickname: 'AdminUno',
+      role: 'ADMIN',
+      withTotp: true,
+    });
+    const supportCookie = await adminCookie(supportId, 'soporte@truco.ar');
+    const modCookie = await adminCookie(modId, 'moderador2@truco.ar');
+    const adminCookieHeader = await adminCookie(adminId, 'admin@truco.ar');
+
+    const targetId = await createUser({ email: 'target@truco.ar', nickname: 'ReportadoUno' });
+
+    const dashboard = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/dashboard',
+      headers: { cookie: supportCookie },
+    });
+    expect(dashboard.statusCode).toBe(200);
+    expect(dashboard.json().usersTotal).toBeGreaterThan(0);
+
+    const supportSanction = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/users/${targetId}/sanctions`,
+      headers: { cookie: supportCookie },
+      payload: { type: 'WARNING', reason: 'Primera advertencia formal' },
+    });
+    expect(supportSanction.statusCode).toBe(403);
+    expect(supportSanction.json().error.details.requiredPermission).toBe('sanctions:issue');
+
+    const modBan = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/users/${targetId}/sanctions`,
+      headers: { cookie: modCookie },
+      payload: { type: 'BAN', reason: 'Reincidencia grave de abandono', durationHours: 720 },
+    });
+    expect(modBan.statusCode).toBe(403);
+    expect(modBan.json().error.details.requiredPermission).toBe('sanctions:issue_ban');
+
+    const adminBan = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/users/${targetId}/sanctions`,
+      headers: { cookie: adminCookieHeader },
+      payload: { type: 'BAN', reason: 'Reincidencia grave de abandono', durationHours: 720 },
+    });
+    expect(adminBan.statusCode).toBe(201);
+    expect(adminBan.json().appliedStatus).toBe('BANNED');
+
+    // El jugador no puede usar endpoints del panel.
+    const guest = await app.inject({ method: 'POST', url: '/v1/auth/guest', payload: {} });
+    const playerCookie = buildCookieHeader(extractAuthCookies(guest.headers['set-cookie']).map);
+    const asPlayer = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/dashboard',
+      headers: { cookie: playerCookie },
+    });
+    expect(asPlayer.statusCode).toBe(401);
+
+    // La matriz compartida es la fuente de verdad de lo que cada rol puede hacer.
+    expect(ADMIN_ROLE_PERMISSIONS.SUPPORT).not.toContain('sanctions:issue');
+    expect(ADMIN_ROLE_PERMISSIONS.MODERATOR).toContain('sanctions:issue');
+    expect(ADMIN_ROLE_PERMISSIONS.MODERATOR).not.toContain('users:read_pii');
+    expect(ADMIN_ROLE_PERMISSIONS.ADMIN).toContain('users:read_pii');
+  });
+
+  it('impide sancionarse a sí mismo y sancionar a un admin desde un moderador', async () => {
+    const modId = await createUser({
+      email: 'moderador3@truco.ar',
+      nickname: 'ModeradorTres',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const adminId = await createUser({
+      email: 'admin2@truco.ar',
+      nickname: 'AdminDos',
+      role: 'ADMIN',
+      withTotp: true,
+    });
+    const modCookieHeader = await adminCookie(modId, 'moderador3@truco.ar');
+
+    const self = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/users/${modId}/sanctions`,
+      headers: { cookie: modCookieHeader },
+      payload: { type: 'WARNING', reason: 'Auto sanción de prueba' },
+    });
+    expect(self.statusCode).toBe(403);
+    expect(self.json().error.details.reason).toBe('SELF_SANCTION_FORBIDDEN');
+
+    const toAdmin = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/users/${adminId}/sanctions`,
+      headers: { cookie: modCookieHeader },
+      payload: { type: 'SUSPEND', reason: 'No corresponde', durationHours: 24 },
+    });
+    expect(toAdmin.statusCode).toBe(403);
+    expect(toAdmin.json().error.details.reason).toBe('ADMIN_TARGET_FORBIDDEN');
+  });
+
+  it('aplica sanción de suspensión con revocación de sesiones y la audita', async () => {
+    const playerId = await createUser({
+      email: 'sancionado@truco.ar',
+      nickname: 'SancionadoUno',
+      withTotp: false,
+    });
+    const modId = await createUser({
+      email: 'moderador4@truco.ar',
+      nickname: 'ModeradorCuatro',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const modCookieHeader = await adminCookie(modId, 'moderador4@truco.ar');
+
+    const playerLogin = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { email: 'sancionado@truco.ar', password: ADMIN_PASSWORD },
+    });
+    expect(playerLogin.statusCode).toBe(200);
+
+    const sanction = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/users/${playerId}/sanctions`,
+      headers: { cookie: modCookieHeader },
+      payload: {
+        type: 'SUSPEND',
+        reason: 'Abandono reiterado en tres partidas',
+        durationHours: 48,
+      },
+    });
+    expect(sanction.statusCode).toBe(201);
+    expect(sanction.json().appliedStatus).toBe('SUSPENDED');
+    expect(sanction.json().sessionsRevoked).toBeGreaterThanOrEqual(1);
+
+    // La sesión de jugador quedó revocada al instante y no puede unirse a mesas.
+    const playerCookie = buildCookieHeader(
+      extractAuthCookies(playerLogin.headers['set-cookie']).map,
+    );
+    const me = await app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: { cookie: playerCookie },
+    });
+    expect(me.statusCode).toBe(401);
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { email: 'sancionado@truco.ar', password: ADMIN_PASSWORD },
+    });
+    expect(login.statusCode).toBe(403);
+    expect(login.json().error.details.reason).toBe('ACCOUNT_SUSPENDED');
+
+    const audit = await app.inject({
+      method: 'GET',
+      url: `/v1/admin/users/${playerId}?reason=Revisi%C3%B3n%20de%20caso%20reportado`,
+      headers: { cookie: modCookieHeader },
+    });
+    expect(audit.statusCode).toBe(200);
+    expect(audit.json().sanctions[0].type).toBe('SUSPEND');
+    expect(audit.json().email).toBeNull();
+
+    const logs = await dbHandle.db
+      .select()
+      .from(auditLogsTable)
+      .where(
+        and(
+          eq(auditLogsTable.action, 'ADMIN_SANCTION_ISSUED'),
+          eq(auditLogsTable.entityId, playerId),
+        ),
+      );
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[0]?.reason).toContain('Abandono reiterado');
+  });
+
+  it('resuelve reportes con control de concurrencia y audita el replay', async () => {
+    const modA = await createUser({
+      email: 'moderadora@truco.ar',
+      nickname: 'ModeradoraCinco',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const modB = await createUser({
+      email: 'moderadorb@truco.ar',
+      nickname: 'ModeradorSeis',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const cookieA = await adminCookie(modA, 'moderadora@truco.ar');
+    const cookieB = await adminCookie(modB, 'moderadorb@truco.ar');
+
+    const reporter = await createUser({ email: 'denunciante@truco.ar', nickname: 'Denunciante' });
+    const target = await createUser({ email: 'denunciado@truco.ar', nickname: 'Denunciado' });
+    const guest = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: {
+        email: 'denunciante@truco.ar',
+        password: ADMIN_PASSWORD,
+      },
+    });
+    expect(guest.statusCode).toBe(200);
+    const reporterCookie = buildCookieHeader(extractAuthCookies(guest.headers['set-cookie']).map);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/me/reports',
+      headers: { cookie: reporterCookie },
+      payload: { targetUserId: target, reasonCode: 'ABUSIVE_BEHAVIOR', details: 'Insultos' },
+    });
+    expect(created.statusCode).toBe(201);
+    const reportId = created.json().id as string;
+    void reporter;
+
+    const queue = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/reports?status=OPEN',
+      headers: { cookie: cookieA },
+    });
+    expect(queue.statusCode).toBe(200);
+    const item = queue.json().items.find((entry: { id: string }) => entry.id === reportId);
+    expect(item).toBeDefined();
+
+    const claimA = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/reports/${reportId}/claim`,
+      headers: { cookie: cookieA },
+      payload: { expectedVersion: item.version },
+    });
+    expect(claimA.statusCode, JSON.stringify(claimA.json())).toBe(200);
+
+    const claimB = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/reports/${reportId}/claim`,
+      headers: { cookie: cookieB },
+      payload: { expectedVersion: item.version },
+    });
+    expect(claimB.statusCode).toBe(409);
+
+    const resolveA = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/reports/${reportId}/resolve`,
+      headers: { cookie: cookieA },
+      payload: {
+        outcome: 'RESOLVED_ACTIONED',
+        note: 'Se aplicó advertencia y seguimiento',
+        expectedVersion: claimA.json().version,
+      },
+    });
+    expect(resolveA.statusCode).toBe(200);
+
+    // Segundo moderador con la versión vieja: no puede volver a resolver.
+    const resolveB = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/reports/${reportId}/resolve`,
+      headers: { cookie: cookieB },
+      payload: {
+        outcome: 'RESOLVED_DISMISSED',
+        note: 'Sin mérito suficiente',
+        expectedVersion: claimA.json().version,
+      },
+    });
+    expect(resolveB.statusCode).toBe(409);
+    expect(resolveB.json().error.details.reason).toBe('REPORT_VERSION_CONFLICT');
+  });
+
+  it('audita cada acceso a replay y solo permite partidas terminadas', async () => {
+    const modId = await createUser({
+      email: 'moderador7@truco.ar',
+      nickname: 'ModeradorSiete',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const cookie = await adminCookie(modId, 'moderador7@truco.ar');
+    const p1 = await createUser({ email: 'p1@truco.ar', nickname: 'JugadorP1' });
+    const p2 = await createUser({ email: 'p2@truco.ar', nickname: 'JugadorP2' });
+    const finishedId = generateUuidV7(clockMs);
+    const liveId = generateUuidV7(clockMs + 1);
+    const now = new Date(clockMs);
+
+    for (const [id, ended] of [
+      [finishedId, now],
+      [liveId, null],
+    ] as const) {
+      await dbHandle.db.insert(matchesTable).values({
+        id,
+        mode: '1v1',
+        rulesetCode: 'ar-standard-v1',
+        seedCommitment: 'a'.repeat(64),
+        startedAt: now,
+        endedAt: ended,
+        result: ended ? { winnerTeam: 0 } : null,
+        createdAt: now,
+      });
+      for (const [seat, userId] of [
+        [0, p1],
+        [1, p2],
+      ] as const) {
+        await dbHandle.db.insert(matchPlayersTable).values({
+          matchId: id,
+          seat,
+          userId,
+          team: seat,
+          score: seat === 0 ? 30 : 18,
+          outcome: seat === 0 ? 'WIN' : 'LOSS',
+          createdAt: now,
+        });
+      }
+    }
+    await dbHandle.db.insert(matchEventsTable).values([
+      { matchId: finishedId, seq: 1, type: 'game.started', payload: {}, createdAt: now },
+      {
+        matchId: finishedId,
+        seq: 2,
+        type: 'game.handEnded',
+        payload: { handNumber: 1 },
+        createdAt: now,
+      },
+      {
+        matchId: finishedId,
+        seq: 3,
+        type: 'game.scoreUpdated',
+        payload: { team: 0, newScore: 30 },
+        createdAt: now,
+      },
+      {
+        matchId: finishedId,
+        seq: 4,
+        type: 'game.ended',
+        payload: { winnerTeam: 0, scoresByTeam: { '0': 30, '1': 18 } },
+        createdAt: now,
+      },
+    ]);
+
+    const live = await app.inject({
+      method: 'GET',
+      url: `/v1/admin/matches/${liveId}/replay?reason=Chequeo%20de%20partida%20en%20curso`,
+      headers: { cookie },
+    });
+    expect(live.statusCode).toBe(409);
+
+    const withoutReason = await app.inject({
+      method: 'GET',
+      url: `/v1/admin/matches/${finishedId}/replay`,
+      headers: { cookie },
+    });
+    expect(withoutReason.statusCode).toBe(400);
+
+    const replay = await app.inject({
+      method: 'GET',
+      url: `/v1/admin/matches/${finishedId}/replay?reason=Investigar%20reporte%20de%20colusi%C3%B3n`,
+      headers: { cookie },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().players).toHaveLength(2);
+    expect(replay.json().events).toHaveLength(4);
+    expect(replay.json().reconstructed.handsPlayed).toBe(1);
+    expect(replay.json().reconstructed.finalScores['0']).toBe(30);
+    expect(replay.json().reconstructed.valid).toBe(true);
+
+    const replayAudit = await dbHandle.db
+      .select()
+      .from(auditLogsTable)
+      .where(
+        and(
+          eq(auditLogsTable.action, 'ADMIN_REPLAY_ACCESSED'),
+          eq(auditLogsTable.entityId, finishedId),
+        ),
+      );
+    expect(replayAudit).toHaveLength(1);
+    expect(replayAudit[0]?.reason).toContain('colusión');
+    expect(replayAudit[0]?.actorId).toBe(modId);
+  });
+
+  it('enmascara datos personales salvo permiso explícito y cierra la sesión con logout', async () => {
+    const supportId = await createUser({
+      email: 'soporte2@truco.ar',
+      nickname: 'SoporteDos',
+      role: 'SUPPORT',
+      withTotp: true,
+    });
+    const adminId = await createUser({
+      email: 'admin3@truco.ar',
+      nickname: 'AdminTres',
+      role: 'ADMIN',
+      withTotp: true,
+    });
+    await createUser({ email: 'persona@truco.ar', nickname: 'PersonaComun' });
+
+    const supportCookieHeader = await adminCookie(supportId, 'soporte2@truco.ar');
+    const adminCookieHeader = await adminCookie(adminId, 'admin3@truco.ar');
+
+    const supportList = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/users?query=persona',
+      headers: { cookie: supportCookieHeader },
+    });
+    expect(supportList.statusCode).toBe(200);
+    expect(supportList.json().items[0].emailMasked).toMatch(/^p\*\*\*a@truco\.ar$/);
+
+    const adminList = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/users?query=persona',
+      headers: { cookie: adminCookieHeader },
+    });
+    expect(adminList.statusCode).toBe(200);
+    expect(adminList.json().items[0].emailMasked).toBe('persona@truco.ar');
+
+    const auditList = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/audit?limit=5',
+      headers: { cookie: supportCookieHeader },
+    });
+    expect(auditList.statusCode).toBe(200);
+    expect(auditList.json().items.length).toBeGreaterThan(0);
+
+    const logout = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/auth/logout',
+      headers: { cookie: supportCookieHeader },
+    });
+    expect(logout.statusCode).toBe(200);
+
+    const afterLogout = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/dashboard',
+      headers: { cookie: supportCookieHeader },
+    });
+    expect(afterLogout.statusCode).toBe(401);
+  });
+});

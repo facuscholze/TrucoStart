@@ -332,3 +332,18 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
   4. Soportamos IPv4 e IPv4-mapped-IPv6; soporte completo de IPv6 nativo se agrega cuando la infra lo requiera.
 - **Alternativas:** `trustProxy = true` ciego (spoofing trivial de IP para evadir bans); IP basada únicamente en `CF-Connecting-IP` sin verificar origen (acopla al proveedor y sigue siendo spoofeable si Cloudflare no está delante).
 - **Consecuencias:** La IP usada para auditoría, rate limiting y límites de conexiones es correcta tanto en desarrollo (directo) como detrás de proxy; no hay forma de que un cliente fuera de los CIDRs confiables falsifique su origen.
+
+---
+
+## ADR-021: Estrategia de despliegue (Docker multi-stage + docker-compose staging + aprobación manual)
+
+- **Fecha:** 2026-11-18
+- **Estado:** Aceptado
+- **Contexto:** MVP necesita salir a un VPS económico con un camino repetible de despliegue, sin abonar Kubernetes orquestado todavía. Las migraciones de esquema y el drenaje graceful del game-server son operaciones críticas que deben ser auditable y no ocurrir automáticamente a cada push.
+- **Decisión:**
+  1. Dockerfiles multi-stage (deps → build → runner) con usuario `truco` (uid 1001) sin privilegios, `dumb-init` como PID 1 para la correcta entrega de SIGTERM y healthchecks con `wget` en `/v1/health` (API), `/health` (game-server liveness) y `/ready` (game-server readiness: 503 mientras `roomManager.isDraining()`).
+  2. `infra/docker-compose.staging.yml` con servicios `postgres`, `redis`, `api`, `game-server`, `web`, `admin` y un job efímero `migrate` que corre `pnpm drizzle-kit migrate` (entrypoint `node dist/db/migrate.js`) y sale antes de levantar la API.
+  3. Workflow `.github/workflows/deploy-staging.yml` con tres jobs: (a) build + lint/typecheck + `docker compose config -q` + smoke-test local (levanta el stack completo y espera healthchecks); (b) aprobación manual vía GitHub Environments `staging` con reviewers requeridos; (c) deploy vía rsync + SSH que corre migraciones y hace rolling restart de los contenedores, verificando health tras el restart.
+  4. TRUSTED_PROXY_CIDRS se setea en la red interna de compose (`172.16.0.0/12`) y se documenta en DEPLOY.md cómo configurarlo con los rangos oficiales de Cloudflare cuando se ponga el CDN delante.
+- **Alternativas:** K8s/ECS/Fly.io con releases automáticos a cada push (sobredimensionado para MVP, aumenta superficie de error en migraciones); Heroku/Render (caros para la región de Argentina).
+- **Consecuencias:** Un push a main no despliega sin aprobación; si las migraciones fallan se aborta antes de tocar la API nueva; el game-server se reinicia con `stop_grace_period: 45s` durante el cual `/ready` devuelve 503 y el balanceador/Cloudflare le quita tráfico sin cortar partidas en curso.

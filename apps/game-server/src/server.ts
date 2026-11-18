@@ -273,15 +273,27 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       );
     });
 
+    // /health siempre responde 200 si el proceso está vivo (liveness).
+    // /ready responde 503 mientras el servidor está drenando (readiness para
+    // que el balanceador/ORCH retire la instancia sin cortar reconexiones en
+    // curso). Ver doc/DEPLOY.md y ADR-021.
+    const buildHealthBody = (draining: boolean): HealthResponse => ({
+      status: draining ? 'draining' : 'ok',
+      service: 'game-server',
+      appName,
+      timestamp: new Date().toISOString(),
+    });
     if (req.method === 'GET' && req.url === '/health') {
-      const body: HealthResponse = {
-        status: 'ok',
-        service: 'game-server',
-        appName,
-        timestamp: new Date().toISOString(),
-      };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(body));
+      res.end(JSON.stringify(buildHealthBody(roomManager.isDraining())));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/ready') {
+      const draining = roomManager.isDraining();
+      res.writeHead(draining ? 503 : 200, {
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      res.end(JSON.stringify(buildHealthBody(draining)));
       return;
     }
 

@@ -28,7 +28,10 @@ export interface EmailProvider {
   }): Promise<void>;
 }
 
-// TODO(STATE-10): Implementar adaptador productivo (Resend / SMTP) cuando se disponga de EMAIL_PROVIDER_API_KEY en staging/producción.
+// STATE-10 cerrado: ResendEmailProvider / SmtpEmailProvider (resend-email.provider.ts)
+// se activan con EMAIL_PROVIDER=resend o EMAIL_PROVIDER=smtp cuando las credenciales
+// (RESEND_API_KEY o SMTP_CONNECTION_URL) están configuradas; ConsoleEmailProvider sigue
+// siendo el default en desarrollo.
 @Injectable()
 export class ConsoleEmailProvider implements EmailProvider {
   readonly providerName = 'console-simulated';

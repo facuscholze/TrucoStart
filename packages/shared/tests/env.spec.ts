@@ -42,14 +42,27 @@ describe('ServerEnvSchema & parseServerEnv', () => {
     ).toThrow(/DATABASE_URL/);
   });
 
-  it('requires EMAIL_PROVIDER_API_KEY when EMAIL_PROVIDER is not console', () => {
+  it('requires RESEND_API_KEY + EMAIL_FROM_ADDRESS (o SMTP_CONNECTION_URL) cuando EMAIL_PROVIDER es productivo', () => {
     expect(() =>
       parseServerEnv({
         ...validBaseEnv,
         EMAIL_PROVIDER: 'resend',
-        EMAIL_PROVIDER_API_KEY: '',
       }),
-    ).toThrow(/EMAIL_PROVIDER_API_KEY/);
+    ).toThrow(/RESEND_API_KEY/);
+    expect(() =>
+      parseServerEnv({
+        ...validBaseEnv,
+        EMAIL_PROVIDER: 'resend',
+        RESEND_API_KEY: 're_xxx',
+      }),
+    ).toThrow(/EMAIL_FROM_ADDRESS/);
+    expect(() =>
+      parseServerEnv({
+        ...validBaseEnv,
+        EMAIL_PROVIDER: 'smtp',
+        EMAIL_FROM_ADDRESS: 'a@b.co',
+      }),
+    ).toThrow(/SMTP_CONNECTION_URL/);
   });
 
   it('requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET when CAPTCHA_PROVIDER is turnstile', () => {

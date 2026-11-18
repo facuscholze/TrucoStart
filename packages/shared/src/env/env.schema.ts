@@ -62,9 +62,16 @@ export const ServerEnvSchema = z
 
     GOOGLE_CLIENT_ID: z.string().optional().default(''),
     GOOGLE_CLIENT_SECRET: z.string().optional().default(''),
+    GOOGLE_HOSTED_DOMAIN: z.string().optional().default(''),
 
     EMAIL_PROVIDER: EmailProviderTypeSchema.default('console'),
+    EMAIL_FROM_ADDRESS: z.string().optional().default(''),
+    /** @deprecated usar RESEND_API_KEY (EMAIL_PROVIDER=resend) o SMTP_CONNECTION_URL (EMAIL_PROVIDER=smtp). */
     EMAIL_PROVIDER_API_KEY: z.string().optional().default(''),
+    RESEND_API_KEY: z.string().optional().default(''),
+    SMTP_CONNECTION_URL: z.string().optional().default(''),
+    /** Base URL pública de la web (se usa para armar links en correos). */
+    WEB_BASE_URL: z.string().url().optional().default('http://localhost:5173'),
 
     CAPTCHA_PROVIDER: CaptchaProviderTypeSchema.default('disabled'),
     CAPTCHA_SITE_KEY: z.string().optional().default(''),
@@ -161,12 +168,36 @@ export const ServerEnvSchema = z
     S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
   })
   .superRefine((env, ctx) => {
-    if (env.EMAIL_PROVIDER !== 'console' && env.EMAIL_PROVIDER_API_KEY.trim().length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['EMAIL_PROVIDER_API_KEY'],
-        message: 'EMAIL_PROVIDER_API_KEY es obligatorio cuando EMAIL_PROVIDER no es "console"',
-      });
+    if (env.EMAIL_PROVIDER === 'resend') {
+      if (env.RESEND_API_KEY.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['RESEND_API_KEY'],
+          message: 'RESEND_API_KEY es obligatorio cuando EMAIL_PROVIDER=resend',
+        });
+      }
+      if (env.EMAIL_FROM_ADDRESS.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['EMAIL_FROM_ADDRESS'],
+          message: 'EMAIL_FROM_ADDRESS es obligatorio cuando EMAIL_PROVIDER=resend',
+        });
+      }
+    } else if (env.EMAIL_PROVIDER === 'smtp') {
+      if (env.SMTP_CONNECTION_URL.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SMTP_CONNECTION_URL'],
+          message: 'SMTP_CONNECTION_URL es obligatorio cuando EMAIL_PROVIDER=smtp',
+        });
+      }
+      if (env.EMAIL_FROM_ADDRESS.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['EMAIL_FROM_ADDRESS'],
+          message: 'EMAIL_FROM_ADDRESS es obligatorio cuando EMAIL_PROVIDER=smtp',
+        });
+      }
     }
     if (
       env.CAPTCHA_PROVIDER !== 'disabled' &&
@@ -178,6 +209,19 @@ export const ServerEnvSchema = z
         message:
           'CAPTCHA_SITE_KEY y CAPTCHA_SECRET son obligatorios cuando CAPTCHA_PROVIDER está activo',
       });
+    }
+    // Si se activa Google OAuth (GOOGLE_CLIENT_ID presente) se exige que en
+    // producción se verifique por JWKS (no con el simulador).
+    if (env.NODE_ENV === 'production' && env.GOOGLE_CLIENT_ID.trim().length > 0) {
+      // Sin GOOGLE_CLIENT_SECRET no se puede intercambiar el authorization code.
+      if (env.GOOGLE_CLIENT_SECRET.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['GOOGLE_CLIENT_SECRET'],
+          message:
+            'GOOGLE_CLIENT_SECRET es obligatorio en producción cuando GOOGLE_CLIENT_ID está configurado',
+        });
+      }
     }
   });
 

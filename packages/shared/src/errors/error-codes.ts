@@ -12,6 +12,7 @@ export const ErrorCodeSchema = z.enum([
   'RULE_VIOLATION',
   'ROOM_FULL',
   'INVALID_STATE',
+  'BAD_GATEWAY',
   'INTERNAL_ERROR',
 ]);
 

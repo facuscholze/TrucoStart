@@ -9,7 +9,9 @@ export interface CaptchaVerifier {
   verifyOrThrow(token: string | undefined, remoteIp: string): Promise<void>;
 }
 
-// TODO(STATE-12): Implementar adaptador HTTP contra Cloudflare Turnstile cuando CAPTCHA_PROVIDER="turnstile" y CAPTCHA_SECRET esté configurado en producción.
+// STATE-12 cerrado: TurnstileCaptchaVerifier (turnstile-captcha.verifier.ts) se activa
+// automáticamente cuando CAPTCHA_PROVIDER=turnstile y CAPTCHA_SECRET está configurado.
+// En dev/staging sin credenciales se usa SimulatedCaptchaVerifier.
 @Injectable()
 export class SimulatedCaptchaVerifier implements CaptchaVerifier {
   readonly providerName = 'captcha-simulated-dev';

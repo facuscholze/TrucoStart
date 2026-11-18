@@ -57,6 +57,18 @@ import { GAME_ROOM_PROVISIONER, type GameRoomProvisioner } from './ports/game-ro
 @Injectable()
 export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdown {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Caché en memoria de corta duración para el listado público del lobby.
+   * El lobby público no requiere consistencia estricta (cada cliente recibe
+   * actualizaciones WS en tiempo real), así que una TTL de 1 s elimina picos
+   * de ráfaga HTTP sin afectar la percepción. La clave es el JSON estable de
+   * los filtros (no depende de autenticación).
+   */
+  private lobbyListCache = new Map<
+    string,
+    { readonly at: number; readonly value: PublicTableListResponse }
+  >();
+  private static readonly LOBBY_LIST_CACHE_TTL_MS = 1_000;
 
   constructor(
     @Inject(LOBBY_RUNTIME_CONFIG) private readonly config: LobbyRuntimeConfig,
@@ -105,6 +117,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       await this.provisioner.deleteRoom(item.id).catch(() => undefined);
       this.realtimeGateway.broadcastTableRemoved(item.id, item.visibility);
     }
+    if (expired.length > 0) this.invalidateLobbyListCache();
     return expired.length;
   }
 
@@ -153,13 +166,26 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
 
     await this.sweepExpiredTables();
     const cappedLimit = Math.min(query.limit, this.config.listTablesMaxResults);
+    const cacheKey = JSON.stringify({ ...query, limit: cappedLimit });
+    const cached = this.lobbyListCache.get(cacheKey);
+    if (cached && this.config.nowFn() - cached.at < LobbyService.LOBBY_LIST_CACHE_TTL_MS) {
+      return cached.value;
+    }
+
     const aggregates = await this.lobbyRepository.listPublicTables({
       ...query,
       limit: cappedLimit,
     });
-    return PublicTableListResponseSchema.parse({
+    const parsed = PublicTableListResponseSchema.parse({
       tables: aggregates.slice(0, cappedLimit).map((agg) => toPublicTableSummary(agg)),
     });
+    this.lobbyListCache.set(cacheKey, { at: this.config.nowFn(), value: parsed });
+    return parsed;
+  }
+
+  /** Invalida el listado público cacheado tras cualquier mutación del lobby. */
+  private invalidateLobbyListCache(): void {
+    this.lobbyListCache.clear();
   }
 
   async createTable(
@@ -249,6 +275,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
         aggregate.row.visibility as TableVisibility,
         toPublicTableSummary(aggregate),
       );
+      this.invalidateLobbyListCache();
     }
 
     const invite = this.mintInviteForAggregate(aggregate);
@@ -376,6 +403,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       aggregate.row.visibility as TableVisibility,
       toPublicTableSummary(aggregate),
     );
+    this.invalidateLobbyListCache();
 
     const invite = this.mintInviteForAggregate(aggregate);
     return TableDetailResponseSchema.parse(
@@ -423,6 +451,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
         aggregate.row.visibility as TableVisibility,
         toPublicTableSummary(aggregate),
       );
+      this.invalidateLobbyListCache();
       const invite = this.mintInviteForAggregate(aggregate);
       return TableDetailResponseSchema.parse(
         toTableDetailResponse(aggregate, {
@@ -491,6 +520,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       aggregate.row.visibility as TableVisibility,
       toPublicTableSummary(aggregate),
     );
+    this.invalidateLobbyListCache();
     const invite = this.mintInviteForAggregate(aggregate);
     return TableDetailResponseSchema.parse(
       toTableDetailResponse(aggregate, {
@@ -557,6 +587,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
     if (outcome.kind === 'CLOSED') {
       await this.provisioner.deleteRoom(outcome.tableId).catch(() => undefined);
       this.realtimeGateway.broadcastTableRemoved(outcome.tableId, outcome.visibility);
+      this.invalidateLobbyListCache();
       return LeaveTableResponseSchema.parse({
         left: true,
         tableId: outcome.tableId,
@@ -569,6 +600,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       outcome.aggregate.row.visibility as TableVisibility,
       toPublicTableSummary(outcome.aggregate),
     );
+    this.invalidateLobbyListCache();
     return LeaveTableResponseSchema.parse({
       left: true,
       tableId: outcome.aggregate.row.id,
@@ -591,6 +623,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
 
     await this.provisioner.deleteRoom(closed.id).catch(() => undefined);
     this.realtimeGateway.broadcastTableRemoved(closed.id, closed.visibility);
+    this.invalidateLobbyListCache();
 
     await this.auditRepository.record({
       actorId: principal.userId,

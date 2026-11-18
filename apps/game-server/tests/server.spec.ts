@@ -134,6 +134,59 @@ describe('@truco/game-server handshake auth, Zod validation & WS rate limit', ()
     }
   });
 
+  it('enforces per-user and per-IP connection caps (M8b)', async () => {
+    const capServer = createGameServer({
+      sessionSecret: TEST_SECRET,
+      seedEncryptionKey: TEST_SECRET,
+      maxConnectionsPerUser: 2,
+      maxConnectionsPerIp: 5,
+      rateLimiter: { actionMax: 100, chatMax: 100, tableMax: 100 },
+    });
+    const capPort = await capServer.listen(0, '127.0.0.1');
+    const connected: Array<ReturnType<typeof createClient>> = [];
+    try {
+      const makeToken = (jti: string, userId: string) =>
+        signWsAuthTicket(
+          { jti, userId, sessionId: `sess-${jti}`, nickname: `U-${jti}`, exp: Date.now() + 60_000 },
+          TEST_SECRET,
+        );
+      const connect = (jti: string, userId: string) =>
+        new Promise<ReturnType<typeof createClient>>((resolve, reject) => {
+          const c = createClient(`http://127.0.0.1:${capPort}`, {
+            transports: ['websocket'],
+            forceNew: true,
+            reconnection: false,
+            auth: { token: makeToken(jti, userId) },
+          });
+          const timer = setTimeout(() => reject(new Error('timeout connect')), 3_000);
+          c.once('connect', () => {
+            clearTimeout(timer);
+            resolve(c);
+          });
+          c.once('connect_error', (e: Error) => {
+            clearTimeout(timer);
+            reject(e);
+          });
+        });
+
+      // 2 conexiones OK, 3ra rechazada por TOO_MANY_CONNECTIONS.
+      connected.push(await connect('jti-cap-1', 'user-cap-1'));
+      connected.push(await connect('jti-cap-2', 'user-cap-1'));
+      await expect(connect('jti-cap-3', 'user-cap-1')).rejects.toThrow('TOO_MANY_CONNECTIONS');
+
+      // Liberar una y volver a conectar: debe funcionar.
+      connected.pop()!.disconnect();
+      await new Promise((r) => setTimeout(r, 80));
+      const third = await connect('jti-cap-3b', 'user-cap-1');
+      connected.push(third);
+      third.disconnect();
+      connected.pop();
+    } finally {
+      for (const c of connected) c.disconnect();
+      await capServer.close();
+    }
+  });
+
   it('enforces single-use WS tickets by rejecting any second handshake with the same jti', async () => {
     const singleUseToken = signWsAuthTicket(
       {

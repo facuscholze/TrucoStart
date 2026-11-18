@@ -1,4 +1,5 @@
 import type { AccountStatus, UserRole, UserSettings } from '@truco/shared';
+import { desc, sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -89,6 +90,9 @@ export const sessionsTable = pgTable(
   (t) => [
     index('sessions_user_id_idx').on(t.userId),
     index('sessions_family_id_idx').on(t.familyId),
+    index('sessions_user_active_idx')
+      .on(t.userId, desc(t.lastUsedAt))
+      .where(sql`${t.revokedAt} IS NULL`),
   ],
 );
 
@@ -107,7 +111,12 @@ export const authTokensTable = pgTable(
     consumedAt: timestamp('consumed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('auth_tokens_user_purpose_idx').on(t.userId, t.purpose)],
+  (t) => [
+    index('auth_tokens_user_purpose_idx').on(t.userId, t.purpose),
+    index('auth_tokens_user_purpose_active_idx')
+      .on(t.userId, t.purpose, t.expiresAt)
+      .where(sql`${t.consumedAt} IS NULL`),
+  ],
 );
 
 /** Sesión del panel administrativo: cookie separada de la de jugador y TTL corto. */

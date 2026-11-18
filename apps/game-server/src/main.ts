@@ -40,6 +40,8 @@ async function main(): Promise<void> {
       actionMax: env.RATE_LIMIT_WS_ACTION_MAX,
       chatMax: env.RATE_LIMIT_WS_CHAT_MAX,
     },
+    maxConnectionsPerUser: env.WS_MAX_CONNECTIONS_PER_USER,
+    maxConnectionsPerIp: env.WS_MAX_CONNECTIONS_PER_IP,
     // Sanciones autoritativas: la API dice suspendido/silenciado y el juego lo aplica.
     moderationLookup: createHttpModerationLookup({
       baseUrl: env.API_INTERNAL_URL,

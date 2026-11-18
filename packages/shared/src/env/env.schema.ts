@@ -87,6 +87,10 @@ export const ServerEnvSchema = z
     RATE_LIMIT_WS_ACTION_MAX: PositiveIntFromEnv.default(30),
     RATE_LIMIT_WS_CHAT_MAX: PositiveIntFromEnv.default(10),
     RATE_LIMIT_TABLE_CREATE_MAX: PositiveIntFromEnv.default(6),
+    /** Máximas conexiones WS simultáneas por usuario autenticado (M8b). */
+    WS_MAX_CONNECTIONS_PER_USER: PositiveIntFromEnv.default(4),
+    /** Máximas conexiones WS simultáneas por IP (M8b). */
+    WS_MAX_CONNECTIONS_PER_IP: PositiveIntFromEnv.default(20),
 
     TURN_TIMEOUT_MS: PositiveIntFromEnv.default(DEFAULT_TURN_TIMEOUT_MS),
     RECONNECT_GRACE_MS: PositiveIntFromEnv.default(DEFAULT_RECONNECT_GRACE_MS),

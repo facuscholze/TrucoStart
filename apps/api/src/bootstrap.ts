@@ -8,7 +8,9 @@ import {
   buildRequestLogFields,
   CORRELATION_ID_HEADER,
   createCorrelationId,
+  ipInCidr,
   MetricsRegistry,
+  parseCidr,
   pickCorrelationId,
 } from '@truco/shared';
 import { AppModule, type CreateAppModuleOptions } from './app.module.js';
@@ -19,7 +21,13 @@ import type {
 } from './modules/observability/observability.module.js';
 
 export interface CreateApiAppOptions extends CreateAppModuleOptions {
-  readonly trustProxy?: boolean;
+  /**
+   * CIDRs de proxies confiables (ADR-020). Fastify sólo confiará en
+   * x-forwarded-for cuando la conexión venga de una IP en esta lista. Si está
+   * vacío no se confía en ninguna cabecera, incluso si la app está detrás de
+   * un proxy.
+   */
+  readonly trustProxyCidrs?: readonly string[];
   readonly corsOrigins?: string[];
   /** Logger estructurado (pino). Sin logger no se emiten líneas de request. */
   readonly logger?: ApiLoggerLike;
@@ -47,6 +55,14 @@ export async function createApiApp(
   // Un único registro compartido entre el módulo (`/v1/metrics`) y los hooks de Fastify.
   const registry = options.metricsRegistry ?? new MetricsRegistry();
 
+  const trustedProxyCidrs = (options.trustProxyCidrs ?? [])
+    .map((c) => parseCidr(c))
+    .filter((c): c is NonNullable<ReturnType<typeof parseCidr>> => c !== null);
+  // Función de confianza por CIDR: sólo se fía de x-forwarded-for cuando la
+  // IP remota pertenece a un rango confiable (ADR-020).
+  const trustProxyFn = (ip: string): boolean =>
+    trustedProxyCidrs.length > 0 && trustedProxyCidrs.some((c) => ipInCidr(ip, c));
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.register({
       ...options,
@@ -58,7 +74,7 @@ export async function createApiApp(
     }),
     new FastifyAdapter({
       logger: false,
-      trustProxy: options.trustProxy ?? false,
+      trustProxy: trustedProxyCidrs.length > 0 ? trustProxyFn : false,
     }),
     { logger: false },
   );

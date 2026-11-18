@@ -45,7 +45,7 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 ### Tests
 
 - `packages/truco-engine/tests/bot-m6.spec.ts`: Vale Cuatro con carta imbatible (los tres niveles responden `QUIERO`), carta más baja que alcanza, Envido con tanto alto (31) y umbral por dificultad (26 solo lo canta el difícil), monotonía de parámetros.
-- `packages/truco-engine/tests/bot-benchmark.spec.ts`: regresión del criterio de aceptación (>60% vs M1 con 400 partidas deterministas) y escalera difícil > medio > fácil.
+- `packages/truco-engine/tests/bot-benchmark.slow.spec.ts`: regresión del criterio de aceptación (>60% vs M1 con 400 partidas deterministas) y escalera difícil > medio > fácil (suite separada, ver `test:slow`).
 
 ---
 

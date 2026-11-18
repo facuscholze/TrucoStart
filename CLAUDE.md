@@ -78,3 +78,43 @@ pnpm build         # Build de producción vía Turborepo
 3. **Trazabilidad de pendientes**: ningún `TODO` puede existir sin identificador registrado en [`docs/STATE.md`](./docs/STATE.md) con formato exacto `// TODO(STATE-xx): descripción`. Un test automatizado verifica esta invariante.
 4. **Conventional Commits**: `feat(scope): ...`, `fix(scope): ...`, `chore(scope): ...`, `docs(scope): ...`, `test(scope): ...` validados con `commitlint`.
 5. **Hitos con pausa (`⏸`)**: detenerse y esperar confirmación explícita del usuario al cerrar **M0**, **M1**, **M5** y **M8**, y antes de iniciar Etapas 2–5.
+
+---
+
+## Protocolo de cierre de cada turno
+
+**Regla obligatoria.** Al final de CADA turno de trabajo, sin excepción, el último mensaje debe ser un reporte con el formato de abajo. No se puede terminar un turno con una llamada a herramienta o con pensamiento: las últimas llamadas son para commitar, empujar y producir el reporte. Si se acerca el límite de herramientas del turno, se detiene el trabajo, se commitea, se empuja y se escribe el reporte. Un reporte parcial verificado vale más que trabajo sin reportar. Si el reporte falta, el turno cuenta como incompleto.
+
+**FORMATO (títulos exactos, en español, breve, sin relleno):**
+
+```
+## REPORTE DE CIERRE
+
+**Rama / commit final / PR:** (nombre de rama, hash corto del último commit, número de PR y si está abierto o mergeado)
+
+**CI:** (id de la última corrida, resultado pass/fail por job; si no corrió, "no corrió")
+
+### Hecho y verificado
+- Una línea por ítem: qué se hizo + evidencia (comando y resultado, id de CI, archivo de prueba).
+
+### Hecho pero NO verificado
+- Lo que se escribió pero no se probó o no se vio en verde, y por qué.
+
+### No hecho
+- Lo pedido que quedó sin hacer, con el motivo.
+
+### Simulado, pendiente o no medido
+- Cualquier mock, resultado esperado o medición que falte (con código STATE-xx si existe).
+
+### Problemas y riesgos nuevos
+- Bugs encontrados, deuda técnica, decisiones que necesitan opinión del usuario.
+
+### Próximo paso propuesto
+- Una o dos líneas.
+```
+
+**Reglas del reporte:**
+1. Nunca marcar como verificado algo que no se corrió.
+2. No inventar ids de CI ni números.
+3. Si un comando falló, pegar el error resumido (máximo 10 líneas).
+4. Pegar las salidas pedidas por el usuario (tablas, listados) dentro del reporte, no remitir a un archivo.

@@ -25,7 +25,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     dbHandle = await createAdaptiveTestDatabase();
     app = await createApiApp({
       dbHandle,
-      trustProxy: true,
+      trustProxyCidrs: ['127.0.0.1/32'],
       authOptions: {
         runtimeConfig: {
           sessionSecret: 'users-authz-secret-minimum-32-characters!!',

@@ -32,7 +32,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
     emailProvider = new ConsoleEmailProvider();
     app = await createApiApp({
       dbHandle,
-      trustProxy: true,
+      trustProxyCidrs: ['127.0.0.1/32'],
       authOptions: {
         emailProvider,
         googleVerifier: new SimulatedGoogleOAuthVerifier({ allowSimulatedTokens: true }),

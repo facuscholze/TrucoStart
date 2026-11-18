@@ -5,7 +5,10 @@ import {
   ClientMessageSchema,
   DEFAULT_APP_NAME,
   type HealthResponse,
+  parseCidr,
+  type ParsedCidr,
   type RoomProvisionSpec,
+  resolveClientIp,
   verifyWsAuthTicket,
   type BotDifficulty,
   type WsAuthTicketClaims,
@@ -70,10 +73,23 @@ export interface GameServerOptions {
    */
   readonly maxConnectionsPerUser?: number;
   /**
-   * Límite de conexiones simultáneas por IP de origen (sin autenticar).
-   * Protege al proceso de ataques de conexión desde un único origen. Por defecto 20.
+   * Límite de conexiones simultáneas por IP de origen real (resuelta a través
+   * de proxies confiables). Protege al proceso de ataques de conexión desde un
+   * único origen. Default 60 (ver ADR-020: NAT/CGNAT compartido).
    */
   readonly maxConnectionsPerIp?: number;
+  /**
+   * CIDRs de proxies confiables. Si la IP remota del socket está dentro de
+   * alguno, se usa `trustedProxyHeader` para obtener la IP real del cliente;
+   * en caso contrario las cabeceras se ignoran (anti-spoofing).
+   */
+  readonly trustedProxyCidrs?: readonly string[];
+  /**
+   * Cabecera que contiene la IP real del cliente cuando la conexión viene de
+   * un proxy confiable. Default `x-forwarded-for` (Cloudflare: usar
+   * `cf-connecting-ip` y pasar sus rangos en `trustedProxyCidrs`).
+   */
+  readonly trustedProxyHeader?: string;
   readonly nowFn?: () => number;
   /** Logger estructurado (pino) para requests internos y conexiones WebSocket. */
   readonly logger?: GameServerLoggerLike;
@@ -184,18 +200,23 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
   // Límites de conexiones simultáneas por usuario e IP para impedir abusos
   // (pestañas zombis, un solo origen agotando sockets del proceso).
   const maxConnectionsPerUser = options.maxConnectionsPerUser ?? 4;
-  const maxConnectionsPerIp = options.maxConnectionsPerIp ?? 20;
+  const maxConnectionsPerIp = options.maxConnectionsPerIp ?? 60;
+  const trustedCidrs: readonly ParsedCidr[] = (options.trustedProxyCidrs ?? [])
+    .map((raw) => parseCidr(raw))
+    .filter((c): c is ParsedCidr => c !== null);
+  const trustedProxyHeader = (options.trustedProxyHeader ?? 'x-forwarded-for').toLowerCase();
   const connectionsPerUser = new Map<string, number>();
   const connectionsPerIp = new Map<string, number>();
+
   function getSocketIp(socket: Socket): string {
-    // Socket.IO / Engine.IO exponen la dirección en `handshake.address`; en
-    // entornos con proxy confiamos en x-forwarded-for sólo si está configurado.
-    const address =
-      (socket.handshake.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ||
-      socket.handshake.address ||
-      'unknown';
-    return address;
+    return resolveClientIp({
+      remoteAddress: socket.handshake.address,
+      headers: socket.handshake.headers as Record<string, string | string[] | undefined>,
+      trustedCidrs,
+      headerName: trustedProxyHeader,
+    });
   }
+
   function bumpCounter(map: Map<string, number>, key: string, delta: number): number {
     const next = Math.max(0, (map.get(key) ?? 0) + delta);
     if (next === 0) map.delete(key);

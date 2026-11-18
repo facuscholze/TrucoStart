@@ -143,7 +143,7 @@ Consultas cubiertas:
 
 ## Benchmark de la IA de Truco (BL-010, M6)
 
-> Medido el 2026-11-13 en sandbox Node 20, motor puro sin red. Reproducible con `pnpm --filter @truco/engine exec vitest run tests/bot-benchmark.spec.ts`.
+> Medido el 2026-11-13 en sandbox Node 20, motor puro sin red. Reproducible con `pnpm --filter @truco/engine test:slow` (suite de benchmarks y simulaciones masivas; separada del `pnpm test` rápido en CI).
 
 ### Metodología
 

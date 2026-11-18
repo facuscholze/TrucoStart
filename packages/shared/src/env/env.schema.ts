@@ -89,8 +89,38 @@ export const ServerEnvSchema = z
     RATE_LIMIT_TABLE_CREATE_MAX: PositiveIntFromEnv.default(6),
     /** Máximas conexiones WS simultáneas por usuario autenticado (M8b). */
     WS_MAX_CONNECTIONS_PER_USER: PositiveIntFromEnv.default(4),
-    /** Máximas conexiones WS simultáneas por IP (M8b). */
-    WS_MAX_CONNECTIONS_PER_IP: PositiveIntFromEnv.default(20),
+    /**
+     * Máximas conexiones WS simultáneas por IP de origen (M8b).
+     * El default de 60 contempla redes compartidas (NAT corporativo, CGNAT de
+     * ISP móvil, escuelas/cibers) donde muchos jugadores comparten la misma IP
+     * pública. ADR-020 documenta la elección.
+     */
+    WS_MAX_CONNECTIONS_PER_IP: PositiveIntFromEnv.default(60),
+    /**
+     * Lista de CIDRs de proxies confiables (separados por coma). Si la IP
+     * remota de la conexión está dentro de uno de estos rangos, se confía en
+     * la cabecera `TRUSTED_PROXY_HEADER` (por defecto `x-forwarded-for`) para
+     * obtener la IP real del cliente. Fuera de estos rangos la cabecera se
+     * ignora y se usa la IP del socket. Configuración recomendada:
+     * Cloudflare (`https://www.cloudflare.com/ips/`) o el balanceador propio.
+     */
+    TRUSTED_PROXY_CIDRS: z
+      .string()
+      .optional()
+      .default('')
+      .transform((raw) =>
+        raw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    /**
+     * Nombre de la cabecera de IP real del cliente que sólo se respeta si la
+     * conexión viene de un `TRUSTED_PROXY_CIDRS`. Por defecto `x-forwarded-for`
+     * (estándar de proxies HTTP). Si se usa Cloudflare puede ponerse
+     * `cf-connecting-ip`.
+     */
+    TRUSTED_PROXY_HEADER: z.string().trim().toLowerCase().default('x-forwarded-for'),
 
     TURN_TIMEOUT_MS: PositiveIntFromEnv.default(DEFAULT_TURN_TIMEOUT_MS),
     RECONNECT_GRACE_MS: PositiveIntFromEnv.default(DEFAULT_RECONNECT_GRACE_MS),

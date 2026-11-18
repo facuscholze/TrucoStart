@@ -22,7 +22,7 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     dbHandle = await createAdaptiveTestDatabase();
     app = await createApiApp({
       dbHandle,
-      trustProxy: true,
+      trustProxyCidrs: ['127.0.0.1/32'],
       authOptions: {
         runtimeConfig: { sessionSecret: SESSION_SECRET, nowFn: () => clockMs },
         rateLimitConfig: { maxPerIp: 500, maxPerAccount: 500, nowFn: () => clockMs },

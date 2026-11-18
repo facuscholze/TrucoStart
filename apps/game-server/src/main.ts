@@ -42,6 +42,8 @@ async function main(): Promise<void> {
     },
     maxConnectionsPerUser: env.WS_MAX_CONNECTIONS_PER_USER,
     maxConnectionsPerIp: env.WS_MAX_CONNECTIONS_PER_IP,
+    trustedProxyCidrs: env.TRUSTED_PROXY_CIDRS,
+    trustedProxyHeader: env.TRUSTED_PROXY_HEADER,
     // Sanciones autoritativas: la API dice suspendido/silenciado y el juego lo aplica.
     moderationLookup: createHttpModerationLookup({
       baseUrl: env.API_INTERNAL_URL,

@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 
   const app = await createApiApp({
     corsOrigins,
-    trustProxy: env.NODE_ENV === 'production',
+    trustProxyCidrs: env.TRUSTED_PROXY_CIDRS,
     logger,
     observability: {
       config: {

@@ -24,7 +24,7 @@ describe('M7 — reportes del jugador, límites y estado de moderación', () => 
   }): Promise<NestFastifyApplication> {
     const created = await createApiApp({
       dbHandle,
-      trustProxy: true,
+      trustProxyCidrs: ['127.0.0.1/32'],
       authOptions: {
         runtimeConfig: { sessionSecret: SESSION_SECRET, nowFn: () => clockMs },
         rateLimitConfig: { maxPerIp: 500, maxPerAccount: 500, nowFn: () => clockMs },

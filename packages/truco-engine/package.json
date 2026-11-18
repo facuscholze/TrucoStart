@@ -26,7 +26,8 @@
     "dev": "tsup --watch",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:slow": "vitest run --config vitest.slow.config.ts"
   },
   "devDependencies": {
     "@truco/config": "workspace:*",

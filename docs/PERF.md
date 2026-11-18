@@ -14,16 +14,17 @@
 
 ## Criterios de salida de M8b
 
-| Criterio                                             | Estado                    | Evidencia                                                                                                                                                                                            |
-| ---------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| p95 latencia de acción < 150 ms                      | **Verificado en sandbox** | `perf:actions` p95 0,54 ms (25 salas/50 sockets, loopback); `perf:load` p95 0,37 ms (100 salas/200 sockets). En producción debe validarse en CI/perf.yml y en infra real (red + Redis + Postgres).   |
-| 100 partidas simultáneas estables                    | **Verificado en sandbox** | `ROOMS=100 ACTIONS=20` `perf:load`: 4.000 acciones, 0 fallos, todas las salas activas. CI correrá el mismo escenario contra Redis+Postgres reales en el workflow manual `perf.yml`.                  |
-| Escenarios k6 100 / 1.000 usuarios + workflow manual | **Implementado**          | `perf/k6/lobby-and-login.js` + `.github/workflows/perf.yml` (`workflow_dispatch`). 1.000 usuarios sólo contra el stack CI (el sandbox no dispone de k6 ni de CPU para esa carga).                    |
-| Índices críticos y paginación                        | **Verificado**            | Migración `0005_m8b_performance_indexes.sql` + tests de migración (PGlite) y de repositorios en CI.                                                                                                  |
-| Caché corto del lobby (1 s)                          | **Implementado**          | `LobbyService.lobbyListCache` (TTL 1 s, invalidado en cada mutación: create/join/leave/delete/expire). Verificado por tests del servicio (lobby-rules-and-ws-privacy).                               |
-| Límites de conexiones por usuario e IP               | **Implementado + test**   | `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 20), test en `apps/game-server/tests/server.spec.ts`.                                                               |
-| EXPLAIN ANALYZE de consultas críticas                | **Parcial**               | Script `scripts/perf/explain-critical.mjs` integrado en el workflow `perf.yml` (escenario `explain`); falta ejecutarlo sobre una base con datos realistas (muchas filas y un volumen de producción). |
-| Medición CPU / memoria por sala                      | **Parcial (sandbox)**     | Ver datos abajo; falta medición en infra real con métricas Prometheus (`truco_rooms_active`, `truco_ws_connections`, Node `process_cpu_seconds_total`).                                              |
+| Criterio                                             | Estado                    | Evidencia                                                                                                                                                                                                  |
+| ---------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| p95 latencia de acción < 150 ms                      | **Verificado en sandbox** | `perf:actions` p95 0,54 ms (25 salas/50 sockets, loopback); `perf:load` p95 0,37 ms (100 salas/200 sockets). En producción debe validarse en CI/perf.yml y en infra real (red + Redis + Postgres).         |
+| 100 partidas simultáneas estables                    | **Verificado en sandbox** | `ROOMS=100 ACTIONS=20` `perf:load`: 4.000 acciones, 0 fallos, todas las salas activas. CI correrá el mismo escenario contra Redis+Postgres reales en el workflow manual `perf.yml`.                        |
+| Escenarios k6 100 / 1.000 usuarios + workflow manual | **Implementado**          | `perf/k6/lobby-and-login.js` + `.github/workflows/perf.yml` (`workflow_dispatch`). 1.000 usuarios sólo contra el stack CI (el sandbox no dispone de k6 ni de CPU para esa carga).                          |
+| Índices críticos y paginación                        | **Verificado**            | Migración `0005_m8b_performance_indexes.sql` + tests de migración (PGlite) y de repositorios en CI.                                                                                                        |
+| Caché corto del lobby (1 s)                          | **Implementado**          | `LobbyService.lobbyListCache` (TTL 1 s, invalidado en cada mutación: create/join/leave/delete/expire). Verificado por tests del servicio (lobby-rules-and-ws-privacy).                                     |
+| Límites de conexiones por usuario e IP               | **Implementado + test**   | `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 60, ADR-019), resolviendo IP real sólo desde `TRUSTED_PROXY_CIDRS` (ADR-020); tests en `cidr.spec.ts` y `server.spec.ts`. |
+| EXPLAIN ANALYZE de consultas críticas                | **No medido en CI**       | Script `scripts/perf/explain-critical.mjs` integrado en el workflow `perf.yml` (escenario `explain`); debe ejecutarse manualmente (403 por integración desde este sandbox) sobre una base sembrada.        |
+| k6 HTTP 100 VUs (lobby + login + historial)          | **No medido en CI**       | Script `perf/k6/lobby-and-login.js` y artefactos subidos en `perf.yml`; requiere ejecución manual del workflow.                                                                                            |
+| Medición CPU / memoria por sala                      | **Parcial (sandbox)**     | Ver datos abajo; falta medición en infra real con métricas Prometheus (`truco_rooms_active`, `truco_ws_connections`, Node `process_cpu_seconds_total`).                                                    |
 
 ---
 
@@ -118,7 +119,7 @@
    - `table_seats(table_id) WHERE is_active=true` para snapshots de sala.
    - Índices parciales: `sanctions(user_id, expires_at) WHERE revoked_at IS NULL`, `sessions(user_id, last_used_at DESC) WHERE revoked_at IS NULL`, `auth_tokens(user_id, purpose, expires_at) WHERE consumed_at IS NULL`, `reports(claimed_by, status)`, `audit_logs(created_at DESC, action)`.
 2. **Caché del lobby en memoria:** `LobbyService.listPublicTables` cachea por 1 s los resultados del listado HTTP, invalidándolo en cada mutación (crear/unirse/abandonar/eliminar/expirar). Como la fuente de verdad en vivo es el canal WebSocket `/lobby`, el listado HTTP no requiere consistencia estricta.
-3. **Límites de conexiones WS por usuario e IP:** `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 20) para impedir que un solo usuario u origen agote sockets del proceso. Ver `apps/game-server/tests/server.spec.ts`.
+3. **Límites de conexiones WS por usuario e IP:** `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 60, ADR-019) para impedir que un solo usuario u origen agote sockets del proceso. Ver `apps/game-server/tests/server.spec.ts`.
 4. **Check de bundle admin en CI:** `pnpm --filter @truco/admin check:bundle` corre en CI después del build y falla si el bundle de producción incluye datos demo (`createDemoClient`, nombres ficticios del panel).
 
 ---
@@ -131,12 +132,12 @@
 
 Consultas cubiertas:
 
-- **Lobby público** (`GET /v1/tables`): `tables WHERE visibility='PUBLIC' AND status IN ('WAITING','IN_GAME') ORDER BY created_at DESC LIMIT 25` → uso esperado de `tables_lobby_listing_idx` (Index Scan + sin Sort).
-- **Login por email / nickname:** `users WHERE email = $1` / `nickname_lower = $1` → Índice único sobre las columnas (PK implicada).
-- **Historial paginado:** `match_players JOIN matches WHERE user_id = $1 ORDER BY match_id DESC LIMIT 20` → uso esperado de `match_players_user_started_idx` (índice compuesto que ordena y filtra).
-- **Estadísticas (win/loss/abandon):** agregado agrupado por `outcome` sobre `match_players WHERE user_id=$1` → Index Only Scan sobre `match_players_user_match_idx`.
-- **Barrido de salas expiradas:** combina `tables_status_expires_idx` (WAITING) y `tables_status_updated_idx` (IN_GAME zombi).
-- **Cola de moderación:** `reports WHERE status IN ('OPEN','IN_REVIEW') ORDER BY created_at DESC LIMIT 50` → `reports_status_created_idx`.
+- **Lobby público** (`GET /v1/tables`): `tables WHERE visibility='PUBLIC' AND status IN ('WAITING','IN_GAME') ORDER BY created_at DESC LIMIT 25` → **no medido en CI** (falta ejecutar `perf.yml`); se espera `tables_lobby_listing_idx` con Index Scan + sin Sort.
+- **Login por email / nickname:** `users WHERE email = $1` / `nickname_lower = $1` → Índice único sobre las columnas (PK implicada), uso ya comprobado en tests de contrato de `@truco/api`.
+- **Historial paginado:** `match_players JOIN matches WHERE user_id = $1 ORDER BY match_id DESC LIMIT 20` → **no medido en CI**; se espera uso de `match_players_user_started_idx` (índice compuesto que ordena y filtra).
+- **Estadísticas (win/loss/abandon):** agregado agrupado por `outcome` sobre `match_players WHERE user_id=$1` → **no medido en CI**; se espera Index Only Scan sobre `match_players_user_match_idx`.
+- **Barrido de salas expiradas:** combina `tables_status_expires_idx` (WAITING) y `tables_status_updated_idx` (IN_GAME zombi) — **no medido en CI**.
+- **Cola de moderación:** `reports WHERE status IN ('OPEN','IN_REVIEW') ORDER BY created_at DESC LIMIT 50` → **no medido en CI**; se espera uso de `reports_status_created_idx`.
 
 ---
 

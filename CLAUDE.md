@@ -114,6 +114,7 @@ pnpm build         # Build de producción vía Turborepo
 ```
 
 **Reglas del reporte:**
+
 1. Nunca marcar como verificado algo que no se corrió.
 2. No inventar ids de CI ni números.
 3. Si un comando falló, pegar el error resumido (máximo 10 líneas).

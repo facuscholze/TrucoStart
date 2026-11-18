@@ -14,16 +14,16 @@
 
 ## Criterios de salida de M8b
 
-| Criterio                                                              | Estado                     | Evidencia                                                                                                                                                                                              |
-| --------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| p95 latencia de acción < 150 ms                                       | **Verificado en sandbox**  | `perf:actions` p95 0,54 ms (25 salas/50 sockets, loopback); `perf:load` p95 0,37 ms (100 salas/200 sockets). En producción debe validarse en CI/perf.yml y en infra real (red + Redis + Postgres).         |
-| 100 partidas simultáneas estables                                     | **Verificado en sandbox**  | `ROOMS=100 ACTIONS=20` `perf:load`: 4.000 acciones, 0 fallos, todas las salas activas. CI correrá el mismo escenario contra Redis+Postgres reales en el workflow manual `perf.yml`.                     |
-| Escenarios k6 100 / 1.000 usuarios + workflow manual                  | **Implementado**           | `perf/k6/lobby-and-login.js` + `.github/workflows/perf.yml` (`workflow_dispatch`). 1.000 usuarios sólo contra el stack CI (el sandbox no dispone de k6 ni de CPU para esa carga).                       |
-| Índices críticos y paginación                                         | **Verificado**             | Migración `0005_m8b_performance_indexes.sql` + tests de migración (PGlite) y de repositorios en CI.                                                                                                     |
-| Caché corto del lobby (1 s)                                           | **Implementado**           | `LobbyService.lobbyListCache` (TTL 1 s, invalidado en cada mutación: create/join/leave/delete/expire). Verificado por tests del servicio (lobby-rules-and-ws-privacy).                                  |
-| Límites de conexiones por usuario e IP                                | **Implementado + test**    | `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 20), test en `apps/game-server/tests/server.spec.ts`.                                                                  |
-| EXPLAIN ANALYZE de consultas críticas                                 | **Parcial**                | Script `scripts/perf/explain-critical.mjs` integrado en el workflow `perf.yml` (escenario `explain`); falta ejecutarlo sobre una base con datos realistas (muchas filas y un volumen de producción).     |
-| Medición CPU / memoria por sala                                       | **Parcial (sandbox)**      | Ver datos abajo; falta medición en infra real con métricas Prometheus (`truco_rooms_active`, `truco_ws_connections`, Node `process_cpu_seconds_total`).                                                 |
+| Criterio                                             | Estado                    | Evidencia                                                                                                                                                                                            |
+| ---------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| p95 latencia de acción < 150 ms                      | **Verificado en sandbox** | `perf:actions` p95 0,54 ms (25 salas/50 sockets, loopback); `perf:load` p95 0,37 ms (100 salas/200 sockets). En producción debe validarse en CI/perf.yml y en infra real (red + Redis + Postgres).   |
+| 100 partidas simultáneas estables                    | **Verificado en sandbox** | `ROOMS=100 ACTIONS=20` `perf:load`: 4.000 acciones, 0 fallos, todas las salas activas. CI correrá el mismo escenario contra Redis+Postgres reales en el workflow manual `perf.yml`.                  |
+| Escenarios k6 100 / 1.000 usuarios + workflow manual | **Implementado**          | `perf/k6/lobby-and-login.js` + `.github/workflows/perf.yml` (`workflow_dispatch`). 1.000 usuarios sólo contra el stack CI (el sandbox no dispone de k6 ni de CPU para esa carga).                    |
+| Índices críticos y paginación                        | **Verificado**            | Migración `0005_m8b_performance_indexes.sql` + tests de migración (PGlite) y de repositorios en CI.                                                                                                  |
+| Caché corto del lobby (1 s)                          | **Implementado**          | `LobbyService.lobbyListCache` (TTL 1 s, invalidado en cada mutación: create/join/leave/delete/expire). Verificado por tests del servicio (lobby-rules-and-ws-privacy).                               |
+| Límites de conexiones por usuario e IP               | **Implementado + test**   | `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 20), test en `apps/game-server/tests/server.spec.ts`.                                                               |
+| EXPLAIN ANALYZE de consultas críticas                | **Parcial**               | Script `scripts/perf/explain-critical.mjs` integrado en el workflow `perf.yml` (escenario `explain`); falta ejecutarlo sobre una base con datos realistas (muchas filas y un volumen de producción). |
+| Medición CPU / memoria por sala                      | **Parcial (sandbox)**     | Ver datos abajo; falta medición en infra real con métricas Prometheus (`truco_rooms_active`, `truco_ws_connections`, Node `process_cpu_seconds_total`).                                              |
 
 ---
 
@@ -52,9 +52,14 @@
   "rooms": 25,
   "wsConnections": 50,
   "actions": {
-    "measured": 2000, "failed": 0,
-    "elapsedMs": 608.14, "rps": 3289,
-    "p50Ms": 0.27, "p95Ms": 0.54, "p99Ms": 0.91, "maxMs": 7.46
+    "measured": 2000,
+    "failed": 0,
+    "elapsedMs": 608.14,
+    "rps": 3289,
+    "p50Ms": 0.27,
+    "p95Ms": 0.54,
+    "p99Ms": 0.91,
+    "maxMs": 7.46
   },
   "memory": { "heapAfterMB": 33.47 }
 }
@@ -70,9 +75,15 @@
   "sockets": 200,
   "actionsPerRoom": 20,
   "actions": {
-    "total": 4000, "ok": 4000, "failed": 0,
-    "elapsedMs": 821.4, "rps": 4870,
-    "p50Ms": 0.17, "p95Ms": 0.36, "p99Ms": 0.78, "maxMs": 11.09
+    "total": 4000,
+    "ok": 4000,
+    "failed": 0,
+    "elapsedMs": 821.4,
+    "rps": 4870,
+    "p50Ms": 0.17,
+    "p95Ms": 0.36,
+    "p99Ms": 0.78,
+    "maxMs": 11.09
   },
   "memory": {
     "rssAfterMB": 128.5,
@@ -131,13 +142,13 @@ Consultas cubiertas:
 
 ## Cuellos de botella conocidos y planes
 
-| Cuello                                 | Estado     | Mitigación                                                                                                                                   |
-| -------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Event-loop bloqueado por lote de acciones | Detectado  | El camino de acción ya es < 1 ms; cualquier tarea CPU-pesada (Monte Carlo de bots) corre en el mismo tick pero está acotada a decisiones de IA (120 muestras por decisión de canto, sólo en práctica). |
+| Cuello                                                           | Estado                     | Mitigación                                                                                                                                                                                                            |
+| ---------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Event-loop bloqueado por lote de acciones                        | Detectado                  | El camino de acción ya es < 1 ms; cualquier tarea CPU-pesada (Monte Carlo de bots) corre en el mismo tick pero está acotada a decisiones de IA (120 muestras por decisión de canto, sólo en práctica).                |
 | Redis como punto de compartición entre instancias de game-server | Pendiente de real medición | Escenario `ws-load` actual en sandbox usa `InMemoryGameStore`; en CI y prod corre `RedisGameStore` (ya implementado) con lo que hay que medir el overhead del comando `SET`/pubsub por ticket y por snapshot de sala. |
-| Historial de usuario sobre mesas grandes | Mitigado   | Paginación por cursor (`match_id` UUID v7 = ordenable por tiempo) e índice compuesto; el endpoint `/v1/me/matches?limit=20` ya está capado a 50 filas. |
-| Lobby con miles de mesas públicas      | Mitigado   | Caché de 1 s + límite máximo de 50 resultados + índice compuesto. Si en prod el lobby supera las ~500 mesas activas se moverá el snapshot al canal Redis y se paginará desde el gateway WS. |
-| Emails / OAuth / Captcha               | Fuera de M8b | Sus proveedores reales se conectan en M8c; los adaptadores simulados (`ConsoleEmailProvider`, etc.) no afectan el throughput medido.          |
+| Historial de usuario sobre mesas grandes                         | Mitigado                   | Paginación por cursor (`match_id` UUID v7 = ordenable por tiempo) e índice compuesto; el endpoint `/v1/me/matches?limit=20` ya está capado a 50 filas.                                                                |
+| Lobby con miles de mesas públicas                                | Mitigado                   | Caché de 1 s + límite máximo de 50 resultados + índice compuesto. Si en prod el lobby supera las ~500 mesas activas se moverá el snapshot al canal Redis y se paginará desde el gateway WS.                           |
+| Emails / OAuth / Captcha                                         | Fuera de M8b               | Sus proveedores reales se conectan en M8c; los adaptadores simulados (`ConsoleEmailProvider`, etc.) no afectan el throughput medido.                                                                                  |
 
 ---
 
@@ -154,14 +165,14 @@ Consultas cubiertas:
 
 ### Resultados
 
-| Enfrentamiento                   | Partidas | Victorias | Win rate | IC 95%        |
-| -------------------------------- | -------: | --------: | -------- | ------------- |
+| Enfrentamiento                   | Partidas | Victorias | Win rate  | IC 95%        |
+| -------------------------------- | -------: | --------: | --------- | ------------- |
 | **Difícil vs Bot anterior (M1)** |    2.000 |     1.259 | **62,9%** | 60,8% – 65,0% |
-| Difícil vs Medio                 |    2.000 |     1.233 | 61,7%    | 59,5% – 63,8% |
-| Difícil vs Fácil                 |    2.000 |     1.595 | 79,8%    | 77,9% – 81,5% |
-| Medio vs Bot anterior (M1)       |    2.000 |       991 | 49,5%    | 47,4% – 51,7% |
-| Medio vs Fácil                   |    2.000 |     1.471 | 73,6%    | 71,6% – 75,4% |
-| Difícil vs Random                |    2.000 |     1.951 | 97,5%    | 96,8% – 98,1% |
+| Difícil vs Medio                 |    2.000 |     1.233 | 61,7%     | 59,5% – 63,8% |
+| Difícil vs Fácil                 |    2.000 |     1.595 | 79,8%     | 77,9% – 81,5% |
+| Medio vs Bot anterior (M1)       |    2.000 |       991 | 49,5%     | 47,4% – 51,7% |
+| Medio vs Fácil                   |    2.000 |     1.471 | 73,6%     | 71,6% – 75,4% |
+| Difícil vs Random                |    2.000 |     1.951 | 97,5%     | 96,8% – 98,1% |
 
 **Criterio BL-010 (difícil > 60% vs bot anterior): cumplido.**
 
@@ -169,17 +180,17 @@ Costo de CPU de una partida entre dos bots difíciles: ~10 ms, dominado por el M
 
 ### Parámetros finales por dificultad
 
-| Parámetro                | Fácil | Medio | Difícil |
-| ------------------------ | ----: | ----: | ------: |
-| envidoCallThreshold      |    30 |    27 |      25 |
-| envidoRaiseThreshold     |    33 |    32 |      31 |
-| envidoAcceptProbability  |  0,62 |  0,55 |    0,65 |
-| trucoRaiseStrength       |  0,85 |  0,70 |    0,78 |
-| trucoAcceptStrength      |  0,62 |  0,50 |    0,40 |
-| bluffRate                |  0,02 |  0,07 |    0,12 |
-| evaluationNoise          |  0,22 |  0,10 |    0,03 |
-| cardMistakeRate          |  0,15 |  0,05 |    0,00 |
-| usesCardMemory           |    no |    sí |      sí |
+| Parámetro               | Fácil | Medio | Difícil |
+| ----------------------- | ----: | ----: | ------: |
+| envidoCallThreshold     |    30 |    27 |      25 |
+| envidoRaiseThreshold    |    33 |    32 |      31 |
+| envidoAcceptProbability |  0,62 |  0,55 |    0,65 |
+| trucoRaiseStrength      |  0,85 |  0,70 |    0,78 |
+| trucoAcceptStrength     |  0,62 |  0,50 |    0,40 |
+| bluffRate               |  0,02 |  0,07 |    0,12 |
+| evaluationNoise         |  0,22 |  0,10 |    0,03 |
+| cardMistakeRate         |  0,15 |  0,05 |    0,00 |
+| usesCardMemory          |    no |    sí |      sí |
 
 ## Log de decisiones del bot difícil (M6)
 

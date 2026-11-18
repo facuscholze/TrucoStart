@@ -289,7 +289,6 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
   - Cero duplicación de estado o reglas: `tables.id === roomId` y el `RuleSet` nace una sola vez en `apps/api`.
   - Escritura ACID garantizada de `matches` + `match_players` + `match_events` con tolerancia a reintentos (at-least-once) de BullMQ.
 
-
 ---
 
 ## ADR-018: Listado de Lobby con Paginación y Caché de 1 Segundo

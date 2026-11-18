@@ -79,7 +79,8 @@ const RULES = [
     // Excluye URLs de docker-compose que interpolan variables (${...}) — esas
     // referencias se resuelven en runtime contra .env y no contienen secreto.
     pattern: /\b[a-z][a-z0-9+.-]*:\/\/(?!\$\{)[^\s:@/]+:(?!\$\{)[^\s:@/]{6,}@/i,
-    allow: /\b(?:localhost|127\.0\.0\.1|postgres(?:ql)?:\/\/truco_dev:[a-z_]+@localhost)/i,
+    allow:
+      /\b(?:localhost|127\.0\.0\.1|postgres(?:ql)?:\/\/truco_dev:[a-z_]+@localhost|postgres(?:ql)?:\/\/truco_staging:ci_staging_password@postgres)/i,
   },
   {
     id: 'env-secret-assignment',

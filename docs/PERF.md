@@ -60,21 +60,27 @@
 }
 ```
 
+> Nota: el número previo de 0,44 ms (citado en STATE.md al comenzar M8b) se obtuvo con 25 salas/40 acciones y sin los límites de conexiones por usuario/IP recién agregados; la diferencia con el valor actual (0,54 ms) es de ~0,1 ms atribuible a la nueva comprobación por IP en el middleware. Sigue siendo una cota inferior de CPU en loopback.
+
 ### Carga 100 salas / 200 sockets / 20 acciones por socket (`perf:load`)
 
 ```json
 {
-  "rooms": 100,
-  "wsConnections": 200,
+  "roomsConfigured": 100,
+  "sockets": 200,
+  "actionsPerRoom": 20,
   "actions": {
     "total": 4000, "ok": 4000, "failed": 0,
-    "elapsedMs": 840.78, "rps": 4757,
-    "p50Ms": 0.16, "p95Ms": 0.37, "p99Ms": 0.81, "maxMs": 13.74
+    "elapsedMs": 821.4, "rps": 4870,
+    "p50Ms": 0.17, "p95Ms": 0.36, "p99Ms": 0.78, "maxMs": 11.09
   },
   "memory": {
-    "rssAfterMB": 121.68,
-    "heapUsedMB": 40.58
-  }
+    "rssAfterMB": 128.5,
+    "rssDeltaMB": 2.3,
+    "heapUsedMB": 42.64,
+    "memPerSocketKB": 11.8
+  },
+  "rooms": { "active": 100, "wsConnections": 200 }
 }
 ```
 

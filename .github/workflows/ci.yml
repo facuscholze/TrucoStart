@@ -85,6 +85,12 @@ jobs:
       - name: Test secrets scanner with decoys
         run: node scripts/test-scan-secrets.mjs
 
+      # Regla 13 del proyecto: producto sin dinero real. Busca MECANISMOS
+      # (pasarelas, saldos, endpoints de depósito/retiro, copy que prometa plata),
+      # no palabras: "Real Envido" y "gana la baza" son vocabulario del truco.
+      - name: Enforce rule 13 (no real money)
+        run: node scripts/check-no-real-money.mjs
+
       - name: Check formatting
         run: pnpm format:check
 

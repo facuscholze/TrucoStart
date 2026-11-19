@@ -136,12 +136,25 @@ describe('@truco/game-server trusted-proxy IP resolution (ADR-020)', () => {
       expect(c3.ip).toBe('203.0.113.5');
     });
 
-    it('X-Forwarded-For con múltiples IPs toma la primera (cliente más a la izquierda)', async () => {
+    it('X-Forwarded-For se parsea de derecha a izquierda (ADR-022)', async () => {
+      // En esta suite el único proxy confiable es 127.0.0.1/32 (el socket).
+      // 10.0.0.1 está a la derecha del cliente: es el primer salto NO confiable,
+      // así que ése es el origen que se usa. (Recorrer la lista de izquierda a
+      // derecha devolvería 203.0.113.42, que es justamente lo que un atacante
+      // podría prepender.)
       const c = await connectWith({
         tokenUserId: 'u4',
         extraHeaders: { 'x-forwarded-for': '203.0.113.42, 10.0.0.1, 127.0.0.1' },
       });
-      expect(c.ip).toBe('203.0.113.42');
+      expect(c.ip).toBe('10.0.0.1');
+
+      // Ataque de prepend con un solo salto confiable: la IP falsa nunca gana.
+      const c2 = await connectWith({
+        tokenUserId: 'u6',
+        extraHeaders: { 'x-forwarded-for': '198.51.100.99, 203.0.113.42, 127.0.0.1' },
+      });
+      expect(c2.ip).toBe('203.0.113.42');
+      expect(c2.ip).not.toBe('198.51.100.99');
     });
 
     it('cabecera ausente → cae a la IP remota (127.0.0.1)', async () => {

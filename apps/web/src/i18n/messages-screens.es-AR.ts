@@ -77,6 +77,14 @@ export const screenMessagesEsAr = {
     offlineNotice:
       'Estás sin conexión a internet. Podés usar el Anotador de fósforos y la sección Aprender con normalidad.',
   },
+  legal: {
+    footerAria: 'Documentos legales y de privacidad',
+    index: 'Documentos legales',
+    terms: 'Términos y Condiciones',
+    privacy: 'Política de Privacidad',
+    cookies: 'Política de Cookies',
+    conduct: 'Reglas de Conducta',
+  },
   auth: {
     pageTitle: 'Tu cuenta en el paño',
     pageSubtitle:
@@ -113,6 +121,18 @@ export const screenMessagesEsAr = {
       'Si el correo corresponde a una cuenta activa, enviamos las instrucciones de recuperación.',
     successPasswordReset: '¡Listo! Actualizamos tu contraseña. Ya podés iniciar sesión.',
     successEmailVerified: '¡Correo verificado correctamente!',
+    legalHeading: 'Aceptación de términos',
+    legalAcceptanceLabel:
+      'Tengo la edad mínima requerida y acepto los Términos y Condiciones y la Política de Privacidad.',
+    legalMinAgeNotice: (minAge: number) =>
+      `Para crear una cuenta necesitás tener al menos ${minAge} años declarados.`,
+    legalAgeLabel: 'Declaro tener',
+    legalAgeSuffix: 'años',
+    legalReadTermsCta: 'Leer los Términos',
+    legalReadPrivacyCta: 'Leer la Política de Privacidad',
+    legalAcceptanceRequired: 'Marcá la casilla de aceptación para continuar.',
+    legalAgeBelowMinimum: (minAge: number) =>
+      `La edad declarada no alcanza el mínimo de ${minAge} años.`,
     alreadyLoggedTitle: 'Sesión activa',
     goToProfileCta: 'Ir a mi perfil y ajustes',
     logoutHereCta: 'Cerrar sesión en este navegador',

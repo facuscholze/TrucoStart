@@ -1,3 +1,4 @@
+import nodemailer, { type Transporter } from 'nodemailer';
 import { DomainApiException } from '../../../common/api-exception.js';
 import type { EmailProvider, OutboundEmailMessage } from './email.provider.js';
 
@@ -114,26 +115,20 @@ export class ResendEmailProvider implements EmailProvider {
 }
 
 /**
- * Adaptador SMTP genérico usando nodemailer (opcional). Activado cuando
- * `EMAIL_PROVIDER=smtp` y `SMTP_CONNECTION_URL` está configurado.
+ * Adaptador SMTP genérico usando `nodemailer` (dependencia directa de `@truco/api`).
+ * Activado con `EMAIL_PROVIDER=smtp` y `SMTP_CONNECTION_URL`
+ * (`smtps://usuario:clave@smtp.proveedor.com:465`).
  *
- * NOTA: requiere `nodemailer` como dependencia opcional. Si el paquete no
- * está instalado, se lanza un error de configuración al iniciar.
+ * A diferencia del wrapper anterior (dependencia opcional cargada con `import()`
+ * dinámico y `@ts-expect-error`), `nodemailer` es ahora una dependencia directa
+ * tipada: el transporte se valida con `verify()` al construir el provider.
  */
 export class SmtpEmailProvider implements EmailProvider {
   readonly providerName = 'smtp';
   readonly isSimulated = false;
 
   constructor(
-    private readonly transport: {
-      sendMail: (opts: {
-        from: string;
-        to: string;
-        subject: string;
-        html: string;
-        text: string;
-      }) => Promise<unknown>;
-    },
+    private readonly transport: Pick<Transporter, 'sendMail'>,
     private readonly fromAddress: string,
     private readonly webBaseUrl: string,
     private readonly outbox?: OutboundEmailMessage[],
@@ -145,35 +140,18 @@ export class SmtpEmailProvider implements EmailProvider {
     webBaseUrl: string;
     outbox?: OutboundEmailMessage[];
   }): Promise<SmtpEmailProvider> {
-    // nodemailer es una dependencia opcional (no se requiere en sandbox).
-    type NodemailerLike = {
-      createTransport: (url: string) => {
-        verify: () => Promise<unknown>;
-        sendMail: (opts: unknown) => Promise<unknown>;
-      };
-    };
-    let nodemailer: NodemailerLike;
+    const transport = nodemailer.createTransport(options.connectionUrl);
     try {
-      // nodemailer es una dependencia opcional: en sandbox no está instalada
-      // y no se requieren tipos. En staging/prod se instala por separado si
-      // EMAIL_PROVIDER=smtp.
-      // @ts-expect-error: optional dep, types not required in monorepo, types not required in monorepo
-      nodemailer = (await import('nodemailer')) as unknown as NodemailerLike;
-    } catch {
+      await transport.verify();
+    } catch (error) {
       throw new DomainApiException(
         500,
         'BAD_GATEWAY',
-        'EMAIL_PROVIDER=smtp pero el paquete `nodemailer` no está instalado',
+        `No se pudo conectar al servidor SMTP: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
-    const transport = nodemailer.createTransport(options.connectionUrl);
-    await transport.verify().catch((err: unknown) => {
-      throw new DomainApiException(
-        500,
-        'BAD_GATEWAY',
-        `No se pudo conectar al servidor SMTP: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
     return new SmtpEmailProvider(
       transport,
       options.fromAddress,
@@ -189,18 +167,15 @@ export class SmtpEmailProvider implements EmailProvider {
     expiresAt: Date;
   }): Promise<void> {
     const verifyUrl = `${this.webBaseUrl}/verify-email?token=${encodeURIComponent(params.token)}`;
-    await this.transport.sendMail({
-      from: this.fromAddress,
+    await this.send({
       to: params.to,
       subject: 'Confirmá tu correo en Mesa de Truco',
-      html: `<p>Hola ${escapeHtml(params.nickname)}</p><p><a href="${escapeAttr(verifyUrl)}">${escapeHtml(verifyUrl)}</a></p>`,
-      text: `Hola ${params.nickname}\n\n${verifyUrl}`,
+      html: `<p>Hola ${escapeHtml(params.nickname)},</p><p>Confirmá tu correo abriendo este enlace:</p><p><a href="${escapeAttr(
+        verifyUrl,
+      )}">${escapeHtml(verifyUrl)}</a></p><p>El enlace expira el ${params.expiresAt.toISOString()}.</p>`,
+      text: `Hola ${params.nickname},\n\nConfirmá tu correo abriendo:\n${verifyUrl}\n\nExpira: ${params.expiresAt.toISOString()}\n`,
     });
-    this.outbox?.push({
-      ...params,
-      template: 'EMAIL_VERIFICATION',
-      sentAt: new Date(),
-    });
+    this.outbox?.push({ ...params, template: 'EMAIL_VERIFICATION', sentAt: new Date() });
   }
 
   async sendPasswordResetEmail(params: {
@@ -210,18 +185,32 @@ export class SmtpEmailProvider implements EmailProvider {
     expiresAt: Date;
   }): Promise<void> {
     const resetUrl = `${this.webBaseUrl}/reset-password?token=${encodeURIComponent(params.token)}`;
-    await this.transport.sendMail({
-      from: this.fromAddress,
+    await this.send({
       to: params.to,
       subject: 'Restablecé tu contraseña en Mesa de Truco',
-      html: `<p>Hola ${escapeHtml(params.nickname)}</p><p><a href="${escapeAttr(resetUrl)}">${escapeHtml(resetUrl)}</a></p>`,
-      text: `Hola ${params.nickname}\n\n${resetUrl}`,
+      html: `<p>Hola ${escapeHtml(params.nickname)},</p><p>Pediste restablecer tu contraseña. Abrí este enlace:</p><p><a href="${escapeAttr(
+        resetUrl,
+      )}">${escapeHtml(resetUrl)}</a></p><p>El enlace expira el ${params.expiresAt.toISOString()}. Si no fuiste vos, ignoralo.</p>`,
+      text: `Hola ${params.nickname},\n\nRestablecé tu contraseña abriendo:\n${resetUrl}\n\nExpira: ${params.expiresAt.toISOString()}\n`,
     });
-    this.outbox?.push({
-      ...params,
-      template: 'PASSWORD_RESET',
-      sentAt: new Date(),
-    });
+    this.outbox?.push({ ...params, template: 'PASSWORD_RESET', sentAt: new Date() });
+  }
+
+  private async send(msg: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+  }): Promise<void> {
+    try {
+      await this.transport.sendMail({ from: this.fromAddress, ...msg });
+    } catch (error) {
+      throw new DomainApiException(
+        502,
+        'BAD_GATEWAY',
+        `No se pudo enviar el correo: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }
 

@@ -10,6 +10,7 @@ import {
   type DatabaseConnectionHandle,
 } from '../../../db/database.provider.js';
 import { buildCookieHeader, extractAuthCookies } from './test-cookie-jar.js';
+import { TEST_LEGAL_ACCEPTANCE } from '../../../common/testing/legal-acceptance.fixture.js';
 
 const SHARED_SESSION_SECRET = 'shared-m3-api-and-gameserver-secret-32chars!!';
 
@@ -113,6 +114,7 @@ describe('M3 Cross-Service Integration: apps/api POST /v1/auth/ws-ticket <-> app
         email: 'socket.player@truco.ar',
         password: 'ClaveSocket123',
         nickname: 'ManoDeHierro',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     expect(reg.statusCode).toBe(201);

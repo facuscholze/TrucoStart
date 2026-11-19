@@ -1,4 +1,4 @@
-import { DEFAULT_APP_NAME, type AuthUserSummary } from '@truco/shared';
+import { DEFAULT_APP_NAME, LEGAL_DRAFT_BANNER, type AuthUserSummary } from '@truco/shared';
 import { Avatar, Badge } from '@truco/ui';
 import { type ReactNode, useEffect, useState } from 'react';
 import { messagesEsAr } from '../i18n/messages.es-AR.js';
@@ -9,6 +9,18 @@ import {
 } from '../lib/preferences.js';
 
 export type NavSection = 'home' | 'lobby' | 'learn' | 'scorer' | 'profile' | 'auth';
+
+/**
+ * Enlaces legales del pie. El orden coincide con `legalDocumentOrder` para que el
+ * índice y el pie nunca se contradigan.
+ */
+const legalFooterLinks: ReadonlyArray<{ path: string; label: string }> = [
+  { path: '/legal/terminos', label: messagesEsAr.legal.terms },
+  { path: '/legal/privacidad', label: messagesEsAr.legal.privacy },
+  { path: '/legal/cookies', label: messagesEsAr.legal.cookies },
+  { path: '/legal/reglas-de-conducta', label: messagesEsAr.legal.conduct },
+  { path: '/legal', label: messagesEsAr.legal.index },
+];
 
 export interface AppShellProps {
   activeSection: NavSection;
@@ -174,6 +186,33 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
       <main className="flex-1 w-full max-w-6xl mx-auto px-3.5 tablet:px-6 py-5 pb-24 tablet:pb-8">
         {children}
       </main>
+
+      <footer className="border-t border-ivory/15 bg-surface/60 px-3.5 tablet:px-6 py-5">
+        <div className="max-w-6xl mx-auto flex flex-col gap-3 tablet:flex-row tablet:items-center tablet:justify-between">
+          <p className="text-[11px] leading-relaxed text-muted">
+            {appName} · Juego recreativo sin dinero real: no hay apuestas, depósitos, retiros ni
+            transferencias de puntos entre jugadores.
+          </p>
+          <nav aria-label={messagesEsAr.legal.footerAria}>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {legalFooterLinks.map((link) => (
+                <li key={link.path}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(link.path)}
+                    className="py-1 text-[11px] font-semibold text-ivory/80 underline underline-offset-2 hover:text-gold"
+                  >
+                    {link.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
+        <p className="max-w-6xl mx-auto mt-3 text-[10px] font-bold uppercase tracking-wide text-danger/90">
+          {LEGAL_DRAFT_BANNER}
+        </p>
+      </footer>
 
       {/* Barra inferior táctil en móvil (< 768px) */}
       <nav

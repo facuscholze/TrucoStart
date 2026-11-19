@@ -105,10 +105,21 @@ export function resolveClientIp(params: {
   const header = Array.isArray(raw) ? raw[0] : raw;
   if (!header) return remote || 'unknown';
 
-  // x-forwarded-for puede ser "client, proxy1, proxy2": se toma la primera IP válida.
-  for (const part of header.split(',')) {
-    const candidate = part.trim().split(':')[0]!;
-    if (parseIp(candidate) !== null) return candidate;
+  // x-forwarded-for es una lista "cliente, proxy1, proxy2". Se recorre de
+  // DERECHA a IZQUIERDA (igual que Fastify y Caddy con trusted_proxies_strict):
+  // el primer salto que NO sea un proxy confiable es el cliente real. Recorrerla
+  // de izquierda a derecha dejaría ganar a una IP que el cliente prependeó.
+  const parts = header
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const candidate = parts[i]!.split(':')[0]!;
+    if (parseIp(candidate) === null) continue;
+    const parsed = parseIp(candidate)!;
+    const hopIsTrusted = params.trustedCidrs.some((c) => mask(parsed, c.prefix128) === c.network);
+    if (!hopIsTrusted) return candidate;
   }
+  // Todos los saltos son proxies confiables (o no hay ninguno válido).
   return remote || 'unknown';
 }

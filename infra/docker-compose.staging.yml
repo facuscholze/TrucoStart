@@ -5,15 +5,17 @@
 #     un servicio gestionado).
 #   - api, game-server: procesos Node de la app.
 #   - web, admin: SPAs servidas por nginx.
-#   - migrate: job efímero que corre `pnpm drizzle-kit migrate` y sale (exit 0
-#     si las migraciones están al día; exit !=0 en caso de deriva y detiene el
-#     deploy vía `service_completed_successfully`).
-#   - nginx: TLS terminator / reverse proxy que expone 8443 con SNI por
-#     subdominio, setea HSTS, X-Forwarded-For y redirige a cada upstream.
+#   - migrate: job efímero que corre las migraciones Drizzle y sale (exit 0 si
+#     están al día; exit !=0 en caso de deriva y detiene el deploy vía
+#     `service_completed_successfully`).
+#   - caddy: terminador TLS y reverse proxy perimetral. Es el ÚNICO servicio con
+#     puertos publicados en el host (80/443). Ningún upstream expone puertos:
+#     se llega a ellos sólo por la red interna `truco-net`.
 #
-# Este compose se usa en el runner de GitHub Actions dentro del workflow
-# `deploy-staging.yml` para validación de humo antes del aprobado manual, y
-# también en un VPS cualquiera para levantar el stack en staging.
+# Firewall: Docker publica puertos insertando reglas DNAT en `iptables` ANTES que
+# ufw, así que `ufw deny 443` no alcanza. El compose se acompaña de
+# `infra/firewall/docker-user-cloudflare.sh`, que limita 80/443 a los rangos de
+# Cloudflare en la cadena `DOCKER-USER`. Ver `docs/DEPLOY.md#firewall`.
 name: mesa-de-truco-staging
 
 networks:
@@ -82,7 +84,10 @@ services:
       REDIS_URL: redis://redis:6379
       API_HOST: '0.0.0.0'
       GAME_SERVER_INTERNAL_URL: http://game-server:3002
+      # Sólo Caddy llega a la API. Con TRUSTED_PROXY_HEADER=x-forwarded-for y
+      # sin CF-Connecting-IP aquí, la IP real la resuelve Caddy (ADR-020/022).
       TRUSTED_PROXY_CIDRS: '172.16.0.0/12'
+      TRUSTED_PROXY_HEADER: 'x-forwarded-for'
       NODE_ENV: production
     depends_on:
       postgres:
@@ -111,6 +116,7 @@ services:
       GAME_SERVER_HOST: '0.0.0.0'
       API_INTERNAL_URL: http://api:3001
       TRUSTED_PROXY_CIDRS: '172.16.0.0/12'
+      TRUSTED_PROXY_HEADER: 'x-forwarded-for'
       NODE_ENV: production
     depends_on:
       redis:
@@ -156,6 +162,43 @@ services:
       timeout: 3s
       retries: 3
 
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    networks: [truco-net]
+    # Único servicio con puertos publicados. 80 queda abierto para la validación
+    # HTTP-01 de ACME y para redirigir a HTTPS. Los puertos del host son
+    # configurables sólo para el smoke test de CI (que corre sin root); en el VPS
+    # se usan los defaults 80/443.
+    ports:
+      - '${HTTP_PORT:-80}:80'
+      - '${HTTPS_PORT:-443}:443'
+      - '${HTTPS_PORT:-443}:443/udp'
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-staging.truco.ar}
+      ACME_EMAIL: ${ACME_EMAIL:-ops@truco.ar}
+      # Caddy sólo acepta CF-Connecting-IP si el par TCP es un edge de Cloudflare.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - staging_caddy_data:/data
+      - staging_caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      game-server:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   staging_postgres_data:
   staging_redis_data:
+  staging_caddy_data:
+  staging_caddy_config:

@@ -1,188 +1,485 @@
 # Guía de despliegue a staging / producción (M8c)
 
-> **Versión:** 2026-11-18 (M8c). Esta guía asume M8b y M8c cerrados (CI verde, adaptadores
-> productivos de email/OAuth/Captcha implementados). La guía está pensada para el primer
-> despliegue del MVP (staging) y luego se extiende sin cambios arquitectónicos a
-> producción.
+> **Versión:** 2026-11-19 (M8c). La guía cubre el **primer despliegue del MVP** en un VPS
+> con Caddy como terminador TLS y Cloudflare delante. Se extiende a producción sin cambios
+> arquitectónicos (mismo compose, otros dominios y secretos).
 
-## Proveedor elegido (MVP)
+Índice: [Proveedor y región](#proveedor-y-región) · [Arquitectura](#arquitectura-de-red-y-tls) ·
+[Primer despliegue](#primer-despliegue) · [Lo que tenés que hacer vos](#4-lo-que-tenés-que-hacer-vos-checklist) ·
+[Firewall](#firewall-docker-se-salta-ufw) · [IP real del cliente](#ip-real-del-cliente) · [Drenaje](#drenaje-graceful-del-game-server) ·
+[Backups](#backups-y-restauración) · [Verificación](#verificación-post-deploy)
 
-**VPS en Hetzner AX102/CPX (región Falkenstein, Alemania — `fsn1`) con Cloudflare delante.**
+---
 
-Justificación:
+## Proveedor y región
 
-- **Precio del VPS:** un CPX21 (3 vCPU AMD / 4 GB RAM / 80 GB NVMe) cuesta ~ €6,40/mes. Un CPX31
-  (4 vCPU / 8 GB) para absorber el pico inicial ~ €11/mes. Es dos órdenes de magnitud más barato
-  que cualquier alternativa cloud gestionada en LATAM.
-- **Latencia a Argentina:** desde Falkenstein a Bs.As./Córdoba la RTT típica es 210–240 ms; con
-  TLS 1.3 + 0-RTT resumido + caché estática de Cloudflare con PoP en Buenos Aires (Ezeiza) el p95
-  de acciones WS queda dentro del objetivo <150 ms del cliente al edge y ~40 ms del edge al
-  game-server (región este-US o FSN). Fly.io tiene edge en EZE pero los nodos workers corren en
-  us-east con precios 4×; Render no tiene región LATAM.
-- **Servicios gestionados:** en el MVP Postgres y Redis corren como contenedores en el mismo VPS
-  (con backups diarios con `pg_dump` a volumen externo y snapshots automáticos de Hetzner).
-  Cuando el uso supere las 200 partidas simultáneas se migra PG a **Neon** (us-east-1 o sa-east-1
-  si está disponible) y Redis a **Upstash**, sin cambios en código (sólo `DATABASE_URL`/`REDIS_URL`).
-- **CDN/WAF:** Cloudflare en el plan Free delante: TLS terminado en el edge, caché de assets
-  estáticos (SPA de web/admin), WAF anti-bots y Turnstile. Cloudflare expone sus rangos de IP
-  confiables para setear `TRUSTED_PROXY_CIDRS`.
-- **Dominio:** un dominio `.com.ar` o `.ar` (apunta `app.truco.ar`, `api.truco.ar`,
-  `admin.truco.ar` al mismo eTLD+1 `truco.ar` — ADR-016 SameSite=Lax).
+**VPS con `docker compose` + Cloudflare delante.**
 
-## Arquitectura DNS/TLS
+### Región: São Paulo (`sa-east-1` / `nbg1` como respaldo)
 
-| Subdominio       | Origen                                               | Cabeceras                                                                 |
-| ---------------- | ---------------------------------------------------- | ------------------------------------------------------------------------- |
-| `app.truco.ar`   | Cloudflare → VPS :8443 (nginx) → `web` (nginx SPA)   | HSTS + CSP + COOP desde el contenedor nginx                               |
-| `api.truco.ar`   | Cloudflare → VPS :8443 (nginx) → `api` (Fastify)     | `X-Forwarded-For` confiable sólo desde rangos Cloudflare                  |
-| `admin.truco.ar` | Cloudflare → VPS :8443 (nginx) → `admin` (nginx SPA) | `X-Robots-Tag: noindex`, `Cache-Control: no-store`                        |
-| `game.truco.ar`  | Cloudflare → VPS :8443 (nginx) → `game-server` WS    | Upgrade a WebSocket, `CF-Connecting-IP` confiable desde rangos Cloudflare |
+La decisión de M8c es **São Paulo** para el cómputo del MVP:
 
-La cookie `truco_access` (HttpOnly; Secure; SameSite=Lax) se emite con `Domain=.truco.ar`
-por lo que el navegador la envía a cualquiera de los tres subdominios sin ser cross-site.
+| Opción                          | RTT Córdoba/Bs.As. | Notas                                                                                       |
+| ------------------------------- | ------------------ | ------------------------------------------------------------------------------------------- |
+| **AWS `sa-east-1` (São Paulo)** | **~35–55 ms**      | La región LATAM con menor latencia real a Argentina. `t4g.small`/`t4g.medium` (ARM) barato. |
+| Hetzner `fsn1` (Alemania)       | ~210–240 ms        | Barato y confiable, pero la RTT domina el p95 de acciones WS. Sólo como respaldo.           |
+| Fly.io edge EZE (Buenos Aires)  | ~10–25 ms          | Edge en EZE pero los workers corren en `us-east` a ~4× precio; sobre-complejo para el MVP.  |
+| Render / Railway                | ~120–180 ms        | Sin región en LATAM ni en São Paulo en el plan base.                                        |
 
-## Rangos de Cloudflare (TRUSTED_PROXY_CIDRS)
+**Recomendación:** un único VPS pequeño en **São Paulo** (`sa-east-1`, `t4g.small` 2 vCPU ARM /
+2 GB o `t4g.medium` 2 vCPU / 4 GB) para `caddy + api + game-server + web + admin`. Postgres y
+Redis corren en el mismo host durante el MVP y se migran a gestionado cuando el uso supere
+~200 partidas simultáneas:
 
-Cloudflare publica sus rangos en:
+- **Postgres:** **Neon `sa-east-1`** (São Paulo) o Supabase `sa-east-1`.
+- **Redis:** **Upstash `sa-east-1`**.
 
-- IPv4: https://www.cloudflare.com/ips-v4
-- IPv6: https://www.cloudflare.com/ips-v6
+Sin cambios de código: sólo `DATABASE_URL` / `REDIS_URL`. Si el proveedor elegido no tiene
+São Paulo, el respaldo documentado es Hetzner `fsn1` + Cloudflare con PoP en Buenos Aires
+(Ezeiza), aceptando 210–240 ms de RTT.
 
-Configuración para `TRUSTED_PROXY_HEADER=cf-connecting-ip` (recomendado cuando sólo Cloudflare
-toca el VPS). Copiar la lista IPv4 separada por coma como valor de `TRUSTED_PROXY_CIDRS` en
-`.env`. Script auxiliar:
+**Por qué importa la región:** el objetivo de M8b/`PERF.md` es p95 de acción WS < 150 ms
+_cliente↔edge_. Con el nodo en São Paulo la RTT Córdoba→São Paulo (~35–55 ms) deja margen
+suficiente; con el nodo en Alemania la RTT sola ya consume el presupuesto.
 
-```bash
-curl -s https://www.cloudflare.com/ips-v4 | paste -sd ',' -
+### Costos de referencia (2026, aproximados)
+
+| Ítem                                    | Mensual        |
+| --------------------------------------- | -------------- |
+| VPS São Paulo `t4g.small` (ARM, 2 GB)   | ~USD 12–15     |
+| Volumen de backups 20–40 GB             | ~USD 2–4       |
+| Cloudflare Free (CDN + WAF + Turnstile) | USD 0          |
+| Dominio `.ar` / `.com.ar`               | ~USD 1–2       |
+| **Total MVP**                           | **~USD 15–21** |
+
+---
+
+## Arquitectura de red y TLS
+
+```
+Cliente ──TLS──▶ Cloudflare (edge, WAF, Turnstile) ──▶ VPS :443 ──▶ caddy ──▶ [red interna Docker]
+                                                          :80 (ACME + redirect)   ├─ web:8080
+                                                                                  ├─ api:3001
+                                                                                  ├─ admin:8080
+                                                                                  └─ game-server:3002
 ```
 
-## Checklist manual (lo que tenés que hacer una sola vez)
+| Subdominio       | Origen                                     | Cabeceras                                                          |
+| ---------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| `app.truco.ar`   | Cloudflare → `caddy` → `web` (nginx SPA)   | HSTS + COOP + CSP desde `web`                                      |
+| `api.truco.ar`   | Cloudflare → `caddy` → `api` (Fastify)     | `X-Forwarded-For` reescrito por Caddy con la IP real de Cloudflare |
+| `admin.truco.ar` | Cloudflare → `caddy` → `admin` (nginx SPA) | `X-Robots-Tag: noindex`, `Cache-Control: no-store`                 |
+| `game.truco.ar`  | Cloudflare → `caddy` → `game-server` (WS)  | Upgrade a WebSocket, sin timeout de lectura                        |
 
-1. **Cuenta Hetzner Cloud:** crear proyecto `truco-mvp`, comprar un CPX21 (Ubuntu 24.04 LTS)
-   en Falkenstein con firewall que sólo abra 22 (tu IP) y 8443 (público). Agregar un volumen
-   de backups de 40 GB (`/mnt/backups`).
-2. **Dominio:** comprar `truco.ar` (o el que elijas) en NIC.ar y delegar los nameservers a Cloudflare.
-3. **Cloudflare:**
-   - Crear los registros A/AAAA para `app`, `api`, `admin`, `game` apuntando a la IP del VPS
-     (proxy naranja = "Proxied").
-   - En SSL/TLS → Mode: **Full (strict)**.
-   - Crear regla WAF que rate-limit `/v1/auth/login` y `/v1/auth/register` si no querés depender
-     del rate-limit de la app.
-   - Crear API Token con permisos `Zone:Cache Purge` (opcional para el paso post-deploy del
-     workflow).
-   - Crear una clave **Turnstile** (Sitio → Turnstile, dominio `*.truco.ar`, Managed o non-interactive).
-     Guardar `Site Key` y `Secret Key`.
-4. **Resend (email transaccional):** crear cuenta en https://resend.com, verificar dominio
-   `truco.ar` (agregar DKIM/SPF/DMARC como indica Resend), generar API key.
-5. **Google OAuth (login):** crear credencial OAuth 2.0 en Google Cloud Console, tipo
-   "Web application", orígenes autorizados `https://app.truco.ar` y URIs de redirección
-   `https://app.truco.ar/auth/google/callback`. Copiar `Client ID` y `Client Secret`.
-6. **GitHub Secrets (repo Settings → Secrets and variables → Actions):**
-   - `STAGING_SSH_HOST`: IP pública del VPS
-   - `STAGING_SSH_USER`: usuario SSH (p. ej. `ubuntu` o `root`)
-   - `STAGING_SSH_KEY`: contenido de la clave privada SSH (ed25519) que tenga acceso al VPS
-   - `STAGING_ENV`: archivo `.env` completo de staging generado desde `.env.example` (con
-     secretos reales: `SESSION_SECRET`, `SEED_ENCRYPTION_KEY`, `INTERNAL_RPC_SECRET`, credenciales Resend,
-     Google, Turnstile, Postgres/Redis)
-7. **GitHub Environment:** Settings → Environments → `staging` → "Required reviewers" y poner
-   tu usuario como aprobador obligatorio.
-8. **En el VPS:**
-   ```bash
-   # Como root / usuario con sudo
-   apt update && apt install -y docker.io docker-compose-plugin rsync ufw
-   ufw allow 22/tcp from <TU_IP_PÚBLICA>
-   ufw allow 8443/tcp
-   ufw enable
-   mkdir -p ~/truco-start && cd ~/truco-start
-   # El workflow rsync copia el repo aquí.
-   ```
+**Sólo `caddy` publica puertos.** `api`, `game-server`, `web`, `admin`, `postgres` y `redis`
+viven en la red `truco-net` y no son alcanzables desde la IP pública (ni siquiera desde el
+propio host por la interfaz externa). Esto lo verifica `scripts/check-caddyfile.mjs` en CI.
 
-## Pasos de despliegue
+La cookie `truco_access` (HttpOnly; Secure; SameSite=Lax) se emite con `Domain=.truco.ar`,
+así el navegador la envía a los tres subdominios sin ser cross-site (ADR-016).
 
-1. Ir a Actions → **"Deploy to staging (M8c)"** → Run workflow.
-2. El job `build-and-smoke-test` compila todo, valida el compose y levanta un stack efímero en
-   CI para verificar que los healthchecks quedan en `healthy`.
-3. Si el smoke test pasa, GitHub te muestra el botón **"Awaiting approval"** → Approve.
-4. El job `deploy` copia el repo y el `.env` al VPS, corre las migraciones (`migrate` service)
-   y hace `docker compose up -d` con rolling restart de `api`, `game-server`, `web` y `admin`,
-   esperando que los healthchecks queden `healthy` en ≤90 s.
-5. Si algo falla, `docker compose logs <service>` en el VPS permite diagnosticar; la versión
-   anterior sigue corriendo hasta que todos los contenedores nuevos están healthy (política
-   `--wait` de docker compose + migración transaccional).
+TLS: Caddy obtiene y renueva certificados ACME automáticamente en `:80`/`:443`. El modo de
+Cloudflare debe ser **Full (strict)**: Cloudflare valida el certificado de Caddy, y Caddy
+valida el de Cloudflare.
 
-## Drenaje graceful del game-server (por qué no se cortan partidas)
+---
 
-- Al correr `docker compose up -d` con la nueva imagen, Compose envía SIGTERM al contenedor
-  viejo y espera `stop_grace_period: 45s` antes de SIGKILL.
-- `apps/game-server/src/main.ts` escucha SIGTERM, llama a `roomManager.setDraining(true)` y
-  luego `server.close()`.
-- En modo draining:
-  - No se aceptan nuevas mesas (`table.join` sobre salas nuevas se rechaza).
-  - El endpoint `/ready` responde 503 (Cloudflare/nginx saca al contenedor del pool).
-  - Las partidas activas continúan hasta finalizar (no se cortan) o hasta que expire la
-    `reconnectGraceMs`.
-  - El socket existente sigue transmitiendo la partida en curso.
+## Primer despliegue
 
-## Backups
+Sigue las fases en orden. Las fases 1–3 son **tuyas** (consola de proveedores); las fases
+4–7 las ejecuta el workflow de GitHub Actions salvo donde se indica.
 
-El VPS de staging corre un cron diario (script `infra/backups/pg-backup.sh` que se instala en
-M8d) que hace `pg_dump -F c` a `/mnt/backups/truco-YYYYMMDD.dump`, retención 7 días.
-En Hetzner, habilitar snapshots automáticos diarios del volumen de 40 GB.
+### Fase 0 — Pre-requisitos en el repo (una vez)
 
-## Variables de entorno sensibles (cargarlas en GitHub Secret `STAGING_ENV`, NUNCA en el repo)
+1. CI de `main` en verde.
+2. GitHub → Settings → **Environments** → `staging` → _Required reviewers_ = tu usuario.
+3. GitHub → Settings → Secrets and variables → Actions: `STAGING_SSH_HOST`, `STAGING_SSH_USER`,
+   `STAGING_SSH_KEY`, `STAGING_ENV` (contenido completo del `.env` de staging, ver más abajo).
+
+### Fase 1 — Servidor
+
+```bash
+# En el VPS (Ubuntu 24.04 LTS), como root/sudo:
+apt update && apt install -y docker.io docker-compose-plugin rsync curl ufw iptables-persistent
+
+# El workflow de deploy copia el repo en este directorio:
+mkdir -p ~/truco-start && cd ~/truco-start
+
+# Firewall (ver sección "Firewall"): security group del proveedor + DOCKER-USER
+sudo SSH_ALLOW_FROM=<tu-ip>/32 ./scripts/cloudflare-ufw.sh apply
+```
+
+El security group del proveedor debe dejar abiertos **sólo**:
+
+- `22/tcp` desde **tu IP** (no `0.0.0.0/0`).
+- `80/tcp` y `443/tcp` desde `0.0.0.0/0` **sólo si** no podés restringirlo a los rangos de
+  Cloudflare; si podés, restringilo a `https://www.cloudflare.com/ips-v4` + `ips-v6`.
+- **Nada más.** Ni 3001, ni 3002, ni 5432, ni 6379: no están publicados por el compose.
+
+### Fase 2 — DNS y TLS (Cloudflare)
+
+1. Delegar el dominio a Cloudflare (nameservers).
+2. Registros **A/AAAA proxied (naranja)** para `app`, `api`, `admin`, `game` → IP del VPS.
+3. SSL/TLS → **Full (strict)**. Activar _Always Use HTTPS_.
+4. Regla WAF de rate-limit en `/v1/auth/login` y `/v1/auth/register`.
+5. Clave Turnstile (dominio `*.truco.ar`).
+
+### Fase 3 — Proveedores externos
+
+- **Email:** Resend (`EMAIL_PROVIDER=resend` + `RESEND_API_KEY`) o SMTP
+  (`EMAIL_PROVIDER=smtp` + `SMTP_CONNECTION_URL`). Verificar SPF/DKIM/DMARC del dominio.
+- **Google OAuth:** credencial OAuth 2.0 "Web application", orígenes
+  `https://app.truco.ar`, redirect `https://app.truco.ar/auth/google/callback`.
+  `GOOGLE_CLIENT_ID` activa la verificación real de ID tokens por JWKS (`jose`).
+
+### Fase 4 — Preparar el `.env` de staging
+
+Copiar `.env.example` y completar. **Nunca versionar este archivo.**
 
 ```bash
 NODE_ENV=staging
-APP_NAME=Mesa de Truco Staging
+APP_NAME="Mesa de Truco Staging"
 
-# Base de datos / Redis (corren en el mismo VPS para staging)
+# Dominio y TLS (Caddy)
+APP_DOMAIN=truco.ar
+ACME_EMAIL=ops@truco.ar
+
+# Base de datos / Redis
 POSTGRES_USER=truco_staging
-POSTGRES_PASSWORD=<generar con openssl rand -hex 24>
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=truco_staging
-DATABASE_URL=postgres://<user>:<pass>@postgres:5432/<db>
+DATABASE_URL=postgres://truco_staging:${POSTGRES_PASSWORD}@postgres:5432/truco_staging
 REDIS_URL=redis://redis:6379
 
-# Secretos (generar con openssl rand -hex 32)
+# Secretos (openssl rand -hex 32)
 SESSION_SECRET=<32+ chars>
-SEED_ENCRYPTION_KEY=<32+ chars>
+SEED_ENCRYPTION_KEY=<64 hex chars>
 INTERNAL_RPC_SECRET=<32+ chars>
 
-# Cookies/CORS
+# Cookies / CORS
 COOKIE_DOMAIN=.truco.ar
-CORS_ORIGINS=https://app.truco.ar,https://admin.truco.ar
+CORS_ORIGINS=https://app.truco.ar
 ADMIN_ORIGIN=https://admin.truco.ar
-ADMIN_ALLOWED_NETWORKS=<tu-ip>/32  # Restringe panel admin a tu IP
+ADMIN_ALLOWED_NETWORKS=<tu-ip>/32
 
-# Proxies confiables (sólo la red docker interna + Cloudflare, abajo)
-TRUSTED_PROXY_CIDRS=172.16.0.0/12,<pegar lista cf ips-v4 separada por coma>
-TRUSTED_PROXY_HEADER=cf-connecting-ip
-
-# Email (Resend)
-EMAIL_PROVIDER=resend
-EMAIL_FROM_ADDRESS=Mesa de Truco <no-reply@truco.ar>
-RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxx
-
-# Google OAuth
-GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOcxxxxxxx
-
-# Turnstile (captcha)
-CAPTCHA_PROVIDER=turnstile
-CAPTCHA_SITE_KEY=0x4AAAAAAAtest
-CAPTCHA_SECRET=0x4AAAAAAAtestsecret
-
-# Web pública (para links en emails)
-WEB_BASE_URL=https://app.truco.ar
+# IP real del cliente: rangos de Cloudflare (ver sección dedicada)
+TRUSTED_PROXY_CIDRS=$(curl -s https://www.cloudflare.com/ips-v4 | paste -sd, -)
+TRUSTED_PROXY_HEADER=x-forwarded-for
 ```
+
+> `TRUSTED_PROXY_CIDRS` alimenta **dos** consumidores: el `trusted_proxies` de Caddy (la
+> cabecera `CF-Connecting-IP` sólo se acepta desde esos rangos) y la lista de proxies
+> confiables de la API. Ver [IP real del cliente](#ip-real-del-cliente).
+
+### Fase 5 — Primer `up`
+
+> **`--env-file .env` es obligatorio.** Docker Compose interpola `${POSTGRES_USER}`, `${POSTGRES_PASSWORD}`,
+> `${APP_DOMAIN}`, etc. desde un `.env` ubicado en el **directorio del archivo compose**
+> (`infra/`), no en la raíz del repo. Si se omite `--env-file .env`, esos valores quedan
+> vacíos, Postgres arranca sin usuario y el stack falla. Los servicios además usan
+> `env_file: ../.env` para sus variables de runtime, así que el mismo archivo sirve para ambos.
+> (Este error se reprodujo en CI y está cubierto por el job `perimeter-smoke`.)
+
+```bash
+cd ~/truco-start
+COMPOSE="docker compose --env-file .env -f infra/docker-compose.staging.yml"
+
+$COMPOSE build
+$COMPOSE run --rm migrate     # migraciones (aborta el deploy si fallan)
+$COMPOSE up -d --wait
+$COMPOSE ps                   # todo "healthy"
+$COMPOSE logs -f caddy        # emisión ACME (Let's Encrypt)
+```
+
+Si Caddy no obtiene el certificado: el registro DNS no está proxied, o el puerto 80 no llega
+al VPS (security group o DOCKER-USER). Ver [RUNBOOKS.md](./RUNBOOKS.md#incidentes).
+
+### Fase 6 — Verificación
+
+```bash
+# Un solo comando: 23 comprobaciones de infraestructura, legal y flujos.
+# (Detalle y diagnóstico en § "Smoke test de staging".)
+node scripts/smoke-staging.mjs --app-url https://app.truco.ar
+
+# Chequeos puntuales, si algo falla:
+curl -fsS https://api.truco.ar/v1/health
+curl -fsS https://game.truco.ar/health
+curl -fsSI https://app.truco.ar | grep -i strict-transport-security
+
+# La IP directa del VPS NO debe aceptar 80/443:
+./scripts/cloudflare-ufw.sh verify <ip-publica-del-vps>
+```
+
+### Fase 7 — Despliegues siguientes
+
+Actions → **"Deploy to staging (M8c)"** → _Run workflow_. El job `build-and-smoke-test`
+valida compose + Caddyfile + firewall y levanta un stack efímero; después el environment
+`staging` espera tu aprobación y recién ahí se copia al VPS, se migra y se reinicia con
+`--wait`.
+
+---
+
+## 4. Lo que tenés que hacer vos (checklist)
+
+Todo lo que requiere una cuenta, un pago o un clic en una consola externa. **Nada de esto
+puede hacerlo un agente desde el repo.**
+
+| #   | Tarea                                                                                           | Dónde                         | Listo |
+| --- | ----------------------------------------------------------------------------------------------- | ----------------------------- | :---: |
+| 1   | Contratar el VPS en **São Paulo** (Ubuntu 24.04 LTS)                                            | Proveedor cloud               |   ☐   |
+| 2   | Configurar el **security group**: sólo 22 (tu IP) + 80/443                                      | Consola del proveedor         |   ☐   |
+| 3   | Crear el volumen de backups y montarlo en `/mnt/backups`                                        | Consola del proveedor         |   ☐   |
+| 4   | Comprar el dominio y delegar los nameservers a Cloudflare                                       | NIC.ar / registrador          |   ☐   |
+| 5   | Crear los 4 registros A proxied (`app`, `api`, `admin`, `game`)                                 | Cloudflare                    |   ☐   |
+| 6   | Poner SSL/TLS en **Full (strict)**                                                              | Cloudflare                    |   ☐   |
+| 7   | Crear la regla WAF de rate-limit en `/v1/auth/*`                                                | Cloudflare                    |   ☐   |
+| 8   | Crear la clave de **Turnstile**                                                                 | Cloudflare                    |   ☐   |
+| 9   | Verificar el dominio en **Resend** (SPF/DKIM/DMARC) y generar API key                           | Resend                        |   ☐   |
+| 10  | Crear credencial **Google OAuth 2.0** (orígenes + redirect)                                     | Google Cloud Console          |   ☐   |
+| 11  | Generar `SESSION_SECRET`, `SEED_ENCRYPTION_KEY`, `INTERNAL_RPC_SECRET`, `POSTGRES_PASSWORD`     | Local (`openssl rand -hex …`) |   ☐   |
+| 12  | Cargar los 4 secrets de Actions y crear el environment `staging` con tu aprobación              | GitHub                        |   ☐   |
+| 13  | Instalar Docker + ufw + iptables-persistent en el VPS                                           | Fase 1                        |   ☐   |
+| 14  | Ejecutar `sudo SSH_ALLOW_FROM=<ip>/32 ./scripts/cloudflare-ufw.sh apply`                        | VPS                           |   ☐   |
+| 15  | Verificar desde **fuera** que la IP directa rechaza 80/443 (`cloudflare-ufw.sh verify <ip>`)    | Tu máquina                    |   ☐   |
+| 16  | Ejecutar el workflow de deploy y aprobar el environment                                         | GitHub Actions                |   ☐   |
+| 17  | Alta del primer admin: `pnpm --filter @truco/api admin:create`                                  | VPS                           |   ☐   |
+| 18  | **Revisión legal** de los cuatro documentos. Hasta entonces no se publica (bloqueante)          | Abogado                       |   ☐   |
+| 19  | Definir **responsable de tratamiento** y canal de contacto, y publicarlos en Privacidad         | Vos + abogado                 |   ☐   |
+| 20  | Definir si corresponde **inscribir la base** en el Registro Nacional de Bases de Datos (AAIP)   | Abogado                       |   ☐   |
+| 21  | Decidir la **edad mínima** final en `LEGAL_MIN_AGE` (default 18) según el criterio legal        | Vos + abogado                 |   ☐   |
+| 22  | Definir **plazos de conservación** de datos (hoy no hay borrado automático)                     | Vos + abogado                 |   ☐   |
+| 23  | Publicar el **procedimiento** para ejercer derechos de acceso/rectificación/supresión           | Vos + abogado                 |   ☐   |
+| 24  | Correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>` → 23/23                 | Tu máquina                    |   ☐   |
+| 25  | Ensayar una **restauración** real de backup sobre el VPS (no alcanza con que el job de CI pase) | VPS                           |   ☐   |
+
+> **Bloqueante de publicación:** los ítems 18 a 23. Mientras no estén cerrados, los
+> textos quedan marcados «BORRADOR, PENDIENTE DE REVISIÓN LEGAL» y el producto no
+> debe presentarse como listo. El detalle está en [`LEGAL_CHECKLIST.md`](./LEGAL_CHECKLIST.md).
+
+---
+
+## Firewall: Docker se salta ufw
+
+**El problema.** Cuando un servicio publica un puerto, el motor de Docker inserta reglas
+DNAT/ACCEPT en `iptables` que se evalúan **antes** que las de `ufw`. Por eso
+`ufw deny 443` **no** protege un puerto publicado por Docker: el tráfico llega igual al
+contenedor. Cualquier guía que diga "abrí sólo 443 en ufw" está incompleta.
+
+**Las dos capas.**
+
+1. **Defensa principal — firewall del proveedor (security group / cloud firewall).**
+   Es el único control que no depende del software del servidor. Debe permitir sólo `22`
+   (desde tu IP) y `80`/`443`. Si este firewall se abre de más, las reglas de abajo siguen
+   protegiendo, pero la primera capa ya falló.
+2. **Segunda capa — cadena `DOCKER-USER`.**
+   Es la única cadena que Docker **respeta y no sobrescribe** (se evalúa antes que sus
+   reglas). Acota el origen de 80/443 a los rangos de Cloudflare.
+
+**Aplicar.**
+
+```bash
+# Regenera los rangos de Cloudflare en vivo y aplica en forma atómica (valida antes):
+sudo SSH_ALLOW_FROM=<tu-ip>/32 ./scripts/cloudflare-ufw.sh apply --dry-run   # revisar
+sudo SSH_ALLOW_FROM=<tu-ip>/32 ./scripts/cloudflare-ufw.sh apply
+
+# Versión estática con los rangos vigentes (la que valida CI con iptables-restore --test):
+sudo iptables-restore infra/firewall/docker-user-cloudflare.rules
+```
+
+Reglas efectivas (archivo `infra/firewall/docker-user-cloudflare.rules`):
+
+| Origen                            | Puerto           | Acción          |
+| --------------------------------- | ---------------- | --------------- |
+| `RELATED,ESTABLISHED`             | cualquiera       | `RETURN`        |
+| Rangos de Cloudflare              | `tcp 80,443`     | `RETURN` (pasa) |
+| Rangos de Cloudflare              | `udp 443` (QUIC) | `RETURN` (pasa) |
+| Cualquier otro                    | `tcp 80,443`     | **`DROP`**      |
+| Cualquier otro                    | `udp 443`        | **`DROP`**      |
+| Resto del tráfico de contenedores | —                | `RETURN`        |
+
+**Persistencia.** Docker no recrea `DOCKER-USER` al reiniciar: el script guarda con
+`netfilter-persistent`. Verificá tras un reboot con `sudo iptables -S DOCKER-USER | head`.
+
+**Cómo verificar desde afuera que la IP directa rechaza conexiones.**
+
+```bash
+# Desde TU máquina (no desde el VPS). Esperado: fallo/timeout en ambos puertos.
+curl -sS --connect-timeout 5 https://<ip-del-vps>/ -o /dev/null -w '%{http_code}\n'   # error de conexión
+curl -sS --connect-timeout 5 http://<ip-del-vps>/v1/health                            # error de conexión
+
+# Alternativa con el script:
+./scripts/cloudflare-ufw.sh verify <ip-del-vps>
+#   OK: <ip>:80 rechaza/timeout la conexión directa
+#   OK: <ip>:443 rechaza/timeout la conexión directa
+
+# Confirmación complementaria: el dominio SÍ responde (vía Cloudflare)
+curl -fsS https://api.truco.ar/v1/health
+```
+
+Si la IP directa responde, la conexión no está pasando por Cloudflare:
+`cloudflare-ufw.sh verify` falla y hay que revisar `iptables -S DOCKER-USER`, el security
+group del proveedor y que los registros DNS estén proxied (naranja).
+
+---
+
+## IP real del cliente
+
+**Regla:** la IP del cliente se resuelve **sólo** desde proxies confiables (ADR-020, ADR-022).
+Un cliente que falsifique `X-Forwarded-For` o `CF-Connecting-IP` no puede cambiar la IP que
+ve la aplicación.
+
+Cadena de confianza:
+
+1. Cloudflare conecta al VPS. Caddy ve como par TCP a un **edge de Cloudflare**.
+2. `trusted_proxies static {$TRUSTED_PROXY_CIDRS}` + `client_ip_headers CF-Connecting-IP`
+   (con `trusted_proxies_strict`): Caddy acepta `CF-Connecting-IP` **sólo** desde esos rangos.
+3. Caddy **reescribe** `X-Forwarded-For` con `{client_ip}`
+   (`header_up X-Forwarded-For {client_ip}`). No la appendea: si la appendeara, la API —que
+   toma la **primera** IP de la lista— leería la IP falsificada que prependeó el cliente.
+4. La API y el game-server confían en `x-forwarded-for` únicamente desde
+   `TRUSTED_PROXY_CIDRS=172.16.0.0/12` (red interna de Docker, `TRUSTED_PROXY_HEADER=x-forwarded-for`).
+5. Fuera de esos rangos, todas las cabeceras se ignoran y se usa la IP del socket.
+
+**Configuración coherente (los tres componentes):**
+
+| Componente  | Variable               | Valor de staging                                    |
+| ----------- | ---------------------- | --------------------------------------------------- |
+| Caddy       | `TRUSTED_PROXY_CIDRS`  | rangos de Cloudflare (`ips-v4`, separados por coma) |
+| API         | `TRUSTED_PROXY_CIDRS`  | `172.16.0.0/12`                                     |
+| API         | `TRUSTED_PROXY_HEADER` | `x-forwarded-for`                                   |
+| game-server | `TRUSTED_PROXY_CIDRS`  | `172.16.0.0/12`                                     |
+| game-server | `TRUSTED_PROXY_HEADER` | `x-forwarded-for`                                   |
+
+> No pongas los rangos de Cloudflare en la API: la API nunca ve una conexión de Cloudflare
+> directa (Caddy está en el medio). Si los pusieras, un fallo de Caddy dejaría la API
+> expuesta a confiar en cabeceras de cualquier IP pública.
+
+**Prueba de que las cabeceras falsas no funcionan** (corre en CI contra el compose y se
+puede correr en el VPS):
+
+```bash
+node scripts/test-client-ip-spoofing.mjs                                  # contra compose en CI
+node scripts/test-client-ip-spoofing.mjs --url http://127.0.0.1:18080    # contra un stack local
+```
+
+El test envía `X-Forwarded-For`, `CF-Connecting-IP` y `X-Real-IP` falsificadas y exige que la
+IP registrada por la API sea la del socket, no la falsa. Además
+`scripts/verify-client-ip.mjs --caddyfile` verifica la configuración sin red.
+
+---
+
+## Drenaje graceful del game-server (por qué no se cortan partidas)
+
+- `docker compose up -d` envía SIGTERM al contenedor viejo y espera
+  `stop_grace_period: 45s` antes de SIGKILL.
+- `apps/game-server/src/main.ts` escucha SIGTERM, llama a `roomManager.setDraining(true)` y
+  luego `server.close()`.
+- En modo draining: no se aceptan mesas nuevas, `/ready` responde **503** (Caddy/Cloudflare
+  lo sacan del pool) y las partidas activas siguen hasta terminar o hasta que expire
+  `reconnectGraceMs`.
+
+---
+
+## Backups y restauración
+
+- `infra/backups/backup-postgres.sh` hace `pg_dump -F c` a `/mnt/backups/truco-YYYYMMDD.dump`
+  con retención configurable (`BACKUP_RETENTION_DAYS`).
+- CI ejecuta un simulacro real (migrar → sembrar → respaldar → restaurar en base vacía →
+  **comparar conteos**).
+- En el VPS: habilitar **snapshots automáticos** del volumen y un cron diario del script.
+  Procedimiento de restauración: [RUNBOOKS.md](./RUNBOOKS.md#respaldos-y-restauración).
+
+---
+
+## Smoke test de staging
+
+`scripts/smoke-staging.mjs` responde en un comando si el despliegue está vivo y si
+los flujos centrales funcionan de punta a punta. Es lo primero que hay que correr
+después de cada deploy y antes de anunciar el entorno.
+
+### Qué verifica (23 comprobaciones)
+
+| Grupo           | Qué mira                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| Infraestructura | `/v1/health`, `/v1/ready` de la API; `/health` y `/ready` del game-server                           |
+| Web             | Que `app.<dominio>` sirve HTML y que los **cuatro documentos legales** responden                    |
+| Estado legal    | `GET /v1/legal`: edad mínima válida (13–21) y `draft === true`                                      |
+| Consentimiento  | Que el alta **sin** consentimiento sigue devolviendo 400 en el entorno real                         |
+| Registro        | Alta con consentimiento (201) y sesión válida en `/v1/me`                                           |
+| Partida vs. bot | Crea mesa de práctica, queda consultable y el room se provisiona                                    |
+| Reporte         | Denuncia de un jugador a otro con estado `OPEN`                                                     |
+| Regla 13        | Sondea `/v1/wallet`, `/v1/deposits`, `/v1/withdrawals`, `/v1/payments`: ninguno puede responder 200 |
+| Cabeceras       | `X-Content-Type-Options` y protección contra clickjacking                                           |
+
+### Topología: el entorno se publica por SUBDOMINIOS
+
+El `Caddyfile` (`infra/caddy/Caddyfile`) enruta por subdominio, **no** por prefijo
+de ruta:
+
+```
+app.<dominio>    -> web (SPA)
+api.<dominio>    -> API REST
+game.<dominio>   -> game-server
+admin.<dominio>  -> panel (no lo prueba este script)
+```
+
+Por eso el script pide `--app-url` y **deriva** `api.` y `game.` del mismo dominio.
+Si el entorno usa otro esquema (un dominio único, un túnel), pasá las tres URLs.
+
+### Uso
+
+```bash
+# Lo normal: deriva api. y game. de app.
+node scripts/smoke-staging.mjs --app-url https://app.staging.truco.ar
+
+# URLs explícitas (dominio único o túnel local)
+node scripts/smoke-staging.mjs \
+  --app-url   http://127.0.0.1:4320 \
+  --api-url   http://127.0.0.1:4310 \
+  --game-url  http://127.0.0.1:4311
+
+# Para consumir desde CI (sale JSON)
+node scripts/smoke-staging.mjs --app-url https://app.staging.truco.ar --json
+```
+
+- **Exit 0** sólo si pasan las 23. Si algo falla, **exit 1** y dice cuántas.
+- Exit 2 si falta la URL (error de invocación, no del entorno).
+- No imprime tokens ni cookies. Crea cuentas con prefijo `smoke-` y correo
+  `@smoke.invalid` para poder identificarlas y purgarlas.
+- No toca endpoints de administración ni de dinero (no existen).
+
+### Evidencia de que funciona
+
+Se ejecutó contra tres servicios **reales** levantados localmente (API sobre
+PGlite, game-server compilado y SPA compilada): **23/23 OK**. Con el game-server
+apagado devuelve **exit 1** con 5 fallas, así que no reporta verde por omisión.
+
+> Pendiente de infraestructura real: correrlo contra `https://app.staging.<tu-dominio>`
+> con DNS y TLS activos. Hasta entonces está verificado el script, no el entorno.
+
+### Si falla
+
+| Síntoma                                          | Causa probable                                               |
+| ------------------------------------------------ | ------------------------------------------------------------ |
+| `API responde /v1/health` falla                  | API abajo o Caddy sin ruta; mirá `docker compose ps`         |
+| `web sirve HTML` falla con 502                   | El contenedor `web` está arriba pero nginx no tiene el build |
+| `game-server responde /health` falla             | Socket.IO no arrancó o Redis no conecta                      |
+| `registro sin consentimiento` devuelve 201       | **Grave**: la validación legal no está desplegada            |
+| `estado legal sigue marcado como borrador` falla | Se publicó como definitivo sin revisión legal: revertir      |
+| `no existen endpoints de dinero real` falla      | Regla 13 violada en el entorno: revisar de inmediato         |
 
 ## Verificación post-deploy
 
 ```bash
-ssh $STAGING_SSH_USER@$STAGING_SSH_HOST
-cd ~/truco-start
-docker compose -f infra/docker-compose.staging.yml ps
-curl -f https://api.truco.ar/v1/health
-curl -f https://game.truco.ar/health
+node scripts/smoke-staging.mjs --app-url https://app.truco.ar   # 23/23 esperado
+
+curl -fsS https://api.truco.ar/v1/health          # {"status":"ok"}
+curl -fsS https://game.truco.ar/health
+curl -fsSI https://app.truco.ar | grep -iE 'strict-transport-security|x-content-type'
+curl -fsSI https://admin.truco.ar | grep -i 'x-robots-tag'
+ssh <user>@<ip> "sudo iptables -S DOCKER-USER | head -5"   # reglas aplicadas
+ssh <user>@<ip> "cd ~/truco-start && docker compose --env-file .env -f infra/docker-compose.staging.yml ps"
+./scripts/cloudflare-ufw.sh verify <ip>                    # IP directa rechaza 80/443
 ```
 
-Si los dos healthchecks devuelven 200 con `status: ok`, el deploy quedó bien.
+Si todo responde 200/`ok` y la IP directa está cerrada, el deploy quedó bien.

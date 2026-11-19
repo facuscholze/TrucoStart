@@ -1,4 +1,5 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, Inject, Req } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import type { HealthResponse } from '@truco/shared';
 import { HealthService } from './health.service.js';
 
@@ -7,8 +8,10 @@ export class HealthController {
   constructor(@Inject(HealthService) private readonly healthService: HealthService) {}
 
   @Get('health')
-  health(): HealthResponse {
-    return this.healthService.getLiveness(process.env['APP_NAME']);
+  health(@Req() request: FastifyRequest): HealthResponse {
+    // `request.ip` es la IP resuelta por Fastify: sólo usa cabeceras de proxy si
+    // el socket pertenece a TRUSTED_PROXY_CIDRS (ADR-020/022).
+    return this.healthService.getLiveness(process.env['APP_NAME'], request.ip);
   }
 
   @Get('ready')

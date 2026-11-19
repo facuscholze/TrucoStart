@@ -8,6 +8,7 @@ import type {
   ForgotPasswordRequest,
   JoinByCodeRequest,
   LeaveTableResponse,
+  LegalStatusResponse,
   LoginRequest,
   MatchmakingCancelResponse,
   MatchmakingEnqueueRequest,
@@ -70,6 +71,11 @@ async function requestJson<TResponse>(path: string, init?: RequestInit): Promise
   }
 
   return payload as TResponse;
+}
+
+/** Estado público de los documentos legales (edad mínima y versiones vigentes). */
+export async function getLegalStatusRequest(): Promise<LegalStatusResponse> {
+  return requestJson<LegalStatusResponse>('/v1/legal', { method: 'GET' });
 }
 
 export async function getMeRequest(): Promise<MeResponse> {

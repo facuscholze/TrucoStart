@@ -241,7 +241,80 @@ TARGET_DATABASE_URL=postgresql://truco:clave@db:5432/truco_restore \
 
 ---
 
-## 7. Panel administrativo
+## 7. Perímetro: Caddy, firewall y IP real (M8c)
+
+### 7.1 Qué expone el servidor
+
+Sólo `caddy` publica puertos (**80/443** TCP y 443 UDP para HTTP/3). `api`, `game-server`,
+`web`, `admin`, `postgres` y `redis` no publican puertos: se llega a ellos sólo por la red
+`truco-net`. Comprobación:
+
+```bash
+docker compose -f infra/docker-compose.staging.yml ps --format json \
+  | jq -r '.[] | .Service as $s | .Publishers[]? | select(.PublishedPort) | "\($s):\(.PublishedPort)"'
+# Esperado: sólo caddy:80, caddy:443 (y caddy:443/udp)
+node scripts/check-caddyfile.mjs          # verificación estática en CI
+```
+
+### 7.2 El firewall del proveedor es la defensa principal
+
+`ufw` **no** filtra los puertos que publica Docker: el motor inserta reglas DNAT/ACCEPT en
+`iptables` que se evalúan antes. La primera capa es el **security group** del proveedor
+(sólo 22 desde la IP del operador + 80/443). La segunda es la cadena `DOCKER-USER`.
+
+```bash
+# Revisar que las reglas estén puestas (tras reinicios también):
+sudo iptables -S DOCKER-USER | head -20
+sudo ip6tables -S DOCKER-USER | head -5
+
+# Reaplicar con los rangos de Cloudflare vigentes:
+sudo SSH_ALLOW_FROM=<tu-ip>/32 ./scripts/cloudflare-ufw.sh apply
+
+# Verificar desde FUERA del VPS que la IP directa rechaza conexiones:
+./scripts/cloudflare-ufw.sh verify <ip-del-vps>
+```
+
+Si la IP directa responde en 80/443: revisar (1) DNS proxied en Cloudflare, (2) security
+group del proveedor, (3) reglas `DOCKER-USER`. Ver `docs/DEPLOY.md#firewall-docker-se-salta-ufw`.
+
+### 7.3 La IP del cliente es falsificable sólo si se configura mal
+
+La IP resuelta se publica en `GET /v1/health` como `clientIp` (nunca el valor crudo del
+cliente). Diagnóstico:
+
+```bash
+curl -s https://api.tu-dominio/v1/health | jq .clientIp          # IP del jugador
+curl -s -H 'X-Forwarded-For: 203.0.113.9' \
+     -H 'CF-Connecting-IP: 203.0.113.9' https://api.tu-dominio/v1/health | jq .clientIp
+# Debe devolver la MISMA IP que arriba, no 203.0.113.9
+```
+
+Controles a revisar si el valor cambia con las cabeceras:
+
+1. Caddy: `trusted_proxies static {$TRUSTED_PROXY_CIDRS}` + `client_ip_headers CF-Connecting-IP`
+   y `header_up X-Forwarded-For {client_ip}` en los cuatro upstreams
+   (`node scripts/verify-client-ip.mjs --caddyfile`).
+2. API y game-server: `TRUSTED_PROXY_CIDRS=172.16.0.0/12` y `TRUSTED_PROXY_HEADER=x-forwarded-for`.
+3. Que `TRUSTED_PROXY_CIDRS` no incluya `0.0.0.0/0` en ningún componente.
+
+Prueba ejecutable (corre en CI contra el compose):
+
+```bash
+node scripts/test-client-ip-spoofing.mjs --url http://127.0.0.1:18080 --host api.localhost
+```
+
+### 7.4 Certificados TLS / ACME no emiten
+
+1. `docker compose -f infra/docker-compose.staging.yml logs caddy | grep -i acme`.
+2. Causas típicas: el registro DNS no está **proxied**, el puerto 80 no llega al VPS
+   (security group o `DOCKER-USER`), o el dominio aún no apunta al servidor.
+3. `ACME_EMAIL` debe ser una casilla real: Let's Encrypt la usa para avisar problemas.
+4. El volumen `staging_caddy_data` guarda los certificados: **no borrarlo** en un redeploy
+   (evita re-emitir y chocar con el rate limit de Let's Encrypt).
+
+---
+
+## 8. Panel administrativo
 
 - Se sirve desde **origen distinto** al de jugadores (`admin.tu-dominio`), con `no-store`,
   `noindex` y CSP propia (`infra/docker/nginx-admin.conf`).

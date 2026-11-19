@@ -1,0 +1,109 @@
+# Caddyfile perimetral de staging/producción (M8c).
+#
+# Este es el ÚNICO componente del stack que se publica en el host. Termina TLS
+# en 80/443 (certificados ACME automáticos), redirige HTTP->HTTPS y enruta cada
+# subdominio a su upstream por la red interna de Docker. `api`, `game-server`,
+# `web`, `admin`, `postgres` y `redis` no publican puertos: no son alcanzables
+# desde fuera del host ni desde la IP pública del servidor.
+#
+# Variables de entorno (interpoladas por Caddy):
+#   APP_DOMAIN           dominio base (p. ej. truco.ar)
+#   ACME_EMAIL           contacto para Let's Encrypt
+#   TRUSTED_PROXY_CIDRS  rangos de Cloudflare (https://www.cloudflare.com/ips/)
+#                        separados por coma. Sólo si el par TCP viene de uno de
+#                        esos rangos se acepta `CF-Connecting-IP` como IP del
+#                        cliente. El default `127.0.0.1/32` significa "no confiar
+#                        en nadie": seguro ante un olvido de configuración.
+#
+# IP REAL DEL CLIENTE (ADR-020/ADR-022)
+#   1. Cloudflare conecta al servidor. Caddy ve como par TCP a un edge de CF.
+#   2. `client_ip_headers CF-Connecting-IP` hace que Caddy reemplace la IP del
+#      cliente por el valor de esa cabecera, SÓLO porque el par es de confianza.
+#   3. Caddy REESCRIBE `X-Forwarded-For` (header_up, no appendea) con esa IP ya
+#      resuelta: la API toma la primera IP de la lista, así que un
+#      `X-Forwarded-For` falsificado por el cliente nunca llega al upstream.
+#   4. La API y el game-server confían en `x-forwarded-for` únicamente desde la
+#      red interna de Docker (TRUSTED_PROXY_CIDRS=172.16.0.0/12).
+#   Un cliente que llegue por otro camino (o que falsifique cabeceras contra la
+#   IP directa del VPS) no puede alterar la IP que ve la aplicación.
+#
+# Verificación sin red: `node scripts/check-caddyfile.mjs` y
+# `node scripts/verify-client-ip.mjs --caddyfile`.
+
+{
+	email {$ACME_EMAIL:ops@truco.ar}
+	# La configuración se versiona en este archivo: se desactiva la Admin API
+	# (localhost:2019) para no dejar una superficie de mutación de config.
+	admin off
+
+	servers {
+		# Política de proxies confiables: `static` + lista explícita.
+		trusted_proxies static {$TRUSTED_PROXY_CIDRS:127.0.0.1/32}
+		# Parseo de derecha a izquierda: la IP "más cercana" al proxy es la que
+		# cuenta, y una cabecera prependeada por el cliente no gana.
+		trusted_proxies_strict
+		# Única cabecera desde la que Caddy acepta la IP del cliente.
+		client_ip_headers CF-Connecting-IP
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			idle 75s
+		}
+	}
+
+	log {
+		format json
+		level INFO
+	}
+}
+
+# Cabeceras comunes. HSTS lo emite Caddy con TLS, se declara explícito para
+# includeSubDomains.
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+}
+
+# SPA del jugador.
+app.{$APP_DOMAIN:truco.ar} {
+	import security_headers
+	encode zstd gzip
+	reverse_proxy web:8080 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# API REST.
+api.{$APP_DOMAIN:truco.ar} {
+	import security_headers
+	reverse_proxy api:3001 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# Game server: HTTP interno + WebSocket. Caddy negocia el upgrade sin
+# configuración extra y no corta conexiones largas.
+game.{$APP_DOMAIN:truco.ar} {
+	import security_headers
+	reverse_proxy game-server:3002 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# Panel administrativo.
+admin.{$APP_DOMAIN:truco.ar} {
+	import security_headers
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		Cache-Control "no-store"
+	}
+	reverse_proxy admin:8080 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}

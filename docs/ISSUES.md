@@ -29,3 +29,24 @@
 - **Severidad:** Baja (riesgo preventivo para M5).
 - **Estado:** En seguimiento.
 - **Detalle:** Framer Motion, Socket.IO client y librerías de UI pueden superar los 200 KB gzip si no se aplica code-splitting por ruta (`LazyMotion`, carga diferida de pantallas secundarias como tutorial/replay). Se verificará en el build de M5 y M8.
+
+### ISSUE-004: El control de edad mínima es declarativo, no verificable
+
+- **Severidad:** Media (bloqueante si el abogado exige verificación real; no bloqueante si acepta declaración).
+- **Estado:** Abierto — abierto durante M8d, con las decisiones de `docs/LEGAL_CHECKLIST.md`.
+- **Detalle:** `LEGAL_MIN_AGE` bloquea el alta si la edad **declarada** no alcanza el mínimo, pero no hay verificación documental ni estimación. Una persona puede escribir la edad que quiera. El sistema tampoco tiene un flujo para el caso de una cuenta detectada como de menor de edad sin autorización, ni pide consentimiento del responsable parental si se baja el mínimo por debajo de 18.
+- **Mitigación:** El mínimo por defecto es 18 (CCyC arts. 25 y 26), la opción más conservadora. Cualquier verificación real es desarrollo nuevo y debe decidirse con el abogado antes de publicar.
+
+### ISSUE-005: No hay plazos de conservación ni borrado automático
+
+- **Severidad:** Media (la Ley 25.326 exige no conservar más de lo necesario).
+- **Estado:** Abierto.
+- **Detalle:** `sessions`, `auth_tokens` y `audit_logs` tienen vencimiento lógico, pero `reports`, `sanctions`, `match_events` y `match_players` no tienen política de purga. Tampoco hay un trabajo programado que borre datos vencidos. El inventario completo está en `docs/LEGAL_CHECKLIST.md` §6.
+- **Mitigación:** La tabla de retención está escrita y solo falta definir los plazos con el abogado e implementar el job de purga.
+
+### ISSUE-006: El smoke test y los criterios de rendimiento no se corrieron contra el entorno real
+
+- **Severidad:** Baja (el código está verificado; falta el entorno).
+- **Estado:** Abierto — requiere infraestructura.
+- **Detalle:** `scripts/smoke-staging.mjs` pasó 23/23 contra API, game-server y SPA **reales levantados localmente**, pero no contra el despliegue (necesita DNS y TLS). Del mismo modo, p95 < 150 ms y las 100 partidas simultáneas están medidos en loopback y en el sandbox, no con red real ni contra Postgres/Redis reales en staging. `docs/STATE.md` § «M8 — criterios de salida del MVP» marca exactamente qué falta.
+- **Mitigación:** Una vez desplegado, el smoke test es un comando; los escenarios de carga ya están escritos en `perf.yml` y `infra/`.

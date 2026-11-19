@@ -80,6 +80,17 @@ jobs:
       - name: Scan tracked files for secrets
         run: node scripts/scan-secrets.mjs
 
+      # Verifica que las reglas detecten cada tipo de secreto (señuelos) y que no
+      # marquen placeholders legítimos (M8c).
+      - name: Test secrets scanner with decoys
+        run: node scripts/test-scan-secrets.mjs
+
+      # Regla 13 del proyecto: producto sin dinero real. Busca MECANISMOS
+      # (pasarelas, saldos, endpoints de depósito/retiro, copy que prometa plata),
+      # no palabras: "Real Envido" y "gana la baza" son vocabulario del truco.
+      - name: Enforce rule 13 (no real money)
+        run: node scripts/check-no-real-money.mjs
+
       - name: Check formatting
         run: pnpm format:check
 
@@ -111,6 +122,39 @@ jobs:
           # `env_file: ../.env` es obligatorio para Compose: se genera desde el ejemplo.
           cp .env.example .env
           docker compose -f infra/docker-compose.staging.yml config -q
+
+      # Perímetro (M8c): Caddy es el único servicio publicado, TLS en 80/443 y
+      # trusted_proxies desde los rangos de Cloudflare.
+      - name: Check Caddyfile and client-IP policy (static)
+        run: |
+          node scripts/check-caddyfile.mjs
+          node scripts/verify-client-ip.mjs --caddyfile
+
+      - name: Validate Caddyfile syntax (official image)
+        run: |
+          docker run --rm \
+            -e APP_DOMAIN=ci.example.com \
+            -e ACME_EMAIL=ci@example.com \
+            -e TRUSTED_PROXY_CIDRS=173.245.48.0/20 \
+            -v "$PWD/infra/caddy:/etc/caddy" \
+            caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      # Reglas de firewall que limitan 80/443 a Cloudflare (DOCKER-USER).
+      # Hermético (no necesita root ni iptables): rangos, DROP final, sin 0.0.0.0/0.
+      - name: Check firewall ruleset policy (static)
+        run: node scripts/check-firewall-rules.mjs
+
+      # Validación real de sintaxis con iptables de un contenedor con NET_ADMIN
+      # (el runner no trae iptables ni necesita modificar su propio firewall).
+      - name: Validate firewall ruleset syntax (iptables in container)
+        run: |
+          docker run --rm --cap-add=NET_ADMIN \
+            -v "$PWD/infra/firewall:/rules:ro" \
+            alpine:3.20 sh -c '
+              apk add --no-cache iptables >/dev/null
+              iptables-restore --test /rules/docker-user-cloudflare.rules &&
+                echo "Reglas DOCKER-USER válidas (sintaxis)."
+            '
 
   backup-restore:
     name: Respaldo y restauración de PostgreSQL
@@ -254,3 +298,169 @@ jobs:
 
       - name: Run slow benchmarks and mass simulations
         run: pnpm --filter @truco/engine test:slow
+
+  # Perímetro real (M8c): levanta el compose de staging con Caddy delante y
+  # demuestra, contra el stack real, que un cliente con cabeceras falsificadas no
+  # puede cambiar la IP que ve la aplicación, y que sólo Caddy publica puertos.
+  perimeter-smoke:
+    name: Perímetro (Caddy + IP real) sobre el compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `.env` de CI: sin secretos reales, credenciales efímeras para los
+      # contenedores. Compose interpola `${POSTGRES_USER}` desde el `.env` del
+      # DIRECTORIO DEL COMPOSE (infra/), así que hay que pasarlo con --env-file.
+      # Lo usa tanto la interpolación como `env_file: ../.env` de los servicios.
+      - name: Prepare CI env file
+        run: |
+          cat > .env <<'EOF'
+          NODE_ENV=staging
+          APP_DOMAIN=localhost
+          POSTGRES_USER=truco_perimeter
+          POSTGRES_PASSWORD=ci_perimeter_password
+          POSTGRES_DB=truco_perimeter
+          DATABASE_URL=postgres://truco_perimeter:ci_perimeter_password@postgres:5432/truco_perimeter
+          REDIS_URL=redis://redis:6379
+          SESSION_SECRET=ci_perimeter_session_secret_at_least_32_chars
+          SEED_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          INTERNAL_RPC_SECRET=ci_perimeter_internal_secret_at_least_32_chars
+          COOKIE_DOMAIN=localhost
+          CORS_ORIGINS=http://localhost:5173
+          ADMIN_ORIGIN=http://localhost:5174
+          EMAIL_PROVIDER=console
+          CAPTCHA_PROVIDER=disabled
+          HTTP_PORT=18080
+          HTTPS_PORT=18443
+          TRUSTED_PROXY_CIDRS=173.245.48.0/20
+          EOF
+
+      # Guarda contra la regresión que rompió este job: si la interpolación no
+      # resuelve las credenciales, postgres arranca sin usuario y todo falla.
+      - name: Assert compose interpolation resolves secrets from .env
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.staging.yml config \
+            | grep -q 'POSTGRES_USER: truco_perimeter' \
+            || { echo 'La interpolación de compose no toma POSTGRES_USER de .env'; exit 1; }
+
+      # `--progress=plain` y anotaciones con el error: los logs del job no son
+      # accesibles desde todas partes, las anotaciones del check-run sí.
+      - name: Build images
+        run: |
+          set -o pipefail
+          if ! docker compose --env-file .env -f infra/docker-compose.staging.yml build --progress=plain > build.log 2>&1; then
+            echo '--- últimas 60 líneas del build ---'
+            tail -60 build.log
+            message=$(tail -60 build.log | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Build images failed::${message}"
+            exit 1
+          fi
+
+      - name: Start perimeter stack (Caddy on 18080/18443)
+        run: |
+          # Puertos altos para no necesitar root; APP_DOMAIN=localhost hace que
+          # Caddy emita el certificado INTERNO en vez de intentar ACME contra un
+          # dominio que no existe en CI.
+          COMPOSE='docker compose --env-file .env -f infra/docker-compose.staging.yml'
+          if ! ${COMPOSE} up -d --wait --wait-timeout 240 > up.log 2>&1; then
+            echo '--- up falló ---'; tail -40 up.log
+            ${COMPOSE} ps || true
+            for svc in api game-server web admin caddy migrate postgres; do
+              echo "===== logs $svc ====="
+              ${COMPOSE} logs --tail 40 "$svc" || true
+            done > diag.log 2>&1
+            tail -80 diag.log
+            message=$(tail -80 diag.log | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Stack startup failed::${message}"
+            exit 1
+          fi
+          ${COMPOSE} ps
+
+      # La prueba central: cabeceras falsas contra la API REAL, a través de Caddy.
+      - name: Client IP cannot be spoofed (through Caddy)
+        run: |
+          node scripts/test-client-ip-spoofing.mjs \
+            --url https://127.0.0.1:18443 --host api.localhost --insecure
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+
+      # Evidencia de borde (valores explícitos): el mismo pedido con y sin
+      # cabeceras falsas devuelve el mismo clientIp. Usa https nativo por la misma
+      # razón que la prueba anterior (fetch descarta Host) y no depende de curl.
+      - name: Forged headers do not change clientIp (edge evidence)
+        run: |
+          node --input-type=module -e '
+            import https from "node:https";
+            const get = (extra) =>
+              new Promise((resolve, reject) => {
+                const req = https.request(
+                  { host: "127.0.0.1", port: 18443, path: "/v1/health", method: "GET",
+                    hostname: "127.0.0.1", rejectUnauthorized: false, setHost: false,
+                    headers: { Host: "api.localhost", Accept: "application/json", ...extra } },
+                  (res) => { let d = ""; res.setEncoding("utf8");
+                    res.on("data", (c) => (d += c));
+                    res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(d) })); },
+                );
+                req.on("error", reject);
+                req.end();
+              });
+            const clean = await get({});
+            const forged = await get({
+              "X-Forwarded-For": "203.0.113.9",
+              "CF-Connecting-IP": "203.0.113.9",
+              "X-Real-IP": "203.0.113.9",
+            });
+            console.log(`sin cabeceras: ${clean.body.clientIp} | con cabeceras falsas: ${forged.body.clientIp}`);
+            if (clean.body.clientIp !== forged.body.clientIp) {
+              console.log("::error title=Spoofing de IP en el borde::la IP cambió con cabeceras falsas");
+              process.exit(1);
+            }
+            if (forged.body.clientIp === "203.0.113.9") {
+              console.log("::error title=Spoofing de IP en el borde::se aceptó la IP falsificada");
+              process.exit(1);
+            }
+          '
+
+      # Sólo Caddy publica puertos: cualquier upstream expuesto es un fallo.
+      - name: Only Caddy publishes ports
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.staging.yml ps --format json > /tmp/ps.jsonl
+          node -e '
+            const fs = require("fs");
+            const lines = fs.readFileSync("/tmp/ps.jsonl","utf8").trim().split(/\n/).filter(Boolean);
+            const published = [];
+            for (const line of lines) {
+              const svc = JSON.parse(line);
+              for (const p of svc.Publishers ?? []) {
+                if (p.PublishedPort) published.push(`${svc.Service}:${p.PublishedPort}`);
+              }
+            }
+            console.log("puertos publicados:", published.join(", ") || "(ninguno)");
+            const bad = published.filter((e) => !/^caddy:(18080|18443)$/.test(e));
+            if (bad.length) { console.error("FALLO: puertos de upstream publicados:", bad); process.exit(1); }
+          '
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose --env-file .env -f infra/docker-compose.staging.yml logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env -f infra/docker-compose.staging.yml down -v

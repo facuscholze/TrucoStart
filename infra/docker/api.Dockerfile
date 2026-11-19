@@ -19,6 +19,11 @@ COPY packages/shared/package.json ./packages/shared/
 COPY packages/truco-engine/package.json ./packages/truco-engine/
 COPY packages/ui/package.json ./packages/ui/
 COPY apps/api/package.json ./apps/api/
+# `@truco/api` declara `@truco/game-server` como devDependency (lo usan sus tests
+# de integración). `pnpm --prod deploy` re-resuelve las dependencias del paquete y
+# falla con ERR_PNPM_WORKSPACE_PKG_NOT_FOUND si el manifiesto no está en el
+# workspace de la imagen, aunque no se instale su código.
+COPY apps/game-server/package.json ./apps/game-server/
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
@@ -27,7 +32,10 @@ COPY packages/shared ./packages/shared
 COPY packages/truco-engine ./packages/truco-engine
 COPY packages/ui ./packages/ui
 COPY apps/api ./apps/api
-RUN pnpm --filter @truco/api... build && pnpm --filter @truco/api --prod deploy /prod/api
+# `--filter-prod` sigue sólo las dependencias de PRODUCCIÓN: @truco/game-server es
+# una devDependency de la API (para sus tests), así que no se intenta compilar
+# aquí. El deploy sí necesita su manifiesto presente (ver etapa `deps`).
+RUN pnpm --filter-prod '@truco/api...' build && pnpm --filter @truco/api --prod deploy /prod/api
 
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production

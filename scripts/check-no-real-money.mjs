@@ -11,6 +11,11 @@
  * palabras del truco («Real Envido», «apuesta» como canto, «gana la baza») se
  * excluyen explícitamente, porque son vocabulario del juego y no un mecanismo.
  *
+ * IMPORTANTE: el script escanea `git ls-files`, así que un archivo NUEVO sólo se
+ * revisa después de `git add`. Si se corre antes de agregarlo, no se ve. En CI
+ * esto no pasa (el checkout ya tiene todo trackeado), pero al verificar en local
+ * hay que correrlo DESPUÉS de `git add` o los resultados no son comparables.
+ *
  * Uso: node scripts/check-no-real-money.mjs
  */
 import { execFileSync } from 'node:child_process';
@@ -23,23 +28,33 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const SOURCE_EXTENSIONS = /\.(ts|tsx|mjs|cjs|js|jsx|sql|json)$/;
 
 /**
- * Archivos donde las palabras de dinero aparecen a propósito, porque declaran que
- * NO hay dinero real. Se excluyen sólo del chequeo de copy, nunca del de código.
+ * El chequeo de COPY (promesas de dinero) sólo tiene sentido donde hay copy de
+ * interfaz: la web, el panel y los componentes. En scripts, tests y docs las
+ * palabras «dinero real» aparecen para NEGARLO o para describir la regla, y
+ * marcarlas sería ruido que termina en una allowlist frágil.
  */
-const COPY_DISCLOSURE_ALLOWLIST = [
-  // Tests que ASEVERAN la ausencia de dinero real: hablan del tema para negarlo.
-  'apps/web/tests/m8d-legal.spec.tsx',
-  // Los escáneres de secretos nombran a Stripe/Resend para DETECTAR claves
-  // filtradas: no son una integración de pagos.
+const COPY_ROOTS = ['apps/web/src/', 'apps/admin/src/', 'packages/ui/src/'];
+
+/**
+ * Archivos que nombran dinero para NEGARLO o para DETECTARLO, no para integrarlo.
+ * La allowlist se mantiene mínima y explícita; cualquier alta nueva debe
+ * justificarse acá, no relajando una regla.
+ */
+const MECHANISM_ALLOWLIST = [
+  // Se autoexcluye: contiene los patrones y los mensajes de error.
+  'scripts/check-no-real-money.mjs',
+  // Escáneres que nombran Stripe/Resend para DETECTAR claves filtradas.
   'scripts/scan-secrets.mjs',
   'scripts/test-scan-secrets.mjs',
   'scripts/check-bundles-no-secrets.mjs',
+  // Smoke test: su mensaje de falla dice "no existen endpoints de dinero real".
+  'scripts/smoke-staging.mjs',
+  // Textos legales y copy del pie: afirman que NO hay dinero real (M8d).
   'apps/web/src/features/legal/legal-content.ts',
-  'apps/web/src/features/legal/LegalScreen.tsx',
   'apps/web/src/components/AppShell.tsx',
   'apps/web/src/i18n/messages-screens.es-AR.ts',
-  'docs/',
-  'README.md',
+  // Test que ASEVERA la ausencia de dinero real en los términos.
+  'apps/web/tests/m8d-legal.spec.tsx',
 ];
 
 /** Un pago real siempre necesita una pasarela: si aparece una, es un hallazgo. */
@@ -82,21 +97,20 @@ for (const file of listFiles()) {
     continue;
   }
   const lines = content.split('\n');
-  const isAllowlisted = COPY_DISCLOSURE_ALLOWLIST.some(
-    (allowed) => file === allowed || file.startsWith(allowed),
-  );
+  const isAllowlisted = MECHANISM_ALLOWLIST.includes(file);
+  const hasUiCopy = COPY_ROOTS.some((root) => file.startsWith(root));
 
   for (const [index, line] of lines.entries()) {
     const lineNumber = index + 1;
 
-    // La allowlist cubre las tres familias: son archivos que nombran dinero para
-    // NEGARLO (texto legal, copy del pie) o para DETECTAR claves filtradas.
     if (isAllowlisted) continue;
 
     if (PAYMENT_PROVIDER.test(line)) report('pasarela-de-pago', file, lineNumber, line);
     if (BALANCE_MECHANISM.test(line)) report('saldo-o-billetera', file, lineNumber, line);
     if (MONEY_ENDPOINT.test(line)) report('endpoint-de-dinero', file, lineNumber, line);
-    if (MONEY_PROMISE.test(line)) report('copy-con-promesa-de-dinero', file, lineNumber, line);
+    // El copy sólo se evalúa donde hay interfaz real.
+    if (hasUiCopy && MONEY_PROMISE.test(line))
+      report('copy-con-promesa-de-dinero', file, lineNumber, line);
   }
 }
 

@@ -134,11 +134,21 @@ jobs:
             caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       # Reglas de firewall que limitan 80/443 a Cloudflare (DOCKER-USER).
-      - name: Lint Cloudflare firewall ruleset
+      # Hermético (no necesita root ni iptables): rangos, DROP final, sin 0.0.0.0/0.
+      - name: Check firewall ruleset policy (static)
+        run: node scripts/check-firewall-rules.mjs
+
+      # Validación real de sintaxis con iptables de un contenedor con NET_ADMIN
+      # (el runner no trae iptables ni necesita modificar su propio firewall).
+      - name: Validate firewall ruleset syntax (iptables in container)
         run: |
-          command -v iptables-restore >/dev/null || sudo apt-get install -y iptables
-          sudo iptables-restore --test infra/firewall/docker-user-cloudflare.rules
-          echo 'Reglas DOCKER-USER válidas.'
+          docker run --rm --cap-add=NET_ADMIN \
+            -v "$PWD/infra/firewall:/rules:ro" \
+            alpine:3.20 sh -c '
+              apk add --no-cache iptables >/dev/null
+              iptables-restore --test /rules/docker-user-cloudflare.rules &&
+                echo "Reglas DOCKER-USER válidas (sintaxis)."
+            '
 
   backup-restore:
     name: Respaldo y restauración de PostgreSQL

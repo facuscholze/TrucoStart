@@ -341,8 +341,18 @@ jobs:
           CAPTCHA_PROVIDER=disabled
           EOF
 
+      # `--progress=plain` y anotaciones con el error: los logs del job no son
+      # accesibles desde todas partes, las anotaciones del check-run sí.
       - name: Build images
-        run: docker compose -f infra/docker-compose.staging.yml build
+        run: |
+          set -o pipefail
+          if ! docker compose -f infra/docker-compose.staging.yml build --progress=plain > build.log 2>&1; then
+            echo '--- últimas 60 líneas del build ---'
+            tail -60 build.log
+            message=$(tail -60 build.log | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Build images failed::${message}"
+            exit 1
+          fi
 
       - name: Start perimeter stack (Caddy on 18080/18443)
         run: |

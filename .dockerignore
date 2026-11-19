@@ -1,0 +1,37 @@
+# Contexto de build de las imágenes de staging (M8c).
+# Reduce el contexto y evita copiar secretos o artefactos locales a la imagen.
+
+# Dependencias y artefactos (se instalan/compilan dentro de la imagen)
+node_modules
+**/node_modules
+dist
+**/dist
+.turbo
+**/.turbo
+coverage
+**/coverage
+
+# Control de versiones y metadatos locales
+.git
+.gitignore
+.husky
+
+# Secretos y configuración local: NUNCA dentro del contexto de build
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
+*.pem
+*.key
+
+# Backups, capturas y documentación pesada
+backups
+docs/screenshots
+*.dump
+*.log
+
+# Editores / sistema
+.vscode
+.idea
+.DS_Store

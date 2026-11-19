@@ -13,6 +13,7 @@ FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
 COPY packages/config/package.json ./packages/config/
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/truco-engine/package.json ./packages/truco-engine/
 COPY packages/ui/package.json ./packages/ui/
 COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile
@@ -26,6 +27,9 @@ ENV VITE_GAME_SERVER_URL=${VITE_GAME_SERVER_URL}
 ENV VITE_CAPTCHA_SITE_KEY=${VITE_CAPTCHA_SITE_KEY}
 COPY packages/config ./packages/config
 COPY packages/shared ./packages/shared
+# @truco/web depende de @truco/engine para las vistas previas de mano; sin este
+# paquete el `turbo run build` del filtro falla con "Cannot find module".
+COPY packages/truco-engine ./packages/truco-engine
 COPY packages/ui ./packages/ui
 COPY apps/web ./apps/web
 RUN pnpm --filter @truco/web... build

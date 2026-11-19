@@ -224,26 +224,37 @@ valida compose + Caddyfile + firewall y levanta un stack efímero; después el e
 Todo lo que requiere una cuenta, un pago o un clic en una consola externa. **Nada de esto
 puede hacerlo un agente desde el repo.**
 
-| #   | Tarea                                                                                        | Dónde                         | Listo |
-| --- | -------------------------------------------------------------------------------------------- | ----------------------------- | :---: |
-| 1   | Contratar el VPS en **São Paulo** (Ubuntu 24.04 LTS)                                         | Proveedor cloud               |   ☐   |
-| 2   | Configurar el **security group**: sólo 22 (tu IP) + 80/443                                   | Consola del proveedor         |   ☐   |
-| 3   | Crear el volumen de backups y montarlo en `/mnt/backups`                                     | Consola del proveedor         |   ☐   |
-| 4   | Comprar el dominio y delegar los nameservers a Cloudflare                                    | NIC.ar / registrador          |   ☐   |
-| 5   | Crear los 4 registros A proxied (`app`, `api`, `admin`, `game`)                              | Cloudflare                    |   ☐   |
-| 6   | Poner SSL/TLS en **Full (strict)**                                                           | Cloudflare                    |   ☐   |
-| 7   | Crear la regla WAF de rate-limit en `/v1/auth/*`                                             | Cloudflare                    |   ☐   |
-| 8   | Crear la clave de **Turnstile**                                                              | Cloudflare                    |   ☐   |
-| 9   | Verificar el dominio en **Resend** (SPF/DKIM/DMARC) y generar API key                        | Resend                        |   ☐   |
-| 10  | Crear credencial **Google OAuth 2.0** (orígenes + redirect)                                  | Google Cloud Console          |   ☐   |
-| 11  | Generar `SESSION_SECRET`, `SEED_ENCRYPTION_KEY`, `INTERNAL_RPC_SECRET`, `POSTGRES_PASSWORD`  | Local (`openssl rand -hex …`) |   ☐   |
-| 12  | Cargar los 4 secrets de Actions y crear el environment `staging` con tu aprobación           | GitHub                        |   ☐   |
-| 13  | Instalar Docker + ufw + iptables-persistent en el VPS                                        | Fase 1                        |   ☐   |
-| 14  | Ejecutar `sudo SSH_ALLOW_FROM=<ip>/32 ./scripts/cloudflare-ufw.sh apply`                     | VPS                           |   ☐   |
-| 15  | Verificar desde **fuera** que la IP directa rechaza 80/443 (`cloudflare-ufw.sh verify <ip>`) | Tu máquina                    |   ☐   |
-| 16  | Ejecutar el workflow de deploy y aprobar el environment                                      | GitHub Actions                |   ☐   |
-| 17  | Alta del primer admin: `pnpm --filter @truco/api admin:create`                               | VPS                           |   ☐   |
-| 18  | Revisión legal de privacidad/Términos (bloquea M8d)                                          | Abogado                       |   ☐   |
+| #   | Tarea                                                                                           | Dónde                         | Listo |
+| --- | ----------------------------------------------------------------------------------------------- | ----------------------------- | :---: |
+| 1   | Contratar el VPS en **São Paulo** (Ubuntu 24.04 LTS)                                            | Proveedor cloud               |   ☐   |
+| 2   | Configurar el **security group**: sólo 22 (tu IP) + 80/443                                      | Consola del proveedor         |   ☐   |
+| 3   | Crear el volumen de backups y montarlo en `/mnt/backups`                                        | Consola del proveedor         |   ☐   |
+| 4   | Comprar el dominio y delegar los nameservers a Cloudflare                                       | NIC.ar / registrador          |   ☐   |
+| 5   | Crear los 4 registros A proxied (`app`, `api`, `admin`, `game`)                                 | Cloudflare                    |   ☐   |
+| 6   | Poner SSL/TLS en **Full (strict)**                                                              | Cloudflare                    |   ☐   |
+| 7   | Crear la regla WAF de rate-limit en `/v1/auth/*`                                                | Cloudflare                    |   ☐   |
+| 8   | Crear la clave de **Turnstile**                                                                 | Cloudflare                    |   ☐   |
+| 9   | Verificar el dominio en **Resend** (SPF/DKIM/DMARC) y generar API key                           | Resend                        |   ☐   |
+| 10  | Crear credencial **Google OAuth 2.0** (orígenes + redirect)                                     | Google Cloud Console          |   ☐   |
+| 11  | Generar `SESSION_SECRET`, `SEED_ENCRYPTION_KEY`, `INTERNAL_RPC_SECRET`, `POSTGRES_PASSWORD`     | Local (`openssl rand -hex …`) |   ☐   |
+| 12  | Cargar los 4 secrets de Actions y crear el environment `staging` con tu aprobación              | GitHub                        |   ☐   |
+| 13  | Instalar Docker + ufw + iptables-persistent en el VPS                                           | Fase 1                        |   ☐   |
+| 14  | Ejecutar `sudo SSH_ALLOW_FROM=<ip>/32 ./scripts/cloudflare-ufw.sh apply`                        | VPS                           |   ☐   |
+| 15  | Verificar desde **fuera** que la IP directa rechaza 80/443 (`cloudflare-ufw.sh verify <ip>`)    | Tu máquina                    |   ☐   |
+| 16  | Ejecutar el workflow de deploy y aprobar el environment                                         | GitHub Actions                |   ☐   |
+| 17  | Alta del primer admin: `pnpm --filter @truco/api admin:create`                                  | VPS                           |   ☐   |
+| 18  | **Revisión legal** de los cuatro documentos. Hasta entonces no se publica (bloqueante)          | Abogado                       |   ☐   |
+| 19  | Definir **responsable de tratamiento** y canal de contacto, y publicarlos en Privacidad         | Vos + abogado                 |   ☐   |
+| 20  | Definir si corresponde **inscribir la base** en el Registro Nacional de Bases de Datos (AAIP)   | Abogado                       |   ☐   |
+| 21  | Decidir la **edad mínima** final en `LEGAL_MIN_AGE` (default 18) según el criterio legal        | Vos + abogado                 |   ☐   |
+| 22  | Definir **plazos de conservación** de datos (hoy no hay borrado automático)                     | Vos + abogado                 |   ☐   |
+| 23  | Publicar el **procedimiento** para ejercer derechos de acceso/rectificación/supresión           | Vos + abogado                 |   ☐   |
+| 24  | Correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>` → 23/23                 | Tu máquina                    |   ☐   |
+| 25  | Ensayar una **restauración** real de backup sobre el VPS (no alcanza con que el job de CI pase) | VPS                           |   ☐   |
+
+> **Bloqueante de publicación:** los ítems 18 a 23. Mientras no estén cerrados, los
+> textos quedan marcados «BORRADOR, PENDIENTE DE REVISIÓN LEGAL» y el producto no
+> debe presentarse como listo. El detalle está en [`LEGAL_CHECKLIST.md`](./LEGAL_CHECKLIST.md).
 
 ---
 

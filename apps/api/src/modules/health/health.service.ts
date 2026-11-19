@@ -10,12 +10,15 @@ export class HealthService {
     private readonly dbHandle?: DatabaseConnectionHandle,
   ) {}
 
-  getLiveness(appName = DEFAULT_APP_NAME): HealthResponse {
+  getLiveness(appName = DEFAULT_APP_NAME, clientIp?: string): HealthResponse {
     return {
       status: 'ok',
       service: 'api',
       appName,
       timestamp: new Date().toISOString(),
+      // IP resuelta por Fastify (`request.ip`) según la política de proxies
+      // confiables: nunca el valor crudo que mandó el cliente.
+      ...(clientIp ? { clientIp } : {}),
     };
   }
 

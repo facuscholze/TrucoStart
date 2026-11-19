@@ -132,14 +132,23 @@ function checkResolver() {
     'Conexión desde la red de Docker confiable → se respeta X-Forwarded-For (198.51.100.7).',
   );
 
-  // 3. El resolver toma la PRIMERA IP válida de XFF. Por eso Caddy debe
-  //    REESCRIBIR la cabecera en lugar de appendear: si la appendeara, un
-  //    cliente que prependa su IP falsa sería el "cliente" para la API.
-  //    Esta comprobación documenta ese contrato y la de arriba lo exige.
+  // 3. Ataque de prepend: el cliente manda su IP falsa y el proxy appendea la
+  //    real. El parseo de derecha a izquierda (mismo criterio que Fastify y
+  //    Caddy con trusted_proxies_strict) devuelve la IP real, no la falsa.
   check(
     resolve('172.18.0.5', { 'x-forwarded-for': '203.0.113.9, 198.51.100.7' }, dockerCidrs) ===
-      '203.0.113.9',
-    'Contrato: la API toma la primera IP de XFF, por eso Caddy debe reescribir la cabecera.',
+      '198.51.100.7',
+    'Ataque de prepend: la IP falsa (203.0.113.9) se descarta; se usa la real (198.51.100.7).',
+  );
+
+  // 3b. Varios saltos confiables: se salta hasta el primer salto no confiable.
+  check(
+    resolve(
+      '172.18.0.5',
+      { 'x-forwarded-for': '203.0.113.9, 198.51.100.7, 172.18.0.9' },
+      dockerCidrs,
+    ) === '198.51.100.7',
+    'Varios saltos: se ignoran los proxies confiables a la derecha y se toma el cliente real.',
   );
 
   // 4. Un edge de Cloudflare conectando directo al contenedor de la API sin

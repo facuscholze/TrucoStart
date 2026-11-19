@@ -407,8 +407,11 @@ jobs:
           clean=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/clean.json")).clientIp)')
           forged=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/forged.json")).clientIp)')
           echo "clientIp sin cabeceras: ${clean}; con cabeceras falsas: ${forged}"
-          test "${clean}" = "${forged}" || { echo 'FALLO: la IP cambió con cabeceras falsas'; exit 1; }
-          test "${forged}" != '203.0.113.9' || { echo 'FALLO: se aceptó la IP falsificada'; exit 1; }
+          if [ "${clean}" != "${forged}" ] || [ "${forged}" = '203.0.113.9' ]; then
+            echo "FALLO: clean=${clean} forged=${forged}"
+            echo '::error title=Spoofing de IP en el borde::la IP cambió con cabeceras falsas'
+            exit 1
+          fi
 
       # Sólo Caddy publica puertos: cualquier upstream expuesto es un fallo.
       - name: Only Caddy publishes ports

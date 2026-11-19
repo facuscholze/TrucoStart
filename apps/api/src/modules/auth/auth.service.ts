@@ -17,6 +17,7 @@ import {
 import { DomainApiException } from '../../common/api-exception.js';
 import type { UserRow } from '../../db/schema/index.js';
 import { AuditRepository } from '../audit/audit.repository.js';
+import { LegalService } from '../legal/legal.service.js';
 import {
   AUTH_RUNTIME_CONFIG,
   type AuthRuntimeConfig,
@@ -46,6 +47,7 @@ export class AuthService {
     @Inject(HttpAuthRateLimiter) private readonly rateLimiter: HttpAuthRateLimiter,
     @Inject(CAPTCHA_VERIFIER) private readonly captchaVerifier: CaptchaVerifier,
     @Inject(GOOGLE_OAUTH_VERIFIER) private readonly googleVerifier: GoogleOAuthVerifier,
+    @Inject(LegalService) private readonly legalService: LegalService,
   ) {}
 
   private assertValidAndAvailableNickname(
@@ -136,6 +138,10 @@ export class AuthService {
     });
     await this.captchaVerifier.verifyOrThrow(input.captchaToken, meta.ip);
 
+    // Se valida la aceptación legal ANTES de tocar la base: sin consentimiento
+    // expreso no se crea la cuenta (ADR-023).
+    const legalAcceptance = this.legalService.validateAcceptance(input.legal);
+
     const nicknameTrimmed = input.nickname.trim();
     const existingNick = await this.repo.findUserByNicknameLower(
       normalizeNicknameLower(nicknameTrimmed),
@@ -161,6 +167,7 @@ export class AuthService {
       nicknameLower,
       isGuest: false,
       now,
+      legalAcceptance,
     });
 
     await this.recoveryService.issueVerificationEmailForUser(user, now);
@@ -169,7 +176,15 @@ export class AuthService {
       action: 'AUTH_REGISTERED',
       entity: 'user',
       entityId: user.id,
-      afterState: { email: user.email, nickname: user.nickname },
+      afterState: {
+        email: user.email,
+        nickname: user.nickname,
+        legal: {
+          termsVersion: legalAcceptance.termsVersion,
+          privacyVersion: legalAcceptance.privacyVersion,
+          minAge: legalAcceptance.minAge,
+        },
+      },
       ip: meta.ip,
       now,
     });
@@ -189,6 +204,10 @@ export class AuthService {
       accountKey: principal.userId,
     });
     await this.captchaVerifier.verifyOrThrow(input.captchaToken, meta.ip);
+
+    // Un invitado que se convierte en cuenta registrada también acepta los
+    // términos: la constancia queda en el mismo registro de usuario.
+    const legalAcceptance = this.legalService.validateAcceptance(input.legal);
 
     const currentUser = await this.repo.findUserById(principal.userId);
     if (!currentUser || !currentUser.isGuest) {
@@ -228,6 +247,7 @@ export class AuthService {
       nickname: targetNickname,
       nicknameLower: targetLower,
       now,
+      legalAcceptance,
     });
 
     await this.repo.revokeAllUserSessions(promotedUser.id, 'LOGOUT_ALL', now);
@@ -239,7 +259,16 @@ export class AuthService {
       entity: 'user',
       entityId: promotedUser.id,
       beforeState: { isGuest: true, nickname: currentUser.nickname },
-      afterState: { isGuest: false, email: promotedUser.email, nickname: promotedUser.nickname },
+      afterState: {
+        isGuest: false,
+        email: promotedUser.email,
+        nickname: promotedUser.nickname,
+        legal: {
+          termsVersion: legalAcceptance.termsVersion,
+          privacyVersion: legalAcceptance.privacyVersion,
+          minAge: legalAcceptance.minAge,
+        },
+      },
       ip: meta.ip,
       now,
     });

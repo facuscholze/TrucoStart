@@ -1,11 +1,20 @@
-import type { AuthUserSummary } from '@truco/shared';
+import {
+  type AuthUserSummary,
+  LEGAL_DOCUMENT_SLUGS,
+  LEGAL_MIN_AGE_DEFAULT,
+  type LegalDocumentSlug,
+} from '@truco/shared';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { AppShell } from './components/AppShell.js';
 import { OnboardingModal } from './components/OnboardingModal.js';
 import type { AuthTab } from './features/auth/AuthScreen.js';
 import { HomeScreen } from './features/home/HomeScreen.js';
 import { messagesEsAr } from './i18n/messages.es-AR.js';
-import { createGuestSessionRequest, getMeRequest } from './lib/api-client.js';
+import {
+  createGuestSessionRequest,
+  getLegalStatusRequest,
+  getMeRequest,
+} from './lib/api-client.js';
 import {
   applyPreferencesToDocument,
   loadClientPreferences,
@@ -44,6 +53,9 @@ const ScorerScreenLazy = lazy(() =>
 const AuthScreenLazy = lazy(() =>
   import('./features/auth/AuthScreen.js').then((m) => ({ default: m.AuthScreen })),
 );
+const LegalScreenLazy = lazy(() =>
+  import('./features/legal/LegalScreen.js').then((m) => ({ default: m.LegalScreen })),
+);
 
 type ParsedAppRoute =
   | { kind: 'dev-mesa' }
@@ -60,6 +72,7 @@ type ParsedAppRoute =
       resetToken: string | null;
       verifyToken: string | null;
     }
+  | { kind: 'legal'; slug: LegalDocumentSlug | null }
   | { kind: 'home' };
 
 function parseRoute(pathname: string, search: string): ParsedAppRoute {
@@ -106,6 +119,15 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
 
   if (pathname === '/anotador') {
     return { kind: 'scorer' };
+  }
+
+  // Páginas legales: índice en /legal y un documento por slug conocido.
+  if (pathname === '/legal' || pathname === '/legal/') {
+    return { kind: 'legal', slug: null };
+  }
+  const legalMatch = /^\/legal\/([a-z-]{3,32})$/.exec(pathname);
+  if (legalMatch?.[1] && (LEGAL_DOCUMENT_SLUGS as readonly string[]).includes(legalMatch[1])) {
+    return { kind: 'legal', slug: legalMatch[1] as LegalDocumentSlug };
   }
 
   if (
@@ -157,9 +179,31 @@ export function App() {
   const [sessionLoading, setSessionLoading] = useState<boolean>(true);
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [onboardingBusy, setOnboardingBusy] = useState<boolean>(false);
+  /**
+   * Edad mínima vigente, informada por la API. Arranca en el valor por defecto
+   * para poder pintar la pantalla aunque la API todavía no haya respondido; si
+   * la API falla, se mantiene el default conservador (nunca queda en 0).
+   */
+  const [legalMinAge, setLegalMinAge] = useState<number>(LEGAL_MIN_AGE_DEFAULT);
 
   useEffect(() => {
     applyPreferencesToDocument(loadClientPreferences());
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getLegalStatusRequest()
+      .then((status) => {
+        if (active && Number.isInteger(status.minAge) && status.minAge > 0) {
+          setLegalMinAge(status.minAge);
+        }
+      })
+      .catch(() => {
+        // Se conserva el mínimo por defecto: es el valor más conservador.
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const navigate = useCallback((to: string) => {
@@ -300,12 +344,17 @@ export function App() {
 
         {route.kind === 'scorer' && <ScorerScreenLazy />}
 
+        {route.kind === 'legal' && (
+          <LegalScreenLazy activeSlug={route.slug} minAge={legalMinAge} onNavigate={navigate} />
+        )}
+
         {route.kind === 'auth' && (
           <AuthScreenLazy
             currentUser={currentUser}
             {...(route.tab ? { initialTab: route.tab } : {})}
             initialResetToken={route.resetToken}
             initialVerifyToken={route.verifyToken}
+            legalMinAge={legalMinAge}
             onSessionChanged={(u) => setCurrentUser(u)}
             onNavigate={navigate}
           />

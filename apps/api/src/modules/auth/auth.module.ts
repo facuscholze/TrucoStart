@@ -11,6 +11,7 @@ import {
 import { AuthController } from './auth.controller.js';
 import { AuthRecoveryService } from './auth-recovery.service.js';
 import { AuthRepository } from './auth.repository.js';
+import { LegalModule } from '../legal/legal.module.js';
 import { AuthService } from './auth.service.js';
 import { AuthSessionService } from './auth-session.service.js';
 import { SessionAuthGuard } from './guards/session-auth.guard.js';
@@ -73,6 +74,9 @@ export class AuthModule {
     return {
       module: AuthModule,
       global: true,
+      // AuthModule es global: expone LegalService para que el alta pueda validar
+      // la aceptación sin acoplar cada módulo consumidor.
+      imports: [LegalModule],
       controllers: [AuthController],
       providers: [
         { provide: AUTH_RUNTIME_CONFIG, useValue: runtimeConfig },

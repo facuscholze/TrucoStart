@@ -35,8 +35,35 @@ describe('@truco/shared M3 Auth & Users schemas and nickname profanity filter', 
       email: '  FACU@Example.COM ',
       password: 'ClaveSegura123',
       nickname: 'FacuCordoba',
+      legal: { accepted: true },
     });
     expect(parsed.email).toBe('facu@example.com');
+
+    // M8d: el alta sin aceptación explícita ya no es un payload válido.
+    expect(
+      RegisterRequestSchema.safeParse({
+        email: 'facu@example.com',
+        password: 'ClaveSegura123',
+        nickname: 'FacuCordoba',
+      }).success,
+    ).toBe(false);
+    expect(
+      RegisterRequestSchema.safeParse({
+        email: 'facu@example.com',
+        password: 'ClaveSegura123',
+        nickname: 'FacuCordoba',
+        legal: { accepted: false },
+      }).success,
+    ).toBe(false);
+    // Un documento desconocido tampoco se acepta (contrato cerrado).
+    expect(
+      RegisterRequestSchema.safeParse({
+        email: 'facu@example.com',
+        password: 'ClaveSegura123',
+        nickname: 'FacuCordoba',
+        legal: { accepted: true, versions: { algo_inventado: '1' } },
+      }).success,
+    ).toBe(false);
 
     // Propiedades no declaradas rechazadas (.strict())
     expect(

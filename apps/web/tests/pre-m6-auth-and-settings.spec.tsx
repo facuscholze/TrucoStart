@@ -113,6 +113,15 @@ afterEach(() => {
 });
 
 describe('Pre-M6 — alta de cuenta (registro) y promoción de invitado', () => {
+  /**
+   * M8d: el alta exige consentimiento explícito y edad declarada. Este helper
+   * completa ese paso para que los tests de flujo se concentren en lo suyo.
+   */
+  function acceptLegalStep(age: number) {
+    fireEvent.change(screen.getByLabelText(/Declaro tener/i), { target: { value: String(age) } });
+    fireEvent.click(screen.getByLabelText(/acepto los Términos/i));
+  }
+
   it('registra una cuenta nueva con email, apodo y clave, y publica la sesión resultante', async () => {
     registerAccountRequest.mockResolvedValue({ user: registeredUser, session: {} });
     const onSessionChanged = vi.fn();
@@ -136,14 +145,18 @@ describe('Pre-M6 — alta de cuenta (registro) y promoción de invitado', () => 
     fireEvent.change(screen.getByLabelText(/Contraseña/i), {
       target: { value: 'TrucoDev2026!' },
     });
+    acceptLegalStep(30);
     fireEvent.click(screen.getByRole('button', { name: /Crear cuenta y entrar/i }));
 
     await waitFor(() => {
-      expect(registerAccountRequest).toHaveBeenCalledWith({
-        email: 'gaucho@truco.ar',
-        password: 'TrucoDev2026!',
-        nickname: 'GauchoDelSur',
-      });
+      expect(registerAccountRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'gaucho@truco.ar',
+          password: 'TrucoDev2026!',
+          nickname: 'GauchoDelSur',
+          legal: expect.objectContaining({ accepted: true, age: 30 }),
+        }),
+      );
     });
     expect(onSessionChanged).toHaveBeenCalledWith(registeredUser);
     expect(onNavigate).toHaveBeenCalledWith('/perfil');
@@ -167,6 +180,7 @@ describe('Pre-M6 — alta de cuenta (registro) y promoción de invitado', () => 
     fireEvent.change(screen.getByLabelText(/Contraseña/i), {
       target: { value: 'TrucoDev2026!' },
     });
+    acceptLegalStep(25);
     fireEvent.click(screen.getByRole('button', { name: /Vincular correo/i }));
     await waitFor(() => expect(onSessionChanged).toHaveBeenCalledWith(registeredUser));
     unmount();
@@ -187,6 +201,7 @@ describe('Pre-M6 — alta de cuenta (registro) y promoción de invitado', () => 
     fireEvent.change(screen.getByLabelText(/Contraseña/i), {
       target: { value: 'TrucoDev2026!' },
     });
+    acceptLegalStep(25);
     fireEvent.click(screen.getByRole('button', { name: /Vincular correo/i }));
     expect(await screen.findByText(/Ya existe una cuenta con ese correo/i)).toBeTruthy();
   });

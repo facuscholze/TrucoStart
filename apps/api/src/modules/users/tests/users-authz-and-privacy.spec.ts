@@ -12,6 +12,7 @@ import {
 } from '../../../db/database.provider.js';
 import { matchesTable, matchPlayersTable, usersTable } from '../../../db/schema/index.js';
 import { buildCookieHeader, extractAuthCookies } from '../../auth/tests/test-cookie-jar.js';
+import { TEST_LEGAL_ACCEPTANCE } from '../../../common/testing/legal-acceptance.fixture.js';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const COMMITTED_OPENAPI_PATH = path.resolve(currentDir, '../../../../../../docs/openapi.v1.json');
@@ -50,6 +51,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
         email: 'user.a@truco.ar',
         password: 'ClaveUserA123',
         nickname: 'JugadorAlfa',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     const resB = await app.inject({
@@ -60,6 +62,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
         email: 'privado.b@truco.ar',
         password: 'ClaveUserB123',
         nickname: 'JugadorBeta',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
 
@@ -140,6 +143,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
         email: 'export.delete@truco.ar',
         password: 'ClaveBorrar123',
         nickname: 'ExportadorSur',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     const userId = reg.json().user.id as string;

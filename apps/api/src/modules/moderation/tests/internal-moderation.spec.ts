@@ -9,6 +9,7 @@ import {
 } from '../../../db/database.provider.js';
 import { usersTable } from '../../../db/schema/index.js';
 import { buildCookieHeader, extractAuthCookies } from '../../auth/tests/test-cookie-jar.js';
+import { TEST_LEGAL_ACCEPTANCE } from '../../../common/testing/legal-acceptance.fixture.js';
 
 const SESSION_SECRET = 'm7-internal-secret-minimo-32-chars!!!!!!!!!';
 const INTERNAL_SECRET = 'm7-internal-rpc-secret-32-chars!!!!!!!!';
@@ -53,7 +54,7 @@ describe('M7 — endpoint interno de moderación para el game-server', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/register',
-      payload: { email, password: 'ClaveFuerte123', nickname },
+      payload: { email, password: 'ClaveFuerte123', nickname, legal: TEST_LEGAL_ACCEPTANCE },
     });
     expect(res.statusCode).toBe(201);
     return {

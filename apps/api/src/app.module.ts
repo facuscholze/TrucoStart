@@ -9,6 +9,7 @@ import { AdminModule, type AdminModuleOptions } from './modules/admin/admin.modu
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule, type AuthModuleOptions } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { LegalModule } from './modules/legal/legal.module.js';
 import { LobbyModule, type LobbyModuleOptions } from './modules/lobby/lobby.module.js';
 import { MatchmakingModule } from './modules/matchmaking/matchmaking.module.js';
 import {
@@ -90,6 +91,8 @@ export class AppModule {
         }),
         ObservabilityModule.register(options.observabilityOptions),
         HealthModule,
+        // Público y sin dependencias de sesión: la web lo consulta antes del alta.
+        LegalModule,
         OpenApiModule,
       ],
     };

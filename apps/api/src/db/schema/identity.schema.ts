@@ -39,6 +39,16 @@ export const usersTable = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    /**
+     * Constancia de aceptación legal (M8d). Se guarda la versión aceptada de cada
+     * documento, el momento exacto y la edad mínima vigente en ese momento, para
+     * poder acreditar el consentimiento (Ley 25.326, art. 5). NULL en cuentas
+     * creadas antes de M8d y en invitados.
+     */
+    termsVersion: varchar('terms_version', { length: 64 }),
+    privacyVersion: varchar('privacy_version', { length: 64 }),
+    legalAcceptedAt: timestamp('legal_accepted_at', { withTimezone: true }),
+    legalMinAge: integer('legal_min_age'),
   },
   (t) => [index('users_status_idx').on(t.status)],
 );

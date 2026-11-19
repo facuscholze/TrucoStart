@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LegalAcceptanceInputSchema } from '../legal/legal.schema.js';
 import { NICKNAME_MAX_LENGTH, NICKNAME_MIN_LENGTH } from './nickname.js';
 
 export const EmailInputSchema = z
@@ -44,6 +45,11 @@ export const RegisterRequestSchema = z
     nickname: RawNicknameInputSchema,
     captchaToken: z.string().trim().min(1).max(2048).optional(),
     deviceName: z.string().trim().min(1).max(80).optional(),
+    /**
+     * Aceptación explícita de los documentos legales. Es OBLIGATORIA: sin esto el
+     * alta se rechaza con 400 (ver ADR-023).
+     */
+    legal: LegalAcceptanceInputSchema,
   })
   .strict();
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
@@ -54,6 +60,8 @@ export const PromoteGuestRequestSchema = z
     password: PasswordInputSchema,
     nickname: RawNicknameInputSchema.optional(),
     captchaToken: z.string().trim().min(1).max(2048).optional(),
+    /** Mismo contrato que en el registro: el invitado también debe aceptar. */
+    legal: LegalAcceptanceInputSchema,
   })
   .strict();
 export type PromoteGuestRequest = z.infer<typeof PromoteGuestRequestSchema>;

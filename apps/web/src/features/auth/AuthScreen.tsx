@@ -1,4 +1,8 @@
-import type { AuthUserSummary } from '@truco/shared';
+import {
+  type AuthUserSummary,
+  LEGAL_DOCUMENT_VERSIONS,
+  LEGAL_MIN_AGE_DEFAULT,
+} from '@truco/shared';
 import { Badge, CallButton, Toast } from '@truco/ui';
 import { type FormEvent, useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
@@ -21,6 +25,8 @@ export interface AuthScreenProps {
   initialTab?: AuthTab;
   initialResetToken?: string | null;
   initialVerifyToken?: string | null;
+  /** Edad mínima vigente para el alta, informada por la API. */
+  legalMinAge?: number;
   onSessionChanged: (user: AuthUserSummary | null) => void;
   onNavigate: (path: string) => void;
 }
@@ -30,6 +36,7 @@ export function AuthScreen({
   initialTab,
   initialResetToken = null,
   initialVerifyToken = null,
+  legalMinAge = LEGAL_MIN_AGE_DEFAULT,
   onSessionChanged,
   onNavigate,
 }: AuthScreenProps) {
@@ -46,6 +53,16 @@ export function AuthScreen({
   );
   const [resetToken, setResetToken] = useState<string>(initialResetToken ?? '');
   const [verifyToken, setVerifyToken] = useState<string>(initialVerifyToken ?? '');
+
+  /**
+   * Aceptación legal. `legalAccepted` es el consentimiento explícito (regla 11:
+   * nada se acepta por omisión) y `legalAge` la edad declarada para el control de
+   * edad mínima. La edad NO se envía como dato de perfil: sólo viaja en el alta
+   * para que el servidor pueda rechazarla si no alcanza el mínimo.
+   */
+  const [legalAccepted, setLegalAccepted] = useState<boolean>(false);
+  const [legalAge, setLegalAge] = useState<string>('');
+  const [legalError, setLegalError] = useState<string | null>(null);
 
   const [busy, setBusy] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -111,21 +128,45 @@ export function AuthScreen({
 
   const handleRegisterOrPromote = async (e: FormEvent) => {
     e.preventDefault();
-    setBusy(true);
     setErrorMsg(null);
     setInfoMsg(null);
+    setLegalError(null);
+
+    // Doble control antes de llamar a la API: consentimiento explícito y edad
+    // declarada. El servidor lo vuelve a validar (nunca se confía en el cliente).
+    if (!legalAccepted) {
+      setLegalError(messagesEsAr.auth.legalAcceptanceRequired);
+      return;
+    }
+    const declaredAge = Number.parseInt(legalAge, 10);
+    if (!Number.isFinite(declaredAge) || declaredAge < legalMinAge) {
+      setLegalError(messagesEsAr.auth.legalAgeBelowMinimum(legalMinAge));
+      return;
+    }
+
+    setBusy(true);
     try {
+      const legal = {
+        accepted: true as const,
+        versions: {
+          terminos: LEGAL_DOCUMENT_VERSIONS.terminos,
+          privacidad: LEGAL_DOCUMENT_VERSIONS.privacidad,
+        },
+        age: declaredAge,
+      };
       const res =
         tab === 'promote' && currentUser?.isGuest
           ? await promoteGuestAccountRequest({
               email,
               password,
               ...(nickname.trim() ? { nickname: nickname.trim() } : {}),
+              legal,
             })
           : await registerAccountRequest({
               email,
               password,
               nickname: nickname.trim(),
+              legal,
             });
       onSessionChanged(res.user);
       onNavigate('/perfil');
@@ -344,8 +385,14 @@ export function AuthScreen({
           </form>
         )}
 
+        {/*
+          `noValidate` a propósito: la aceptación y la edad se validan en el
+          handler para poder mostrar un mensaje propio. Con la validación nativa
+          del navegador el submit se cancelaba antes de llegar al handler y la
+          persona no veía qué le faltaba.
+        */}
         {(tab === 'register' || tab === 'promote') && (
-          <form onSubmit={(e) => void handleRegisterOrPromote(e)} className="space-y-4">
+          <form onSubmit={(e) => void handleRegisterOrPromote(e)} noValidate className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="auth-reg-nickname" className="block text-xs font-bold text-ivory">
                 {messagesEsAr.auth.nicknameLabel}
@@ -396,6 +443,79 @@ export function AuthScreen({
                 className="w-full min-h-[44px] rounded-xl bg-elevated border border-ivory/25 px-3.5 text-sm text-ivory placeholder:text-muted/60"
               />
             </div>
+
+            <fieldset className="space-y-3 rounded-xl border border-ivory/20 bg-elevated/60 p-3.5">
+              <legend className="px-1 text-xs font-bold text-ivory">
+                {messagesEsAr.auth.legalHeading}
+              </legend>
+
+              <p className="text-[11px] leading-relaxed text-ivory/80">
+                {messagesEsAr.auth.legalMinAgeNotice(legalMinAge)}
+              </p>
+
+              <div className="flex items-center gap-2">
+                <label htmlFor="auth-reg-age" className="text-xs font-semibold text-ivory">
+                  {messagesEsAr.auth.legalAgeLabel}
+                </label>
+                <input
+                  id="auth-reg-age"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={130}
+                  value={legalAge}
+                  onChange={(e) => setLegalAge(e.target.value)}
+                  aria-describedby="auth-reg-age-hint"
+                  className="w-20 min-h-[44px] rounded-xl bg-surface border border-ivory/25 px-3 text-sm text-ivory"
+                />
+                <span id="auth-reg-age-hint" className="text-xs text-ivory/70">
+                  {messagesEsAr.auth.legalAgeSuffix}
+                </span>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <input
+                  id="auth-reg-legal"
+                  type="checkbox"
+                  checked={legalAccepted}
+                  onChange={(e) => {
+                    setLegalAccepted(e.target.checked);
+                    if (e.target.checked) setLegalError(null);
+                  }}
+                  aria-describedby="auth-reg-legal-links"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-gold"
+                />
+                <label
+                  htmlFor="auth-reg-legal"
+                  className="text-[11px] leading-relaxed text-ivory/85"
+                >
+                  {messagesEsAr.auth.legalAcceptanceLabel}
+                </label>
+              </div>
+
+              <div id="auth-reg-legal-links" className="flex flex-wrap gap-x-3 gap-y-1">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('/legal/terminos')}
+                  className="min-h-[32px] text-[11px] font-semibold text-gold underline underline-offset-2"
+                >
+                  {messagesEsAr.auth.legalReadTermsCta}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('/legal/privacidad')}
+                  className="min-h-[32px] text-[11px] font-semibold text-gold underline underline-offset-2"
+                >
+                  {messagesEsAr.auth.legalReadPrivacyCta}
+                </button>
+              </div>
+
+              {legalError && (
+                <p role="alert" className="text-[11px] font-semibold text-danger">
+                  {legalError}
+                </p>
+              )}
+            </fieldset>
 
             <div className="flex justify-end pt-1">
               <button

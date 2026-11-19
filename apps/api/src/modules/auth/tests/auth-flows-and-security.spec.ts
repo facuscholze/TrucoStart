@@ -20,6 +20,7 @@ import {
   SimulatedGoogleOAuthVerifier,
 } from '../providers/google-oauth.verifier.js';
 import { buildCookieHeader, extractAuthCookies } from './test-cookie-jar.js';
+import { TEST_LEGAL_ACCEPTANCE } from '../../../common/testing/legal-acceptance.fixture.js';
 
 describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => {
   let dbHandle: DatabaseConnectionHandle;
@@ -67,6 +68,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
         password: 'ClaveFuerte123',
         nickname: 'LuciaCriolla',
         deviceName: 'Celular Lucia',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     expect(regRes.statusCode).toBe(201);
@@ -232,6 +234,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
         email: 'invitado.promovido@truco.ar',
         password: 'ClavePromovida2026',
         nickname: 'GauchoPromovido',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     expect(promoteRes.statusCode).toBe(200);
@@ -268,6 +271,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
         email: 'familia@truco.ar',
         password: 'ClaveFamilia123',
         nickname: 'FamiliaToken',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     expect(reg.statusCode).toBe(201);
@@ -335,6 +339,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
         email: 'lockout@truco.ar',
         password: 'ClaveRealLock123',
         nickname: 'EscudoCriollo',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
 
@@ -347,7 +352,10 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
         method: 'POST',
         url: '/v1/auth/login',
         headers: { 'x-forwarded-for': attackerIp },
-        payload: { email: 'lockout@truco.ar', password: 'ClaveIncorrecta00' },
+        payload: {
+          email: 'lockout@truco.ar',
+          password: 'ClaveIncorrecta00',
+        },
       });
       expect(fail.statusCode).toBe(401);
     }
@@ -357,7 +365,10 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': legitimateOwnerIp },
-      payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveRealLock123',
+      },
     });
     expect(missingCaptcha.statusCode).toBe(400);
     expect(missingCaptcha.json().error.code).toBe('CAPTCHA_FAILED');
@@ -412,7 +423,10 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': attackerIp },
-      payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveRealLock123',
+      },
     });
     expect(stillBlockedAttacker.statusCode).toBe(423);
 
@@ -422,7 +436,10 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': attackerIp },
-      payload: { email: 'lockout@truco.ar', password: 'ClaveIncorrecta00' },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveIncorrecta00',
+      },
     });
     expect(sixthFail.statusCode).toBe(401);
 
@@ -430,7 +447,10 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': attackerIp },
-      payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveRealLock123',
+      },
     });
     expect(secondTierCheck.statusCode).toBe(423);
     expect(secondTierCheck.json().error.details?.retryAfterSeconds).toBe(300);
@@ -441,7 +461,10 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': attackerIp },
-      payload: { email: 'lockout@truco.ar', password: 'ClaveRealLock123' },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'ClaveRealLock123',
+      },
     });
     expect(recovered.statusCode).toBe(200);
   });
@@ -469,13 +492,19 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': '203.0.115.3' },
-      payload: { email: 'lockout@truco.ar', password: 'MalPassword1' },
+      payload: {
+        email: 'lockout@truco.ar',
+        password: 'MalPassword1',
+      },
     });
     const loginNoUser = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
       headers: { 'x-forwarded-for': '203.0.115.4' },
-      payload: { email: 'fantasma@truco.ar', password: 'MalPassword1' },
+      payload: {
+        email: 'fantasma@truco.ar',
+        password: 'MalPassword1',
+      },
     });
     expect(loginWrongPw.statusCode).toBe(401);
     expect(loginNoUser.statusCode).toBe(401);
@@ -490,6 +519,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
         email: 'nuevo1@truco.ar',
         password: 'ClaveValida123',
         nickname: 'escudocriollo',
+        legal: TEST_LEGAL_ACCEPTANCE,
       },
     });
     expect(dupNick.statusCode).toBe(409);
@@ -504,6 +534,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
           email: `test.${badNick.toLowerCase()}@truco.ar`,
           password: 'ClaveValida123',
           nickname: badNick,
+          legal: TEST_LEGAL_ACCEPTANCE,
         },
       });
       expect(badRes.statusCode).toBe(400);

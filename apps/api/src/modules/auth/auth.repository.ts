@@ -103,6 +103,12 @@ export class AuthRepository {
     readonly isGuest: boolean;
     readonly emailVerifiedAt?: Date | null;
     readonly now: Date;
+    /** Constancia de aceptación legal (M8d). Opcional: los invitados no aceptan. */
+    readonly legalAcceptance?: {
+      readonly termsVersion: string;
+      readonly privacyVersion: string;
+      readonly minAge: number;
+    } | null;
   }): Promise<{ user: UserRow; profile: ProfileRow }> {
     const userId = generateUuidV7(params.now.getTime());
     const [user] = await this.db
@@ -120,6 +126,14 @@ export class AuthRepository {
         status: 'ACTIVE',
         createdAt: params.now,
         updatedAt: params.now,
+        ...(params.legalAcceptance
+          ? {
+              termsVersion: params.legalAcceptance.termsVersion,
+              privacyVersion: params.legalAcceptance.privacyVersion,
+              legalAcceptedAt: params.now,
+              legalMinAge: params.legalAcceptance.minAge,
+            }
+          : {}),
       })
       .returning();
 
@@ -147,6 +161,11 @@ export class AuthRepository {
     readonly nickname: string;
     readonly nicknameLower: string;
     readonly now: Date;
+    readonly legalAcceptance?: {
+      readonly termsVersion: string;
+      readonly privacyVersion: string;
+      readonly minAge: number;
+    } | null;
   }): Promise<UserRow> {
     const [updated] = await this.db
       .update(usersTable)
@@ -157,6 +176,14 @@ export class AuthRepository {
         nicknameLower: params.nicknameLower,
         isGuest: false,
         updatedAt: params.now,
+        ...(params.legalAcceptance
+          ? {
+              termsVersion: params.legalAcceptance.termsVersion,
+              privacyVersion: params.legalAcceptance.privacyVersion,
+              legalAcceptedAt: params.now,
+              legalMinAge: params.legalAcceptance.minAge,
+            }
+          : {}),
       })
       .where(eq(usersTable.id, params.userId))
       .returning();

@@ -361,7 +361,18 @@ jobs:
           # dominio que no existe en CI.
           export HTTP_PORT=18080 HTTPS_PORT=18443 APP_DOMAIN=localhost
           export TRUSTED_PROXY_CIDRS='173.245.48.0/20'
-          docker compose -f infra/docker-compose.staging.yml up -d --wait --wait-timeout 240
+          if ! docker compose -f infra/docker-compose.staging.yml up -d --wait --wait-timeout 240 > up.log 2>&1; then
+            echo '--- up falló ---'; tail -40 up.log
+            docker compose -f infra/docker-compose.staging.yml ps || true
+            for svc in api game-server web admin caddy migrate; do
+              echo "===== logs $svc ====="
+              docker compose -f infra/docker-compose.staging.yml logs --tail 40 "$svc" || true
+            done > diag.log 2>&1
+            tail -80 diag.log
+            message=$(tail -80 diag.log | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Stack startup failed::${message}"
+            exit 1
+          fi
           docker compose -f infra/docker-compose.staging.yml ps
 
       # La prueba central: cabeceras falsas contra la API REAL, a través de Caddy.

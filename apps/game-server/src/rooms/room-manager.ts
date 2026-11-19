@@ -349,6 +349,10 @@ export class RoomManager {
     this.draining = enabled;
   }
 
+  isDraining(): boolean {
+    return this.draining;
+  }
+
   getActiveRoomCount(): number {
     return this.rooms.size;
   }

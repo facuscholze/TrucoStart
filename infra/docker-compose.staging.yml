@@ -1,13 +1,35 @@
+# docker-compose de staging (M8c).
+#
+# Servicios:
+#   - postgres, redis: BBDD y pub/sub (en prod se reemplazan por Neon/Upstash o
+#     un servicio gestionado).
+#   - api, game-server: procesos Node de la app.
+#   - web, admin: SPAs servidas por nginx.
+#   - migrate: job efímero que corre `pnpm drizzle-kit migrate` y sale (exit 0
+#     si las migraciones están al día; exit !=0 en caso de deriva y detiene el
+#     deploy vía `service_completed_successfully`).
+#   - nginx: TLS terminator / reverse proxy que expone 8443 con SNI por
+#     subdominio, setea HSTS, X-Forwarded-For y redirige a cada upstream.
+#
+# Este compose se usa en el runner de GitHub Actions dentro del workflow
+# `deploy-staging.yml` para validación de humo antes del aprobado manual, y
+# también en un VPS cualquiera para levantar el stack en staging.
 name: mesa-de-truco-staging
+
+networks:
+  truco-net:
+    driver: bridge
 
 services:
   postgres:
     image: postgres:16-alpine
-    restart: always
+    restart: unless-stopped
+    networks: [truco-net]
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      TZ: UTC
     volumes:
       - staging_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -15,11 +37,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
-    restart: always
-    command: ['redis-server', '--appendonly', 'yes']
+    restart: unless-stopped
+    networks: [truco-net]
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     volumes:
       - staging_redis_data:/data
     healthcheck:
@@ -28,49 +52,109 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    networks: [truco-net]
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Corre las migraciones Drizzle pendientes (lee DATABASE_URL del entorno).
+    command: ['node', 'dist/db/migrate.js']
+    restart: 'no'
+
   api:
     build:
       context: ..
       dockerfile: infra/docker/api.Dockerfile
-    restart: always
+    restart: unless-stopped
+    networks: [truco-net]
     env_file:
       - ../.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      API_HOST: '0.0.0.0'
+      GAME_SERVER_INTERNAL_URL: http://game-server:3002
+      TRUSTED_PROXY_CIDRS: '172.16.0.0/12'
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - '${API_PORT:-3001}:3001'
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3001/v1/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   game-server:
     build:
       context: ..
       dockerfile: infra/docker/game-server.Dockerfile
-    restart: always
+    restart: unless-stopped
+    networks: [truco-net]
     env_file:
       - ../.env
+    environment:
+      REDIS_URL: redis://redis:6379
+      GAME_SERVER_HOST: '0.0.0.0'
+      API_INTERNAL_URL: http://api:3001
+      TRUSTED_PROXY_CIDRS: '172.16.0.0/12'
+      NODE_ENV: production
     depends_on:
       redis:
         condition: service_healthy
-    ports:
-      - '${GAME_SERVER_PORT:-3002}:3002'
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3002/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 45s
 
   web:
     build:
       context: ..
       dockerfile: infra/docker/web.Dockerfile
-    restart: always
-    ports:
-      - '${WEB_PORT:-5173}:8080'
+      args:
+        VITE_API_BASE_URL: ${WEB_VITE_API_BASE_URL:-https://api.staging.truco.ar}
+        VITE_GAME_SERVER_URL: ${WEB_VITE_GAME_SERVER_URL:-wss://api.staging.truco.ar}
+        VITE_CAPTCHA_SITE_KEY: ${CAPTCHA_SITE_KEY:-}
+    restart: unless-stopped
+    networks: [truco-net]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/healthz.txt']
+      interval: 15s
+      timeout: 3s
+      retries: 3
 
   admin:
     build:
       context: ..
       dockerfile: infra/docker/admin.Dockerfile
-    restart: always
-    ports:
-      - '${ADMIN_PORT:-5174}:8080'
+      args:
+        VITE_API_BASE_URL: ${WEB_VITE_API_BASE_URL:-https://api.staging.truco.ar}
+        VITE_CAPTCHA_SITE_KEY: ${CAPTCHA_SITE_KEY:-}
+    restart: unless-stopped
+    networks: [truco-net]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/healthz.txt']
+      interval: 15s
+      timeout: 3s
+      retries: 3
 
 volumes:
   staging_postgres_data:

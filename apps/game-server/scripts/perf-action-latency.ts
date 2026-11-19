@@ -115,6 +115,8 @@ async function main(): Promise<void> {
     seedEncryptionKey: SECRET,
     allowAdHocRooms: false,
     idleSweepIntervalMs: 0,
+    maxConnectionsPerUser: 1_000,
+    maxConnectionsPerIp: 10_000,
     rateLimiter: { windowMs: 1_000, actionMax: 1_000_000, chatMax: 1_000_000, tableMax: 1_000_000 },
   });
 

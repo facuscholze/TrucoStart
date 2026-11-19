@@ -32,7 +32,7 @@ function buildOptions(
 ): CreateApiAppOptions {
   return {
     dbHandle,
-    trustProxy: true,
+    trustProxyCidrs: ['127.0.0.1/32'],
     logger: buildLogger(lines),
     observability: { config: { metricsToken: METRICS_TOKEN } },
     authOptions: {

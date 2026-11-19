@@ -42,7 +42,7 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
     dbHandle = await createAdaptiveTestDatabase();
     app = await createApiApp({
       dbHandle,
-      trustProxy: true,
+      trustProxyCidrs: ['127.0.0.1/32'],
       authOptions: {
         runtimeConfig: { sessionSecret: SESSION_SECRET, nowFn: () => clockMs },
         rateLimitConfig: { maxPerIp: 900, maxPerAccount: 900, nowFn: () => clockMs },

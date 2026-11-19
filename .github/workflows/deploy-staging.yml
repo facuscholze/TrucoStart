@@ -1,0 +1,160 @@
+name: Deploy to staging (M8c)
+
+# Workflow manual que levanta el stack en el VPS de staging, corre migraciones
+# de forma controlada, hace una prueba de humo de los healthchecks y pide
+# aprobación humana ANTES de cortar el tráfico a la versión anterior
+# (blue/green a nivel de docker-compose).
+#
+# Requisitos previos (secrets en el repo):
+#   STAGING_SSH_HOST, STAGING_SSH_USER, STAGING_SSH_KEY
+#   STAGING_ENV: archivo .env completo para staging (cargado vía GH secret)
+#   CLOUDFLARE_API_TOKEN (opcional, para purgar caché tras el deploy)
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Entorno a desplegar
+        type: choice
+        options: [staging]
+        default: staging
+      force_migrations:
+        description: Forzar migraciones aunque drizzle-kit detecte diff
+        type: boolean
+        default: false
+
+jobs:
+  build-and-smoke-test:
+    name: Build imágenes y smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+
+      # Validación de composición (falla si faltan variables o el yaml es inválido).
+      - name: Validate staging compose
+        run: |
+          cp .env.example .env
+          echo 'POSTGRES_PASSWORD=ci_staging_password' >> .env
+          echo 'POSTGRES_USER=truco_staging' >> .env
+          echo 'POSTGRES_DB=truco_staging' >> .env
+          docker compose -f infra/docker-compose.staging.yml config -q
+
+      # Smoke test: levanta stack temporal, espera healthchecks, verifica
+      # /v1/health, /health y una conexión WS mínima; luego apaga todo.
+      - name: Smoke test (docker compose)
+        run: |
+          cp .env.example .env
+          cat >> .env <<EOF
+          NODE_ENV=staging
+          POSTGRES_USER=truco_staging
+          POSTGRES_PASSWORD=ci_staging_password
+          POSTGRES_DB=truco_staging
+          SESSION_SECRET=ci_staging_session_secret_at_least_32_chars__
+          SEED_ENCRYPTION_KEY=ci_staging_seed_encryption_key_32_chars_min
+          INTERNAL_RPC_SECRET=ci_staging_internal_secret_32_chars_min
+          COOKIE_DOMAIN=localhost
+          CORS_ORIGINS=http://localhost:5173
+          DATABASE_URL=postgres://truco_staging:ci_staging_password@postgres:5432/truco_staging
+          REDIS_URL=redis://redis:6379
+          ADMIN_ORIGIN=http://localhost:5174
+          EOF
+          docker compose -f infra/docker-compose.staging.yml up -d
+          # Espera hasta 60s a que api y game-server queden healthy.
+          for i in $(seq 1 30); do
+            api=$(docker inspect -f '{{.State.Health.Status}}' mesa-de-truco-staging-api-1 2>/dev/null || echo starting)
+            gs=$(docker inspect -f '{{.State.Health.Status}}' mesa-de-truco-staging-game-server-1 2>/dev/null || echo starting)
+            echo "api=$api gs=$gs"
+            if [ "$api" = healthy ] && [ "$gs" = healthy ]; then break; fi
+            sleep 2
+          done
+          test "$api" = healthy || { echo 'API no healthy'; docker compose -f infra/docker-compose.staging.yml logs api; exit 1; }
+          test "$gs" = healthy || { echo 'game-server no healthy'; docker compose -f infra/docker-compose.staging.yml logs game-server; exit 1; }
+          docker compose -f infra/docker-compose.staging.yml down -v
+
+  approve-deploy:
+    name: Aprobación manual
+    needs: build-and-smoke-test
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      # El environment "staging" está configurado en GitHub Settings > Environments
+      # con "Required reviewers" (1 aprobador) para frenar el despliegue hasta
+      # aprobación humana.
+      url: https://app.staging.truco.ar
+    steps:
+      - run: echo 'Despliegue aprobado, procediendo.'
+
+  deploy:
+    name: Desplegar a VPS (migraciones + rolling restart + health check)
+    needs: approve-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cargar secretos de staging
+        run: |
+          install -m 0600 /dev/null .staging.env
+          printf '%s' "$STAGING_ENV" > .staging.env
+        env:
+          STAGING_ENV: ${{ secrets.STAGING_ENV }}
+
+      - name: Instalar clave SSH
+        run: |
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$STAGING_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$STAGING_SSH_HOST" >> ~/.ssh/known_hosts
+        env:
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+
+      - name: Copiar repo + .env al VPS vía rsync
+        run: |
+          rsync -az --delete --exclude node_modules --exclude dist \
+            ./ "$STAGING_SSH_USER@$STAGING_SSH_HOST:~/truco-start/"
+          rsync -az .staging.env "$STAGING_SSH_USER@$STAGING_SSH_HOST:~/truco-start/.env"
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+
+      - name: Migraciones y rolling restart
+        run: |
+          ssh "$STAGING_SSH_USER@$STAGING_SSH_HOST" bash -se <<'REMOTE'
+            set -euo pipefail
+            cd ~/truco-start
+            # 1. Pull/build de imágenes sin tocar las que están corriendo.
+            docker compose -f infra/docker-compose.staging.yml build
+            # 2. Correr migraciones; si fallan se aborta el deploy.
+            docker compose -f infra/docker-compose.staging.yml run --rm migrate
+            # 3. Drenaje del game-server antes de reiniciarlo: le damos 45s
+            #    para que termine/broadcastée la partida y cierre sockets.
+            #    Al bajar la instancia nueva se activa sólo cuando la vieja
+            #    dejó de marcarse como healthy (healthcheck apunta a /ready,
+            #    que devuelve 503 mientras draining=true).
+            docker compose -f infra/docker-compose.staging.yml up -d --no-deps --wait migrate
+            docker compose -f infra/docker-compose.staging.yml up -d \
+              --wait --wait-timeout 90 api game-server web admin
+            # 4. Prueba de humo remoto.
+            for i in $(seq 1 20); do
+              api=$(curl -fsS http://127.0.0.1:${API_PORT:-3001}/v1/health >/dev/null && echo ok || echo bad)
+              gs=$(curl -fsS http://127.0.0.1:${GAME_SERVER_PORT:-3002}/health >/dev/null && echo ok || echo bad)
+              if [ "$api" = ok ] && [ "$gs" = ok ]; then break; fi
+              sleep 2
+            done
+            test "$api" = ok && test "$gs" = ok
+            docker compose -f infra/docker-compose.staging.yml ps
+          REMOTE
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}

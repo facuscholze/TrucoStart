@@ -9,6 +9,7 @@
     "start": "node dist/main.js",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:dev": "tsx src/db/seed-dev.ts",
+    "db:seed:perf": "tsx scripts/perf/seed-perf-data.ts",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

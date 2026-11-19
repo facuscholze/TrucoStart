@@ -41,9 +41,25 @@ describe('Game Server Security: CSPRNG Commit-Reveal, AES-GCM Seed Storage & WS 
     expect(ciphertext).not.toContain(seedHex);
     expect(decryptSeedFromStore(ciphertext, ENC_KEY)).toBe(seedHex);
 
-    // Adulteración del tag o payload falla autenticación GCM
-    const tampered = `${ciphertext.slice(0, -2)}AA`;
+    // Adulteración a nivel de bytes: se decodifica la tercera parte (ciphertext),
+    // se voltea un bit en el medio del payload y se vuelve a codificar en
+    // base64url. Esto garantiza que el texto cifrado cambia en al menos un byte
+    // sin depender de la posición de los caracteres de padding (base64url no usa
+    // padding) ni de la representación textual.
+    const [ivB64, tagB64, dataB64] = ciphertext.split('.');
+    const data = Buffer.from(dataB64!, 'base64url');
+    const tamperedData = Buffer.from(data);
+    const flipAt = Math.floor(tamperedData.length / 2);
+    tamperedData[flipAt] = tamperedData[flipAt]! ^ 0xff;
+    const tampered = [ivB64, tagB64, tamperedData.toString('base64url')].join('.');
     expect(() => decryptSeedFromStore(tampered, ENC_KEY)).toThrow();
+
+    // Adulterar el tag de autenticación también falla.
+    const tagBuf = Buffer.from(tagB64!, 'base64url');
+    const tamperedTag = Buffer.from(tagBuf);
+    tamperedTag[0] = tamperedTag[0]! ^ 0x01;
+    const tamperedTagCipher = [ivB64, tamperedTag.toString('base64url'), dataB64].join('.');
+    expect(() => decryptSeedFromStore(tamperedTagCipher, ENC_KEY)).toThrow();
   });
 
   it('enforces independent sliding-window limits per connection and per event category (chat vs action)', () => {

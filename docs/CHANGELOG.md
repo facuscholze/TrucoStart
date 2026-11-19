@@ -4,6 +4,30 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.8.1-m8b-perf] — 2026-11-18 (M8b — Rendimiento y carga)
+
+### Agregado
+
+- **Índices SQL para consultas críticas** (migración `0005_m8b_performance_indexes`): `match_players(user_id, match_id DESC)` para historial paginado; `match_events(match_id, seq)` para replay; `tables(visibility, status, mode, created_at DESC)` (lobby público sin sort); `tables(status, updated_at)` para barridos de salas zombi; índices parciales en `sanctions`, `sessions`, `auth_tokens`, `reports` y `audit_logs`.
+- **Caché en memoria de 1 s para el listado público de lobby** en `LobbyService`, invalidada ante cualquier mutación (create/join/leave/delete/expire). Aligera el HTTP GET `/v1/tables` sin afectar la consistencia en tiempo real del canal WS `/lobby`.
+- **Límites de conexiones simultáneas por usuario e IP** en el `game-server`: `WS_MAX_CONNECTIONS_PER_USER` (default 4) y `WS_MAX_CONNECTIONS_PER_IP` (default 20), con rechazo temprano en el middleware de handshake (evita consumir tickets WS).
+- **Workflow de performance manual** (`.github/workflows/perf.yml`, `workflow_dispatch`) que levanta PostgreSQL 16 y Redis 7 reales y ejecuta tres escenarios: `http-100` (k6 lobby+login a 100 VUs), `ws-load` (Node.js `perf:load` parametrizable por `rooms`/`actions`) y `explain` (EXPLAIN ANALYZE de consultas críticas). El informe se publica como artefacto.
+- **Escenario k6 HTTP** en `perf/k6/lobby-and-login.js` (registro + login + perfil + lobby + historial, thresholds `p(95)<300ms`, error <1%).
+- **Escenario WS de carga** (`pnpm --filter @truco/game-server perf:load`, `apps/game-server/scripts/perf/load-ws.mjs`): simula N salas 1v1, conecta 2N sockets, envía `table.ready` midiendo latencia p50/p95/p99 y uso de memoria. Resultados en sandbox: 100 salas/200 sockets, p95 0,37 ms, 0 fallos.
+- **Script de EXPLAIN** (`scripts/perf/explain-critical.mjs`) que emite los planes de ejecución de 8 consultas críticas (lobby, login, historial, stats, barridos, asientos, reportes).
+- **Guarda de bundle admin en CI**: `pnpm --filter @truco/admin check:bundle` se ejecuta después del build para garantizar que los datos de ejemplo (`createDemoClient`, etc.) quedan fuera del bundle de producción.
+
+### Documentación
+
+- `docs/PERF.md` reescrito con: objetivos/SLO, criterios de salida (estado verificado/parcial/pendiente), metodología, resultados medidos en sandbox (25 y 100 salas), ajustes aplicados, planes EXPLAIN esperados, cuellos conocidos y pasos de reproducción local y CI.
+
+### Tests
+
+- `apps/game-server/tests/server.spec.ts`: nueva prueba de límites de conexión por usuario (conecta 2, la 3ra se rechaza con `TOO_MANY_CONNECTIONS`; al liberar una se puede volver a conectar).
+- Migración `0005` verificada en PGlite (tests de API en verde) y su SQL respeta el formato `--> statement-breakpoint` del runner de Drizzle.
+
+---
+
 ## [0.8.0-m6-ai] — 2026-11-13 (M6 — IA de Truco de Tres Niveles, BL-010)
 
 ### Agregado
@@ -21,7 +45,7 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 ### Tests
 
 - `packages/truco-engine/tests/bot-m6.spec.ts`: Vale Cuatro con carta imbatible (los tres niveles responden `QUIERO`), carta más baja que alcanza, Envido con tanto alto (31) y umbral por dificultad (26 solo lo canta el difícil), monotonía de parámetros.
-- `packages/truco-engine/tests/bot-benchmark.spec.ts`: regresión del criterio de aceptación (>60% vs M1 con 400 partidas deterministas) y escalera difícil > medio > fácil.
+- `packages/truco-engine/tests/bot-benchmark.slow.spec.ts`: regresión del criterio de aceptación (>60% vs M1 con 400 partidas deterministas) y escalera difícil > medio > fácil (suite separada, ver `test:slow`).
 
 ---
 

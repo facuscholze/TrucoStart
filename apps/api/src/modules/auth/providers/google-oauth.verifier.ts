@@ -24,7 +24,10 @@ const SimulatedTokenPayloadSchema = z.object({
   name: z.string().min(1).max(80).optional().default('JugadorGoogle'),
 });
 
-// TODO(STATE-11): Implementar verificación criptográfica JWKS contra Google Identity cuando se configuren GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET reales.
+// STATE-11 cerrado: GoogleJwksOAuthVerifier (google-jwks.verifier.ts) verifica la
+// firma RS256 del ID token contra las JWKS públicas de Google, con caché de 6 h,
+// cuando GOOGLE_CLIENT_ID está configurado en staging/producción. En desarrollo
+// sigue disponible SimulatedGoogleOAuthVerifier con tokens "sim-google:..." para tests.
 @Injectable()
 export class SimulatedGoogleOAuthVerifier implements GoogleOAuthVerifier {
   readonly providerName = 'google-simulated-dev';

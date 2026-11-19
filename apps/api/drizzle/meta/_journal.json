@@ -36,6 +36,13 @@
       "when": 1794900100000,
       "tag": "0004_nickname_must_change",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794980000000,
+      "tag": "0005_m8b_performance_indexes",
+      "breakpoints": true
     }
   ]
 }

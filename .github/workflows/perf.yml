@@ -1,0 +1,166 @@
+name: Performance (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Escenario a ejecutar
+        required: false
+        default: 'http-100'
+        type: choice
+        options:
+          - http-100
+          - ws-load
+          - explain
+      rooms:
+        description: 'Partidas simultáneas (solo ws-load; default 50)'
+        required: false
+        default: '50'
+      actions:
+        description: 'Acciones por sala (solo ws-load; default 20)'
+        required: false
+        default: '20'
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    name: Perf — ${{ inputs.scenario }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: truco_perf
+          POSTGRES_PASSWORD: truco_perf_password
+          POSTGRES_DB: truco_perf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U truco_perf -d truco_perf"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=10
+
+    env:
+      NODE_ENV: production
+      APP_NAME: 'Mesa de Truco Perf'
+      DATABASE_URL: postgresql://truco_perf:truco_perf_password@localhost:5432/truco_perf
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: perf_test_session_secret_at_least_32_characters_long
+      SEED_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      INTERNAL_RPC_SECRET: perf_test_internal_secret_at_least_32_chars_long
+      API_INTERNAL_URL: http://127.0.0.1:3000
+      GAME_SERVER_HOST: 0.0.0.0
+      GAME_SERVER_PORT: '3002'
+      CORS_ORIGINS: http://localhost:5173
+      EMAIL_PROVIDER: console
+      CAPTCHA_PROVIDER: disabled
+      TURN_TIMEOUT_MS: '30000'
+      RECONNECT_GRACE_MS: '45000'
+      WS_MAX_CONNECTIONS_PER_USER: '25'
+      WS_MAX_CONNECTIONS_PER_IP: '1000'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Build shared packages
+        run: pnpm --filter @truco/shared --filter @truco/engine build
+
+      - name: Apply DB migrations and seed rulesets
+        run: pnpm --filter @truco/api db:migrate
+
+      - name: Build API & game-server
+        run: pnpm --filter @truco/api --filter @truco/game-server build
+
+      - name: Seed baseline users and tables for HTTP scenario
+        run: pnpm --filter @truco/api db:seed:perf
+        if: inputs.scenario == 'http-100' || inputs.scenario == 'explain'
+
+      - name: Start API
+        run: pnpm --filter @truco/api start &
+        env:
+          PORT: '3000'
+        if: inputs.scenario == 'http-100' || inputs.scenario == 'explain'
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/v1/health; then exit 0; fi
+            sleep 1
+          done
+          echo "API no levantó"; exit 1
+        if: inputs.scenario == 'http-100' || inputs.scenario == 'explain'
+
+      - name: Start game-server
+        run: pnpm --filter @truco/game-server start &
+        if: inputs.scenario == 'http-100'
+
+      - name: Wait for game-server health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3002/health; then exit 0; fi
+            sleep 1
+          done
+          echo "Game-server no levantó"; exit 1
+        if: inputs.scenario == 'http-100'
+
+      - name: Run k6 HTTP scenario (100 VUs)
+        run: k6 run --out json=perf/reports/k6-http-100.json perf/k6/lobby-and-login.js
+        env:
+          BASE_URL: http://127.0.0.1:3000
+          WS_URL: ws://127.0.0.1:3002
+        if: inputs.scenario == 'http-100'
+
+      - name: Run WS load scenario (Node.js)
+        run: pnpm --filter @truco/game-server perf:load
+        env:
+          ROOMS: ${{ inputs.rooms }}
+          ACTIONS: ${{ inputs.actions }}
+        if: inputs.scenario == 'ws-load'
+
+      - name: Run EXPLAIN ANALYZE on critical queries
+        run: |
+          mkdir -p perf/reports
+          node scripts/perf/explain-critical.mjs > perf/reports/explain.md
+        if: inputs.scenario == 'explain'
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-reports-${{ inputs.scenario }}
+          path: perf/reports/
+          retention-days: 14

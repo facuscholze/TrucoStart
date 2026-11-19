@@ -288,3 +288,62 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
 - **Consecuencias:**
   - Cero duplicación de estado o reglas: `tables.id === roomId` y el `RuleSet` nace una sola vez en `apps/api`.
   - Escritura ACID garantizada de `matches` + `match_players` + `match_events` con tolerancia a reintentos (at-least-once) de BullMQ.
+
+---
+
+## ADR-018: Listado de Lobby con Paginación y Caché de 1 Segundo
+
+- **Fecha:** 2026-11-18
+- **Estado:** Aceptado
+- **Contexto:** El endpoint `GET /v1/tables` es consultado por cada cliente en el ingreso al lobby, cada reconexión y cada vez que el WS `/lobby` se reconecta. El lobby en vivo se sincroniza por WebSocket pero la carga HTTP inicial puede generar picos cuando miles de usuarios abren la app simultáneamente (hora pico, viralidad, notificación push). Una consulta por request sin caché ejecuta repetidamente el mismo plan sobre PostgreSQL sin beneficio alguno.
+- **Decisión:**
+  1. Paginación estricta por defecto (25 resultados, máximo 50, rechazando valores mayores) ordenados por `created_at DESC` sobre el índice compuesto `tables(visibility, status, mode, created_at DESC)`.
+  2. Caché en proceso de 1 segundo claveada por los filtros de consulta (`visibility=PUBLIC`, `status`, `mode`, `targetScore`, `flor`, `rulesetCode`, `limit`). La TTL baja (1 s) es imperceptible para un jugador que recibe diffs por WebSocket y absorbe ráfagas de refresco (F5, tabs múltiples).
+  3. Invalidación estricta: toda mutación que modifica la lista pública (create/join/leave/delete/expire) limpia el caché por completo.
+- **Alternativas:** caché en Redis (agrega latencia de red para un TTL tan corto), ETag por cliente (no evita ejecutar la consulta), o incrementar el TTL (riesgo de mostrar mesas ya cerradas durante varios segundos).
+- **Consecuencias:** El QPS sobre PostgreSQL por lecturas de lobby en caliente se reduce aproximadamente `TTL * QPS` veces; la lista que ve un usuario por HTTP está como máximo 1s desfasada de la que recibe por WS.
+
+---
+
+## ADR-019: Límites de Conexiones WebSocket por Usuario e IP
+
+- **Fecha:** 2026-11-18
+- **Estado:** Aceptado
+- **Contexto:** Un solo cliente (por bug, abuso o script) podría abrir miles de conexiones WebSocket contra el `game-server` y agotar sockets o memoria del proceso. A la inversa, un límite muy estricto por IP (p. ej. 5) rompe el uso legítimo desde redes NAT/CGNAT móviles o cibers.
+- **Decisión:**
+  1. `WS_MAX_CONNECTIONS_PER_USER = 4` por defecto: dos dispositivos + pestaña lobby + margen suficiente para dos partidas simultáneas. El límite se aplica en el middleware `io.use` antes de consumir el ticket WS (rechazo con `TOO_MANY_CONNECTIONS`).
+  2. `WS_MAX_CONNECTIONS_PER_IP = 60` por defecto, suficiente para 4-5 hogares o un aula compartiendo un ISP.
+  3. Los contadores se decrementan en el evento `disconnect`; se limpian exhaustivamente (no se admiten leaks por sockets huérfanos).
+  4. Ambos valores son sobre-escribibles por variables de entorno para ambientes de prueba (`perf:load` los eleva a 1.000/10.000).
+- **Alternativas:** sin límite (DoS trivial), límite por IP de 10 (rompe CGNAT), límite global compartido user+ip (no protege de abuso distribuido).
+- **Consecuencias:** Un atacante con un solo userId o IP no puede agotar sockets; el jugador normal con varios dispositivos o un aula no percibe el límite.
+
+---
+
+## ADR-020: Resolución de IP del Cliente Sólo Desde Proxies Confiables
+
+- **Fecha:** 2026-11-18
+- **Estado:** Aceptado
+- **Contexto:** Para aplicar límites por IP, rate limiting y auditoría se necesita la IP real del cliente. Si la app se despliega detrás de Nginx/Cloudflare, la IP del socket es la del proxy y la IP real viene en `X-Forwarded-For` o `CF-Connecting-IP`. Pero cualquier cliente puede falsificar esas cabeceras si el servidor las acepta ciegamente, burlando límites por IP.
+- **Decisión:**
+  1. `TRUSTED_PROXY_CIDRS` (lista de CIDRs IPv4): la cabecera `TRUSTED_PROXY_HEADER` (default `x-forwarded-for`, configurable a `cf-connecting-ip` para Cloudflare) **sólo** se consulta si la IP remota del socket pertenece a uno de estos rangos; en caso contrario se ignora y se usa la IP del socket directamente.
+  2. La misma lógica se aplica en Fastify (`trustProxy` como función) para que `request.ip` y los logs correlacionados siempre muestren la IP correcta y no una IP spoofeada.
+  3. El default es **ningún proxy confiable** (desarrollo local); en producción se configura explícitamente los rangos de Cloudflare y/o del balanceador propio. La configuración se valida al arrancar.
+  4. Soportamos IPv4 e IPv4-mapped-IPv6; soporte completo de IPv6 nativo se agrega cuando la infra lo requiera.
+- **Alternativas:** `trustProxy = true` ciego (spoofing trivial de IP para evadir bans); IP basada únicamente en `CF-Connecting-IP` sin verificar origen (acopla al proveedor y sigue siendo spoofeable si Cloudflare no está delante).
+- **Consecuencias:** La IP usada para auditoría, rate limiting y límites de conexiones es correcta tanto en desarrollo (directo) como detrás de proxy; no hay forma de que un cliente fuera de los CIDRs confiables falsifique su origen.
+
+---
+
+## ADR-021: Estrategia de despliegue (Docker multi-stage + docker-compose staging + aprobación manual)
+
+- **Fecha:** 2026-11-18
+- **Estado:** Aceptado
+- **Contexto:** MVP necesita salir a un VPS económico con un camino repetible de despliegue, sin abonar Kubernetes orquestado todavía. Las migraciones de esquema y el drenaje graceful del game-server son operaciones críticas que deben ser auditable y no ocurrir automáticamente a cada push.
+- **Decisión:**
+  1. Dockerfiles multi-stage (deps → build → runner) con usuario `truco` (uid 1001) sin privilegios, `dumb-init` como PID 1 para la correcta entrega de SIGTERM y healthchecks con `wget` en `/v1/health` (API), `/health` (game-server liveness) y `/ready` (game-server readiness: 503 mientras `roomManager.isDraining()`).
+  2. `infra/docker-compose.staging.yml` con servicios `postgres`, `redis`, `api`, `game-server`, `web`, `admin` y un job efímero `migrate` que corre `pnpm drizzle-kit migrate` (entrypoint `node dist/db/migrate.js`) y sale antes de levantar la API.
+  3. Workflow `.github/workflows/deploy-staging.yml` con tres jobs: (a) build + lint/typecheck + `docker compose config -q` + smoke-test local (levanta el stack completo y espera healthchecks); (b) aprobación manual vía GitHub Environments `staging` con reviewers requeridos; (c) deploy vía rsync + SSH que corre migraciones y hace rolling restart de los contenedores, verificando health tras el restart.
+  4. TRUSTED_PROXY_CIDRS se setea en la red interna de compose (`172.16.0.0/12`) y se documenta en DEPLOY.md cómo configurarlo con los rangos oficiales de Cloudflare cuando se ponga el CDN delante.
+- **Alternativas:** K8s/ECS/Fly.io con releases automáticos a cada push (sobredimensionado para MVP, aumenta superficie de error en migraciones); Heroku/Render (caros para la región de Argentina).
+- **Consecuencias:** Un push a main no despliega sin aprobación; si las migraciones fallan se aborta antes de tocar la API nueva; el game-server se reinicia con `stop_grace_period: 45s` durante el cual `/ready` devuelve 503 y el balanceador/Cloudflare le quita tráfico sin cortar partidas en curso.

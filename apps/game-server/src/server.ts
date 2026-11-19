@@ -5,7 +5,10 @@ import {
   ClientMessageSchema,
   DEFAULT_APP_NAME,
   type HealthResponse,
+  parseCidr,
+  type ParsedCidr,
   type RoomProvisionSpec,
+  resolveClientIp,
   verifyWsAuthTicket,
   type BotDifficulty,
   type WsAuthTicketClaims,
@@ -62,6 +65,31 @@ export interface GameServerOptions {
   readonly idleSweepIntervalMs?: number;
   readonly internalRpcMaxSkewMs?: number;
   readonly rateLimiter?: WsRateLimiterConfig;
+  /**
+   * Límite de conexiones WebSocket simultáneas por userId autenticado.
+   * El exceso se rechaza con `TOO_MANY_CONNECTIONS` para evitar que un solo
+   * usuario agote sockets o conexiones (p. ej. pestañas zombis, abuso).
+   * Por defecto 4 (dos dispositivos por mesa 1v1 + 1 pestaña lobby + margen).
+   */
+  readonly maxConnectionsPerUser?: number;
+  /**
+   * Límite de conexiones simultáneas por IP de origen real (resuelta a través
+   * de proxies confiables). Protege al proceso de ataques de conexión desde un
+   * único origen. Default 60 (ver ADR-020: NAT/CGNAT compartido).
+   */
+  readonly maxConnectionsPerIp?: number;
+  /**
+   * CIDRs de proxies confiables. Si la IP remota del socket está dentro de
+   * alguno, se usa `trustedProxyHeader` para obtener la IP real del cliente;
+   * en caso contrario las cabeceras se ignoran (anti-spoofing).
+   */
+  readonly trustedProxyCidrs?: readonly string[];
+  /**
+   * Cabecera que contiene la IP real del cliente cuando la conexión viene de
+   * un proxy confiable. Default `x-forwarded-for` (Cloudflare: usar
+   * `cf-connecting-ip` y pasar sus rangos en `trustedProxyCidrs`).
+   */
+  readonly trustedProxyHeader?: string;
   readonly nowFn?: () => number;
   /** Logger estructurado (pino) para requests internos y conexiones WebSocket. */
   readonly logger?: GameServerLoggerLike;
@@ -108,6 +136,7 @@ interface ServerToClientEvents {
 
 interface AuthenticatedSocketData {
   claims: WsAuthTicketClaims;
+  ip: string;
 }
 
 function extractHandshakeToken(socket: Socket): string | null {
@@ -168,6 +197,33 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
 
   const rateLimiter = new WsConnectionRateLimiter(options.rateLimiter);
 
+  // Límites de conexiones simultáneas por usuario e IP para impedir abusos
+  // (pestañas zombis, un solo origen agotando sockets del proceso).
+  const maxConnectionsPerUser = options.maxConnectionsPerUser ?? 4;
+  const maxConnectionsPerIp = options.maxConnectionsPerIp ?? 60;
+  const trustedCidrs: readonly ParsedCidr[] = (options.trustedProxyCidrs ?? [])
+    .map((raw) => parseCidr(raw))
+    .filter((c): c is ParsedCidr => c !== null);
+  const trustedProxyHeader = (options.trustedProxyHeader ?? 'x-forwarded-for').toLowerCase();
+  const connectionsPerUser = new Map<string, number>();
+  const connectionsPerIp = new Map<string, number>();
+
+  function getSocketIp(socket: Socket): string {
+    return resolveClientIp({
+      remoteAddress: socket.handshake.address,
+      headers: socket.handshake.headers as Record<string, string | string[] | undefined>,
+      trustedCidrs,
+      headerName: trustedProxyHeader,
+    });
+  }
+
+  function bumpCounter(map: Map<string, number>, key: string, delta: number): number {
+    const next = Math.max(0, (map.get(key) ?? 0) + delta);
+    if (next === 0) map.delete(key);
+    else map.set(key, next);
+    return next;
+  }
+
   // Barrido de inactividad: destruye salas sin conexiones tras `idleRoomTtlMs`
   // y notifica a `apps/api` con `room.expired` para dejar la mesa consistente.
   const idleSweepIntervalMs = options.idleSweepIntervalMs ?? 60_000;
@@ -217,15 +273,27 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       );
     });
 
+    // /health siempre responde 200 si el proceso está vivo (liveness).
+    // /ready responde 503 mientras el servidor está drenando (readiness para
+    // que el balanceador/ORCH retire la instancia sin cortar reconexiones en
+    // curso). Ver doc/DEPLOY.md y ADR-021.
+    const buildHealthBody = (draining: boolean): HealthResponse => ({
+      status: draining ? 'draining' : 'ok',
+      service: 'game-server',
+      appName,
+      timestamp: new Date().toISOString(),
+    });
     if (req.method === 'GET' && req.url === '/health') {
-      const body: HealthResponse = {
-        status: 'ok',
-        service: 'game-server',
-        appName,
-        timestamp: new Date().toISOString(),
-      };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(body));
+      res.end(JSON.stringify(buildHealthBody(roomManager.isDraining())));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/ready') {
+      const draining = roomManager.isDraining();
+      res.writeHead(draining ? 503 : 200, {
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      res.end(JSON.stringify(buildHealthBody(draining)));
       return;
     }
 
@@ -282,6 +350,15 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
   });
 
   io.use((socket, next) => {
+    // Límite por IP: se aplica antes de autenticar para cortar temprano intentos
+    // de flood desde un único origen sin consumir tickets WS.
+    const ip = getSocketIp(socket);
+    const currentFromIp = connectionsPerIp.get(ip) ?? 0;
+    if (currentFromIp >= maxConnectionsPerIp) {
+      next(new Error('TOO_MANY_CONNECTIONS_FROM_IP'));
+      return;
+    }
+
     const token = extractHandshakeToken(socket);
     if (!token) {
       next(new Error('UNAUTHORIZED'));
@@ -293,6 +370,15 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
       next(new Error('UNAUTHORIZED'));
       return;
     }
+
+    // Límite por usuario autenticado (se cuenta al pasar el middleware; se
+    // decrementa en el evento `disconnect`).
+    const currentFromUser = connectionsPerUser.get(claims.userId) ?? 0;
+    if (currentFromUser >= maxConnectionsPerUser) {
+      next(new Error('TOO_MANY_CONNECTIONS'));
+      return;
+    }
+
     const remainingTtlMs = Math.max(1, claims.exp - now);
     void store
       .consumeWsTicket(claims.jti, remainingTtlMs)
@@ -302,6 +388,9 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
           return;
         }
         socket.data.claims = claims;
+        socket.data.ip = ip;
+        bumpCounter(connectionsPerUser, claims.userId, +1);
+        bumpCounter(connectionsPerIp, ip, +1);
         next();
       })
       .catch(() => {
@@ -399,6 +488,12 @@ export function createGameServer(options: GameServerOptions = {}): GameServerIns
         'ws_disconnected',
       );
       rateLimiter.removeConnection(socket.id);
+      if (socket.data.claims) {
+        bumpCounter(connectionsPerUser, socket.data.claims.userId, -1);
+      }
+      if (socket.data.ip) {
+        bumpCounter(connectionsPerIp, socket.data.ip, -1);
+      }
       void roomManager.handleSocketDisconnect(socket);
     });
   });

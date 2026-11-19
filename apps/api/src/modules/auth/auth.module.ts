@@ -29,6 +29,9 @@ import {
   type GoogleOAuthVerifier,
   SimulatedGoogleOAuthVerifier,
 } from './providers/google-oauth.verifier.js';
+import { ResendEmailProvider, SmtpEmailProvider } from './providers/resend-email.provider.js';
+import { GoogleJwksOAuthVerifier } from './providers/google-jwks.verifier.js';
+import { TurnstileCaptchaVerifier } from './providers/turnstile-captcha.verifier.js';
 import { type AuthRateLimitConfig, HttpAuthRateLimiter } from './security/http-rate-limiter.js';
 import { PasswordHasher } from './security/password-hasher.js';
 
@@ -58,6 +61,14 @@ export class AuthModule {
     };
 
     const isProd = process.env['NODE_ENV'] === 'production';
+    const isStaging = process.env['NODE_ENV'] === 'staging';
+    const useRealProviders = isProd || isStaging;
+
+    const emailProvider: EmailProvider = options.emailProvider ?? buildEmailProviderFromEnv();
+    const googleVerifier: GoogleOAuthVerifier =
+      options.googleVerifier ?? buildGoogleVerifierFromEnv(useRealProviders);
+    const captchaVerifier: CaptchaVerifier =
+      options.captchaVerifier ?? buildCaptchaVerifierFromEnv(useRealProviders);
 
     return {
       module: AuthModule,
@@ -70,24 +81,9 @@ export class AuthModule {
           useFactory: (store: RateLimitStore) => new HttpAuthRateLimiter(rateLimitConfig, store),
           inject: [RATE_LIMIT_STORE],
         },
-        {
-          provide: EMAIL_PROVIDER,
-          useValue: options.emailProvider ?? new ConsoleEmailProvider({ logToStdout: false }),
-        },
-        {
-          provide: GOOGLE_OAUTH_VERIFIER,
-          useValue:
-            options.googleVerifier ??
-            new SimulatedGoogleOAuthVerifier({ allowSimulatedTokens: !isProd }),
-        },
-        {
-          provide: CAPTCHA_VERIFIER,
-          useValue:
-            options.captchaVerifier ??
-            new SimulatedCaptchaVerifier({
-              requireToken: process.env['CAPTCHA_PROVIDER'] === 'turnstile',
-            }),
-        },
+        { provide: EMAIL_PROVIDER, useValue: emailProvider },
+        { provide: GOOGLE_OAUTH_VERIFIER, useValue: googleVerifier },
+        { provide: CAPTCHA_VERIFIER, useValue: captchaVerifier },
         PasswordHasher,
         AuthRepository,
         AuthSessionService,
@@ -109,4 +105,72 @@ export class AuthModule {
       ],
     };
   }
+}
+
+function buildEmailProviderFromEnv(): EmailProvider {
+  const kind = (process.env['EMAIL_PROVIDER'] ?? 'console') as 'console' | 'resend' | 'smtp';
+  const webBaseUrl = process.env['WEB_BASE_URL'] ?? 'http://localhost:5173';
+  const from = process.env['EMAIL_FROM_ADDRESS'] ?? '';
+  if (kind === 'resend') {
+    return new ResendEmailProvider(process.env['RESEND_API_KEY'] ?? '', from, webBaseUrl);
+  }
+  if (kind === 'smtp') {
+    // SMTP se construye asincrónicamente; para simplificar el módulo
+    // construimos el transporte al primer envío (wrapper lazy).
+    return lazySmtp(process.env['SMTP_CONNECTION_URL'] ?? '', from, webBaseUrl);
+  }
+  return new ConsoleEmailProvider({ logToStdout: process.env['NODE_ENV'] !== 'production' });
+}
+
+function lazySmtp(connectionUrl: string, from: string, webBaseUrl: string): EmailProvider {
+  let cached: SmtpEmailProvider | null = null;
+  let pending: Promise<SmtpEmailProvider> | null = null;
+  const get = async (): Promise<SmtpEmailProvider> => {
+    if (cached) return cached;
+    if (pending) return pending;
+    pending = SmtpEmailProvider.create({
+      connectionUrl,
+      fromAddress: from,
+      webBaseUrl,
+    }).then((p) => {
+      cached = p;
+      pending = null;
+      return p;
+    });
+    return pending;
+  };
+  return {
+    providerName: 'smtp',
+    isSimulated: false,
+    async sendVerificationEmail(params) {
+      const p = await get();
+      await p.sendVerificationEmail(params);
+    },
+    async sendPasswordResetEmail(params) {
+      const p = await get();
+      await p.sendPasswordResetEmail(params);
+    },
+  };
+}
+
+function buildGoogleVerifierFromEnv(useReal: boolean): GoogleOAuthVerifier {
+  const clientId = (process.env['GOOGLE_CLIENT_ID'] ?? '').trim();
+  if (useReal && clientId.length > 0) {
+    return new GoogleJwksOAuthVerifier(
+      clientId,
+      process.env['GOOGLE_HOSTED_DOMAIN']?.trim() || undefined,
+    );
+  }
+  return new SimulatedGoogleOAuthVerifier({ allowSimulatedTokens: !useReal });
+}
+
+function buildCaptchaVerifierFromEnv(useReal: boolean): CaptchaVerifier {
+  const provider = (process.env['CAPTCHA_PROVIDER'] ?? 'disabled') as 'disabled' | 'turnstile';
+  if (useReal && provider === 'turnstile') {
+    const secret = (process.env['CAPTCHA_SECRET'] ?? '').trim();
+    return new TurnstileCaptchaVerifier(secret);
+  }
+  return new SimulatedCaptchaVerifier({
+    requireToken: provider === 'turnstile',
+  });
 }

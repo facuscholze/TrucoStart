@@ -1,5 +1,5 @@
 import type { GameMode, MatchOutcome, RulesetCode } from '@truco/shared';
-import { sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -58,6 +58,8 @@ export const tablesTable = pgTable(
   (t) => [
     index('tables_status_visibility_mode_idx').on(t.status, t.visibility, t.mode),
     index('tables_status_expires_idx').on(t.status, t.expiresAt),
+    index('tables_status_updated_idx').on(t.status, t.updatedAt),
+    index('tables_lobby_listing_idx').on(t.visibility, t.status, t.mode, desc(t.createdAt)),
   ],
 );
 
@@ -81,6 +83,9 @@ export const tableSeatsTable = pgTable(
     uniqueIndex('table_seats_table_user_uniq').on(t.tableId, t.userId),
     uniqueIndex('table_seats_one_active_per_user_uniq')
       .on(t.userId)
+      .where(sql`${t.isActive} = true`),
+    index('table_seats_table_active_idx')
+      .on(t.tableId)
       .where(sql`${t.isActive} = true`),
   ],
 );
@@ -117,6 +122,7 @@ export const matchPlayersTable = pgTable(
   (t) => [
     primaryKey({ columns: [t.matchId, t.seat] }),
     index('match_players_user_match_idx').on(t.userId, t.matchId),
+    index('match_players_user_started_idx').on(t.userId, desc(t.matchId)),
   ],
 );
 
@@ -131,7 +137,10 @@ export const matchEventsTable = pgTable(
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.matchId, t.seq] })],
+  (t) => [
+    primaryKey({ columns: [t.matchId, t.seq] }),
+    index('match_events_match_seq_idx').on(t.matchId, t.seq),
+  ],
 );
 
 export const reportsTable = pgTable(
@@ -166,6 +175,7 @@ export const reportsTable = pgTable(
   (t) => [
     index('reports_status_created_idx').on(t.status, t.createdAt),
     index('reports_target_status_idx').on(t.targetId, t.status),
+    index('reports_claimed_status_idx').on(t.claimedBy, t.status),
     uniqueIndex('reports_dedupe_open_uniq')
       .on(t.dedupeKey)
       .where(sql`${t.status} IN ('OPEN', 'IN_REVIEW')`),
@@ -190,6 +200,9 @@ export const sanctionsTable = pgTable(
   (t) => [
     index('sanctions_user_created_idx').on(t.userId, t.createdAt),
     index('sanctions_expires_idx').on(t.expiresAt),
+    index('sanctions_user_active_idx')
+      .on(t.userId, t.expiresAt)
+      .where(sql`${t.revokedAt} IS NULL`),
   ],
 );
 
@@ -210,7 +223,11 @@ export const auditLogsTable = pgTable(
     ip: varchar('ip', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('audit_logs_actor_created_idx').on(t.actorId, t.createdAt)],
+  (t) => [
+    index('audit_logs_actor_created_idx').on(t.actorId, t.createdAt),
+    index('audit_logs_created_idx').on(t.createdAt),
+    index('audit_logs_created_action_idx').on(desc(t.createdAt), t.action),
+  ],
 );
 
 /**

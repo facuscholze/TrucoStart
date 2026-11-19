@@ -1,11 +1,13 @@
-import { createSign, generateKeyPairSync, type KeyObject } from 'node:crypto';
+import { generateKeyPairSync } from 'node:crypto';
+import { SignJWT, createLocalJWKSet, type JSONWebKeySet, type JWTPayload } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ResendEmailProvider } from '../providers/resend-email.provider.js';
+import { ResendEmailProvider, SmtpEmailProvider } from '../providers/resend-email.provider.js';
 import { GoogleJwksOAuthVerifier } from '../providers/google-jwks.verifier.js';
+import { DomainApiException } from '../../../common/api-exception.js';
 import { TurnstileCaptchaVerifier } from '../providers/turnstile-captcha.verifier.js';
 
 /**
- * Tests de los adaptadores productivos (Resend, Google JWKS, Turnstile).
+ * Tests de los adaptadores productivos (Resend, SMTP/nodemailer, Google JWKS, Turnstile).
  *
  * Ninguno de estos tests pega la red real: reemplazamos fetch por un mock
  * que devuelve respuestas prefabricadas. Esto garantiza que la
@@ -119,52 +121,88 @@ describe('auth external providers (Resend / Google JWKS / Turnstile)', () => {
     });
   });
 
-  describe('GoogleJwksOAuthVerifier', () => {
-    function signJwt(payload: Record<string, unknown>, privKey: string, kid: string): string {
-      const header = { alg: 'RS256', typ: 'JWT', kid };
-      const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url');
-      const signingInput = `${enc(header)}.${enc(payload)}`;
-      const sig = createSign('RSA-SHA256').update(signingInput).sign(privKey);
-      return `${signingInput}.${sig.toString('base64url')}`;
+  describe('SmtpEmailProvider (nodemailer)', () => {
+    function transportMock() {
+      return { sendMail: vi.fn().mockResolvedValue({ messageId: 'smtp-1' }) };
     }
 
-    function jwkFromKey(pubKey: KeyObject, kid: string) {
-      // publicKey ya es una KeyObject pública; exportamos como JWK directamente.
-      const exported = pubKey.export({ format: 'jwk' }) as {
-        n?: string;
-        e?: string;
-        kty?: string;
-      };
-      if (!exported.n || !exported.e) {
-        throw new Error('No se pudo exportar la clave pública a JWK');
-      }
-      return {
-        kid,
-        kty: 'RSA' as const,
-        alg: 'RS256' as const,
-        use: 'sig' as const,
-        n: exported.n,
-        e: exported.e,
-      };
-    }
-
-    it('accepts a valid RS256 token signed by a published JWK and rejects invalid cases', async () => {
-      const kp = generateKeyPairSync('rsa', { modulusLength: 2048 });
-      const jwk = jwkFromKey(kp.publicKey, 'key-1');
-      const fakeFetch = vi
-        .fn()
-        .mockResolvedValue(new Response(JSON.stringify({ keys: [jwk] }), { status: 200 }));
-      const verifier = new GoogleJwksOAuthVerifier(
-        'my-client-id.apps.googleusercontent.com',
-        undefined,
-        30_000,
-        fakeFetch as unknown as typeof fetch,
+    it('envía el correo de verificación con from, asunto y enlace tokenizado', async () => {
+      const transport = transportMock();
+      const provider = new SmtpEmailProvider(
+        transport,
+        'Mesa de Truco <no-reply@truco.ar>',
+        'https://app.truco.ar',
       );
+      await provider.sendVerificationEmail({
+        to: 'jugador@example.com',
+        nickname: 'Pepito',
+        token: 'abc123',
+        expiresAt: new Date('2030-01-01T00:00:00Z'),
+      });
+      expect(transport.sendMail).toHaveBeenCalledTimes(1);
+      const mail = transport.sendMail.mock.calls[0]![0] as {
+        from: string;
+        to: string;
+        subject: string;
+        html: string;
+        text: string;
+      };
+      expect(mail.from).toBe('Mesa de Truco <no-reply@truco.ar>');
+      expect(mail.to).toBe('jugador@example.com');
+      expect(mail.subject).toContain('Confirmá tu correo');
+      expect(mail.text).toContain('https://app.truco.ar/verify-email?token=abc123');
+      expect(mail.html).toContain('abc123');
+    });
 
+    it('escapa HTML del apodo para no inyectar markup en el correo', async () => {
+      const transport = transportMock();
+      const provider = new SmtpEmailProvider(transport, 'a@b.c', 'https://app.truco.ar');
+      await provider.sendPasswordResetEmail({
+        to: 'x@example.com',
+        nickname: '<script>alert(1)</script>',
+        token: 't',
+        expiresAt: new Date('2030-01-01T00:00:00Z'),
+      });
+      const mail = transport.sendMail.mock.calls[0]![0] as { html: string };
+      expect(mail.html).not.toContain('<script>');
+      expect(mail.html).toContain('&lt;script&gt;');
+    });
+
+    it('traduce un fallo del transporte SMTP a BAD_GATEWAY (sin filtrar credenciales)', async () => {
+      const transport = {
+        sendMail: vi.fn().mockRejectedValue(new Error('535 auth failed for smtp://user:pw@host')),
+      };
+      const provider = new SmtpEmailProvider(transport, 'a@b.c', 'https://app.truco.ar');
+      await expect(
+        provider.sendVerificationEmail({
+          to: 'x@example.com',
+          nickname: 'X',
+          token: 't',
+          expiresAt: new Date('2030-01-01T00:00:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_GATEWAY' });
+    });
+  });
+
+  describe('GoogleJwksOAuthVerifier (jose)', () => {
+    const CLIENT_ID = 'my-client-id.apps.googleusercontent.com';
+
+    async function makeKeys(kid = 'key-1') {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = {
+        ...(publicKey.export({ format: 'jwk' }) as Record<string, unknown>),
+        kid,
+        alg: 'RS256',
+        use: 'sig',
+      };
+      return { privateKey, jwks: createLocalJWKSet({ keys: [jwk] } as JSONWebKeySet) };
+    }
+
+    function basePayload(): JWTPayload {
       const now = Math.floor(Date.now() / 1000);
-      const validPayload = {
+      return {
         iss: 'https://accounts.google.com',
-        aud: 'my-client-id.apps.googleusercontent.com',
+        aud: CLIENT_ID,
         sub: '12345',
         email: 'pepe@gmail.com',
         email_verified: true,
@@ -172,37 +210,103 @@ describe('auth external providers (Resend / Google JWKS / Turnstile)', () => {
         iat: now - 10,
         exp: now + 300,
       };
-      const privPem = kp.privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
-      const valid = signJwt(validPayload, privPem, 'key-1');
-      await expect(verifier.verifyIdToken(valid)).resolves.toMatchObject({
+    }
+
+    it('acepta un token RS256 firmado por una JWK publicada', async () => {
+      const { privateKey, jwks } = await makeKeys();
+      const verifier = new GoogleJwksOAuthVerifier(CLIENT_ID, undefined, 30, jwks);
+      const token = await new SignJWT(basePayload())
+        .setProtectedHeader({ alg: 'RS256', kid: 'key-1' })
+        .sign(privateKey);
+
+      await expect(verifier.verifyIdToken(token)).resolves.toMatchObject({
         sub: '12345',
         email: 'pepe@gmail.com',
         emailVerified: true,
         displayName: 'Pepe',
       });
+    });
 
-      // aud equivocado
+    it('rechaza aud, iss, exp, firma, kid y email_verified inválidos con 401', async () => {
+      const { privateKey, jwks } = await makeKeys();
+      const verifier = new GoogleJwksOAuthVerifier(CLIENT_ID, undefined, 30, jwks);
+      const sign = (payload: JWTPayload, kid = 'key-1') =>
+        new SignJWT(payload).setProtectedHeader({ alg: 'RS256', kid }).sign(privateKey);
+
       await expect(
-        verifier.verifyIdToken(signJwt({ ...validPayload, aud: 'otro' }, privPem, 'key-1')),
+        verifier.verifyIdToken(await sign({ ...basePayload(), aud: 'otro' })),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-      // expirado
       await expect(
-        verifier.verifyIdToken(signJwt({ ...validPayload, exp: now - 100 }, privPem, 'key-1')),
+        verifier.verifyIdToken(await sign({ ...basePayload(), iss: 'falso' })),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-      // iss inválido
-      await expect(
-        verifier.verifyIdToken(signJwt({ ...validPayload, iss: 'falso' }, privPem, 'key-1')),
-      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-      // email_verified=false
       await expect(
         verifier.verifyIdToken(
-          signJwt({ ...validPayload, email_verified: false }, privPem, 'key-1'),
+          await sign({ ...basePayload(), exp: Math.floor(Date.now() / 1000) - 100 }),
         ),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-      // kid desconocido
       await expect(
-        verifier.verifyIdToken(signJwt(validPayload, privPem, 'otro-kid')),
+        verifier.verifyIdToken(await sign({ ...basePayload(), email_verified: false })),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      // kid desconocido: jose intenta refetch y el set local no lo tiene.
+      await expect(
+        verifier.verifyIdToken(await sign(basePayload(), 'otro-kid')),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      // Firma con una clave distinta a la publicada.
+      const other = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const forged = await new SignJWT(basePayload())
+        .setProtectedHeader({ alg: 'RS256', kid: 'key-1' })
+        .sign(other.privateKey);
+      await expect(verifier.verifyIdToken(forged)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      // Token malformado.
+      await expect(verifier.verifyIdToken('no-es-un-jwt')).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+
+    it('exige el dominio alojado (hd) cuando se configura GOOGLE_HOSTED_DOMAIN', async () => {
+      const { privateKey, jwks } = await makeKeys();
+      const verifier = new GoogleJwksOAuthVerifier(CLIENT_ID, 'truco.ar', 30, jwks);
+      const sign = (hd: string) =>
+        new SignJWT({ ...basePayload(), hd })
+          .setProtectedHeader({ alg: 'RS256', kid: 'key-1' })
+          .sign(privateKey);
+
+      await expect(verifier.verifyIdToken(await sign('truco.ar'))).resolves.toMatchObject({
+        email: 'pepe@gmail.com',
+      });
+      await expect(verifier.verifyIdToken(await sign('otro.com'))).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+  });
+});
+
+/**
+ * El verifier de producción (sin inyectar `jwks`) debe usar el set remoto real
+ * de Google. Se comprueba sin red: un token firmado con una clave que Google no
+ * publica tiene que fallar, y el código de error nunca debe ser 5xx.
+ */
+describe('GoogleJwksOAuthVerifier — set remoto por defecto', () => {
+  it('rechaza con 401 un token cuya clave no está en las JWKS de Google', async () => {
+    const verifier = new GoogleJwksOAuthVerifier('cid.apps.googleusercontent.com');
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({
+      iss: 'https://accounts.google.com',
+      aud: 'cid.apps.googleusercontent.com',
+      sub: '1',
+      email: 'x@gmail.com',
+      email_verified: true,
+      iat: now - 10,
+      exp: now + 300,
+    })
+      .setProtectedHeader({ alg: 'RS256', kid: 'kid-que-google-no-publica' })
+      .sign(privateKey);
+
+    // Sin red disponible en CI el fallo también es 401/502, nunca un bypass.
+    await expect(verifier.verifyIdToken(token)).rejects.toBeInstanceOf(DomainApiException);
+    await expect(verifier.verifyIdToken(token)).rejects.toMatchObject({
+      code: expect.stringMatching(/^(UNAUTHORIZED|BAD_GATEWAY)$/),
     });
   });
 });

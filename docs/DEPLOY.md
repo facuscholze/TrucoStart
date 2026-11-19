@@ -197,6 +197,11 @@ al VPS (security group o DOCKER-USER). Ver [RUNBOOKS.md](./RUNBOOKS.md#incidente
 ### Fase 6 — Verificación
 
 ```bash
+# Un solo comando: 23 comprobaciones de infraestructura, legal y flujos.
+# (Detalle y diagnóstico en § "Smoke test de staging".)
+node scripts/smoke-staging.mjs --app-url https://app.truco.ar
+
+# Chequeos puntuales, si algo falla:
 curl -fsS https://api.truco.ar/v1/health
 curl -fsS https://game.truco.ar/health
 curl -fsSI https://app.truco.ar | grep -i strict-transport-security
@@ -375,9 +380,88 @@ IP registrada por la API sea la del socket, no la falsa. Además
 
 ---
 
+## Smoke test de staging
+
+`scripts/smoke-staging.mjs` responde en un comando si el despliegue está vivo y si
+los flujos centrales funcionan de punta a punta. Es lo primero que hay que correr
+después de cada deploy y antes de anunciar el entorno.
+
+### Qué verifica (23 comprobaciones)
+
+| Grupo           | Qué mira                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| Infraestructura | `/v1/health`, `/v1/ready` de la API; `/health` y `/ready` del game-server                           |
+| Web             | Que `app.<dominio>` sirve HTML y que los **cuatro documentos legales** responden                    |
+| Estado legal    | `GET /v1/legal`: edad mínima válida (13–21) y `draft === true`                                      |
+| Consentimiento  | Que el alta **sin** consentimiento sigue devolviendo 400 en el entorno real                         |
+| Registro        | Alta con consentimiento (201) y sesión válida en `/v1/me`                                           |
+| Partida vs. bot | Crea mesa de práctica, queda consultable y el room se provisiona                                    |
+| Reporte         | Denuncia de un jugador a otro con estado `OPEN`                                                     |
+| Regla 13        | Sondea `/v1/wallet`, `/v1/deposits`, `/v1/withdrawals`, `/v1/payments`: ninguno puede responder 200 |
+| Cabeceras       | `X-Content-Type-Options` y protección contra clickjacking                                           |
+
+### Topología: el entorno se publica por SUBDOMINIOS
+
+El `Caddyfile` (`infra/caddy/Caddyfile`) enruta por subdominio, **no** por prefijo
+de ruta:
+
+```
+app.<dominio>    -> web (SPA)
+api.<dominio>    -> API REST
+game.<dominio>   -> game-server
+admin.<dominio>  -> panel (no lo prueba este script)
+```
+
+Por eso el script pide `--app-url` y **deriva** `api.` y `game.` del mismo dominio.
+Si el entorno usa otro esquema (un dominio único, un túnel), pasá las tres URLs.
+
+### Uso
+
+```bash
+# Lo normal: deriva api. y game. de app.
+node scripts/smoke-staging.mjs --app-url https://app.staging.truco.ar
+
+# URLs explícitas (dominio único o túnel local)
+node scripts/smoke-staging.mjs \
+  --app-url   http://127.0.0.1:4320 \
+  --api-url   http://127.0.0.1:4310 \
+  --game-url  http://127.0.0.1:4311
+
+# Para consumir desde CI (sale JSON)
+node scripts/smoke-staging.mjs --app-url https://app.staging.truco.ar --json
+```
+
+- **Exit 0** sólo si pasan las 23. Si algo falla, **exit 1** y dice cuántas.
+- Exit 2 si falta la URL (error de invocación, no del entorno).
+- No imprime tokens ni cookies. Crea cuentas con prefijo `smoke-` y correo
+  `@smoke.invalid` para poder identificarlas y purgarlas.
+- No toca endpoints de administración ni de dinero (no existen).
+
+### Evidencia de que funciona
+
+Se ejecutó contra tres servicios **reales** levantados localmente (API sobre
+PGlite, game-server compilado y SPA compilada): **23/23 OK**. Con el game-server
+apagado devuelve **exit 1** con 5 fallas, así que no reporta verde por omisión.
+
+> Pendiente de infraestructura real: correrlo contra `https://app.staging.<tu-dominio>`
+> con DNS y TLS activos. Hasta entonces está verificado el script, no el entorno.
+
+### Si falla
+
+| Síntoma                                          | Causa probable                                               |
+| ------------------------------------------------ | ------------------------------------------------------------ |
+| `API responde /v1/health` falla                  | API abajo o Caddy sin ruta; mirá `docker compose ps`         |
+| `web sirve HTML` falla con 502                   | El contenedor `web` está arriba pero nginx no tiene el build |
+| `game-server responde /health` falla             | Socket.IO no arrancó o Redis no conecta                      |
+| `registro sin consentimiento` devuelve 201       | **Grave**: la validación legal no está desplegada            |
+| `estado legal sigue marcado como borrador` falla | Se publicó como definitivo sin revisión legal: revertir      |
+| `no existen endpoints de dinero real` falla      | Regla 13 violada en el entorno: revisar de inmediato         |
+
 ## Verificación post-deploy
 
 ```bash
+node scripts/smoke-staging.mjs --app-url https://app.truco.ar   # 23/23 esperado
+
 curl -fsS https://api.truco.ar/v1/health          # {"status":"ok"}
 curl -fsS https://game.truco.ar/health
 curl -fsSI https://app.truco.ar | grep -iE 'strict-transport-security|x-content-type'

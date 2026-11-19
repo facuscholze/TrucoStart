@@ -29,6 +29,9 @@
  * Salida: exit 0 si todas las comprobaciones pasan.
  */
 
+import http from 'node:http';
+import https from 'node:https';
+
 const args = process.argv.slice(2);
 function arg(name, fallback) {
   const index = args.indexOf(name);
@@ -39,7 +42,7 @@ const baseUrl = arg('--url', 'http://127.0.0.1:8080');
 const hostHeader = arg('--host', null);
 // El certificado interno de Caddy no es válido para 127.0.0.1; sólo se relaja en
 // pruebas locales/CI (TLS contra el borde, nunca en producción).
-if (args.includes('--insecure')) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const insecure = args.includes('--insecure');
 
 const FORGED = {
   'X-Forwarded-For': '203.0.113.9',
@@ -62,18 +65,52 @@ function check(condition, message, detail) {
 const target = new URL('/v1/health', baseUrl);
 console.log(`\nObjetivo: ${target.href}${hostHeader ? ` (Host: ${hostHeader})` : ''}`);
 
-/** GET con cabeceras falsificadas; devuelve el JSON o null. */
-async function getHealth(extraHeaders = {}) {
-  const headers = { ...FORGED, ...extraHeaders };
+/**
+ * GET con `http`/`https` nativo en vez de `fetch`: el estándar fetch prohíbe
+ * fijar la cabecera `Host` (necesaria para enrutar por subdominio en Caddy) y la
+ * descarta en silencio.
+ */
+function request(url, extraHeaders = {}) {
+  const isHttps = url.protocol === 'https:';
+  const transport = isHttps ? https : http;
+  const headers = { ...FORGED, ...extraHeaders, Accept: 'application/json' };
   if (hostHeader) headers.Host = hostHeader;
-  const res = await fetch(target, { headers, redirect: 'manual' });
-  const text = await res.text();
-  if (!res.ok) return { status: res.status, body: null, text };
-  try {
-    return { status: res.status, body: JSON.parse(text), text };
-  } catch {
-    return { status: res.status, body: null, text };
-  }
+  return new Promise((resolve, reject) => {
+    const req = transport.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: 'GET',
+        headers,
+        // Si se pasa `--host`, se respeta ese Host; si no, Node agrega el del URL.
+        setHost: !hostHeader,
+        ...(isHttps ? { rejectUnauthorized: !insecure } : {}),
+      },
+      (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          let body = null;
+          try {
+            body = JSON.parse(data);
+          } catch {
+            body = null;
+          }
+          resolve({ status: res.statusCode ?? 0, body, text: data, headers: res.headers });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/** GET con cabeceras falsificadas; devuelve {status, body, text}. */
+async function getHealth(extraHeaders = {}) {
+  return request(target, extraHeaders);
 }
 
 const first = await getHealth();
@@ -124,8 +161,8 @@ check(
 );
 
 // 6. Idempotencia de un pedido limpio: igual resultado sin cabeceras falsas.
-const clean = await fetch(target, { headers: hostHeader ? { Host: hostHeader } : {} });
-const cleanBody = await clean.json().catch(() => null);
+const clean = await request(target, {});
+const cleanBody = clean.body;
 check(
   cleanBody?.clientIp === first.body.clientIp,
   'Un pedido sin cabeceras falsas resuelve el mismo clientIp (no hay cabecera que lo altere).',

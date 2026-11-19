@@ -292,3 +292,114 @@ jobs:
 
       - name: Run slow benchmarks and mass simulations
         run: pnpm --filter @truco/engine test:slow
+
+  # Perímetro real (M8c): levanta el compose de staging con Caddy delante y
+  # demuestra, contra el stack real, que un cliente con cabeceras falsificadas no
+  # puede cambiar la IP que ve la aplicación, y que sólo Caddy publica puertos.
+  perimeter-smoke:
+    name: Perímetro (Caddy + IP real) sobre el compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `.env` de CI: sin secretos reales, credenciales efímeras para los
+      # contenedores. `env_file: ../.env` es obligatorio para Compose.
+      - name: Prepare CI env file
+        run: |
+          cp .env.example .env
+          cat >> .env <<'EOF'
+          NODE_ENV=staging
+          POSTGRES_USER=truco_perimeter
+          POSTGRES_PASSWORD=ci_perimeter_password
+          POSTGRES_DB=truco_perimeter
+          SESSION_SECRET=ci_perimeter_session_secret_at_least_32_chars
+          SEED_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          INTERNAL_RPC_SECRET=ci_perimeter_internal_secret_at_least_32_chars
+          COOKIE_DOMAIN=localhost
+          CORS_ORIGINS=http://localhost:5173
+          ADMIN_ORIGIN=http://localhost:5174
+          DATABASE_URL=postgres://truco_perimeter:ci_perimeter_password@postgres:5432/truco_perimeter
+          REDIS_URL=redis://redis:6379
+          EMAIL_PROVIDER=console
+          CAPTCHA_PROVIDER=disabled
+          EOF
+
+      - name: Build images
+        run: docker compose -f infra/docker-compose.staging.yml build
+
+      - name: Start perimeter stack (Caddy on 18080/18443)
+        run: |
+          # Puertos altos para no necesitar root; APP_DOMAIN=localhost hace que
+          # Caddy emita el certificado INTERNO en vez de intentar ACME contra un
+          # dominio que no existe en CI.
+          export HTTP_PORT=18080 HTTPS_PORT=18443 APP_DOMAIN=localhost
+          export TRUSTED_PROXY_CIDRS='173.245.48.0/20'
+          docker compose -f infra/docker-compose.staging.yml up -d --wait --wait-timeout 240
+          docker compose -f infra/docker-compose.staging.yml ps
+
+      # La prueba central: cabeceras falsas contra la API REAL, a través de Caddy.
+      - name: Client IP cannot be spoofed (through Caddy)
+        run: |
+          node scripts/test-client-ip-spoofing.mjs \
+            --url https://127.0.0.1:18443 --host api.localhost --insecure
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+
+      # Comprobación directa en el borde: el mismo pedido a través de Caddy con
+      # cabeceras falsas y sin ellas devuelve el mismo clientIp.
+      - name: Forged headers do not change clientIp (edge evidence)
+        run: |
+          curl -sk https://127.0.0.1:18443/v1/health -H 'Host: api.localhost' \
+            | tee /tmp/clean.json
+          curl -sk https://127.0.0.1:18443/v1/health -H 'Host: api.localhost' \
+            -H 'X-Forwarded-For: 203.0.113.9' \
+            -H 'CF-Connecting-IP: 203.0.113.9' | tee /tmp/forged.json
+          clean=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/clean.json")).clientIp)')
+          forged=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/forged.json")).clientIp)')
+          echo "clientIp sin cabeceras: ${clean}; con cabeceras falsas: ${forged}"
+          test "${clean}" = "${forged}" || { echo 'FALLO: la IP cambió con cabeceras falsas'; exit 1; }
+          test "${forged}" != '203.0.113.9' || { echo 'FALLO: se aceptó la IP falsificada'; exit 1; }
+
+      # Sólo Caddy publica puertos: cualquier upstream expuesto es un fallo.
+      - name: Only Caddy publishes ports
+        run: |
+          docker compose -f infra/docker-compose.staging.yml ps --format json > /tmp/ps.jsonl
+          node -e '
+            const fs = require("fs");
+            const lines = fs.readFileSync("/tmp/ps.jsonl","utf8").trim().split(/\n/).filter(Boolean);
+            const published = [];
+            for (const line of lines) {
+              const svc = JSON.parse(line);
+              for (const p of svc.Publishers ?? []) {
+                if (p.PublishedPort) published.push(`${svc.Service}:${p.PublishedPort}`);
+              }
+            }
+            console.log("puertos publicados:", published.join(", ") || "(ninguno)");
+            const bad = published.filter((e) => !/^caddy:(18080|18443)$/.test(e));
+            if (bad.length) { console.error("FALLO: puertos de upstream publicados:", bad); process.exit(1); }
+          '
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.staging.yml logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f infra/docker-compose.staging.yml down -v

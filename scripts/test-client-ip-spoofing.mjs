@@ -19,8 +19,13 @@
  * Uso:
  *   node scripts/test-client-ip-spoofing.mjs                         # http://127.0.0.1:8080
  *   node scripts/test-client-ip-spoofing.mjs --url http://127.0.0.1:18080 --host api.localhost
+ *   node scripts/test-client-ip-spoofing.mjs --url https://127.0.0.1:18443 --insecure
  *
- * Con --host se manda la cabecera Host de un subdominio (Caddy enruta por Host).
+ * Opciones:
+ *   --url <baseUrl>   base (default http://127.0.0.1:8080)
+ *   --host <name>     cabecera Host de un subdominio (Caddy enruta por Host)
+ *   --insecure        acepta el certificado interno de Caddy (sólo CI/local)
+ *
  * Salida: exit 0 si todas las comprobaciones pasan.
  */
 
@@ -32,6 +37,9 @@ function arg(name, fallback) {
 
 const baseUrl = arg('--url', 'http://127.0.0.1:8080');
 const hostHeader = arg('--host', null);
+// El certificado interno de Caddy no es válido para 127.0.0.1; sólo se relaja en
+// pruebas locales/CI (TLS contra el borde, nunca en producción).
+if (args.includes('--insecure')) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const FORGED = {
   'X-Forwarded-For': '203.0.113.9',

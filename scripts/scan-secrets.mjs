@@ -83,7 +83,8 @@ const RULES = [
     // referencias se resuelven en runtime contra .env y no contienen secreto.
     pattern: /\b[a-z][a-z0-9+.-]*:\/\/(?!\$\{)[^\s:@/]+:(?!\$\{)[^\s:@/]{6,}@/i,
     allow:
-      /\b(?:localhost|127\.0\.0\.1|postgres(?:ql)?:\/\/truco_dev:[a-z_]+@localhost|postgres(?:ql)?:\/\/truco_staging:ci_staging_password@postgres)/i,
+      // Credenciales efímeras de contenedores en CI (no existen fuera del runner).
+      /\b(?:localhost|127\.0\.0\.1|postgres(?:ql)?:\/\/truco_dev:[a-z_]+@localhost|postgres(?:ql)?:\/\/truco_staging:ci_staging_password@postgres|postgres(?:ql)?:\/\/truco_perimeter:ci_perimeter_password@postgres)/i,
   },
   {
     id: 'env-secret-assignment',

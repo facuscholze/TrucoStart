@@ -5,6 +5,9 @@
  * Uso:  node scripts/scan-secrets.mjs [--all]
  *   --all  incluye archivos ignorados por git que estén en el disco (más lento).
  *
+ * Variable SCAN_SECRETS_ROOT: raíz a escanear (por defecto la del monorepo).
+ * `scripts/test-scan-secrets.mjs` la usa para verificar las reglas contra señuelos.
+ *
  * Reglas: firmas conocidas (claves privadas, AWS, Stripe, Google, JWTs), credenciales
  * embebidas en URLs y asignaciones `*_SECRET=…` con valores que no son placeholders.
  * Los tests, docs y `.env.example` se excluyen porque ahí los valores son ficticios.
@@ -14,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-const ROOT = path.resolve(import.meta.dirname, '..');
+const ROOT = path.resolve(process.env.SCAN_SECRETS_ROOT ?? path.resolve(import.meta.dirname, '..'));
 const MAX_FILE_BYTES = 512 * 1024;
 
 const EXCLUDED_PATTERNS = [

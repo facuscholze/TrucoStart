@@ -76,17 +76,24 @@ const DECOYS = [
     name: 'credentials-in-url',
     rule: 'credentials-in-url',
     file: 'src/db.ts',
-    content: `const url = "postgres://admin:Xk9mP2qL7vR4@db.internal:5432/app";`,
+    content: `const url = "${join('postgres://admin:', 'Xk9mP2qL7vR4', '@db.internal:5432/app')}";`,
   },
   {
     name: 'env-secret-assignment',
     rule: 'env-secret-assignment',
     file: 'src/config.ts',
-    content: `const SESSION_SECRET = "Zq8vN3xT5wR2yK7mL4pJ9hG6fD1sA0bC";`,
+    // El `(secreto)` del nombre no debe eximir el valor: el marcador se evalúa
+    // sobre el VALOR, no sobre el nombre del señuelo.
+    content: `const SESSION_${join('SEC')}RET = "Zq8vN3xT5wR2yK7mL4pJ9hG6fD1sA0bC";`,
   },
 ];
 
-/** Contenido que NO debe disparar ninguna regla. */
+/**
+ * Placeholders que NO deben disparar NINGUNA regla. Incluye secretos ficticios
+ * dentro de tests (en test/e2e/perf la heurística exige que el valor lleve un
+ * marcador obvio: `test`, `fixture`, `dev`…). Vivir en un test ya no es excusa
+ * para tener una clave con formato real.
+ */
 const PLACEHOLDERS = [
   {
     file: '.env.example',
@@ -103,10 +110,39 @@ const PLACEHOLDERS = [
   },
   { file: 'src/local.ts', content: 'const PASSWORD = "change_me_local_pg_password";\n' },
   { file: 'src/compose.ts', content: 'POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}\n' },
-  { file: 'docs/example.md', content: 'RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxx\n' },
+  { file: 'docs/example.md', content: 'RESEND_API_KEY=<tu-api-key-de-resend>\n' },
   {
     file: 'src/tests/fixture.spec.ts',
-    content: 'const RESEND_API_KEY = "re_9kLm3nOp5qRs7tUv1wXy";\n',
+    content: 'const SESSION_SECRET = "secreto-de-prueba-fixture-minimo-32-chars!!";\n',
+  },
+  {
+    file: 'e2e/helpers.ts',
+    content: 'const INTERNAL_RPC_SECRET = "e2e-fixture-internal-secret-32-chars!!";\n',
+  },
+];
+
+/**
+ * Casos que ahora SÍ deben detectarse y antes pasaban inadvertidos: un valor con
+ * forma de secreto real dentro de un test, en docs o en `.env.example`.
+ */
+const NEWLY_CAUGHT = [
+  {
+    name: 'secreto real dentro de un test',
+    rule: 'resend-key',
+    file: 'src/tests/leak.spec.ts',
+    content: `const RESEND_API_KEY = "${join('re', '_9kLm3nOp5qRs7tUv1wXy')}";`,
+  },
+  {
+    name: 'clave de proveedor en la documentación',
+    rule: 'aws-access-key',
+    file: 'docs/deploy-notes.md',
+    content: `aws_access_key_id = "${join('AKIA', 'IOSFODNN7EXAMPL', 'E')}"`,
+  },
+  {
+    name: 'clave de proveedor en .env.example',
+    rule: 'google-api-key',
+    file: 'config/.env.example',
+    content: `GOOGLE_API_KEY=${join('AIza', 'SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q')}`,
   },
 ];
 
@@ -164,7 +200,7 @@ function expect(condition, message) {
 const root = mkdtempSync(path.join(tmpdir(), 'truco-secrets-'));
 try {
   git(['init', '-q'], root);
-  writeFiles(root, [...DECOYS, ...PLACEHOLDERS]);
+  writeFiles(root, [...DECOYS, ...PLACEHOLDERS, ...NEWLY_CAUGHT]);
   git(['add', '-A'], root);
 
   const result = runScanner(root);
@@ -176,16 +212,27 @@ try {
       `detecta el señuelo «${decoy.name}» (${decoy.rule})`,
     );
   }
+  for (const caught of NEWLY_CAUGHT) {
+    expect(
+      result.stderr.includes(caught.file) && result.stderr.includes(`[${caught.rule}]`),
+      `detecta ${caught.name} (${caught.rule}) — no puede esconderse en tests/docs`,
+    );
+  }
   for (const placeholder of PLACEHOLDERS) {
     expect(
-      !result.stderr.includes(`${placeholder.file}:`),
+      !new RegExp(`^\\s*${placeholder.file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'm').test(
+        result.stderr,
+      ),
       `ignora el placeholder legítimo ${placeholder.file}`,
     );
   }
 
-  // Árbol limpio: no debe fallar.
-  rmSync(path.join(root, 'src'), { recursive: true, force: true });
-  rmSync(path.join(root, 'docs'), { recursive: true, force: true });
+  // Árbol limpio: no debe fallar. Se borra TODO lo escrito (incluidos los
+  // directorios de fixtures) y se deja sólo un archivo inocuo.
+  for (const dir of ['src', 'docs', 'e2e', 'config']) {
+    rmSync(path.join(root, dir), { recursive: true, force: true });
+  }
+  rmSync(path.join(root, '.env.example'), { force: true });
   writeFiles(root, [{ file: 'src/ok.ts', content: 'export const hello = "world";\n' }]);
   git(['add', '-A'], root);
   const clean = runScanner(root);

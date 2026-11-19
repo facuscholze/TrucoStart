@@ -148,7 +148,7 @@ ACME_EMAIL=ops@truco.ar
 POSTGRES_USER=truco_staging
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=truco_staging
-DATABASE_URL=postgres://truco_staging:<pass>@postgres:5432/truco_staging
+DATABASE_URL=postgres://truco_staging:${POSTGRES_PASSWORD}@postgres:5432/truco_staging
 REDIS_URL=redis://redis:6379
 
 # Secretos (openssl rand -hex 32)

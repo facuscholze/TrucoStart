@@ -395,23 +395,42 @@ jobs:
         env:
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
 
-      # Comprobación directa en el borde: el mismo pedido a través de Caddy con
-      # cabeceras falsas y sin ellas devuelve el mismo clientIp.
+      # Evidencia de borde (valores explícitos): el mismo pedido con y sin
+      # cabeceras falsas devuelve el mismo clientIp. Usa https nativo por la misma
+      # razón que la prueba anterior (fetch descarta Host) y no depende de curl.
       - name: Forged headers do not change clientIp (edge evidence)
         run: |
-          curl -sk https://127.0.0.1:18443/v1/health -H 'Host: api.localhost' \
-            | tee /tmp/clean.json
-          curl -sk https://127.0.0.1:18443/v1/health -H 'Host: api.localhost' \
-            -H 'X-Forwarded-For: 203.0.113.9' \
-            -H 'CF-Connecting-IP: 203.0.113.9' | tee /tmp/forged.json
-          clean=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/clean.json")).clientIp)')
-          forged=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/forged.json")).clientIp)')
-          echo "clientIp sin cabeceras: ${clean}; con cabeceras falsas: ${forged}"
-          if [ "${clean}" != "${forged}" ] || [ "${forged}" = '203.0.113.9' ]; then
-            echo "FALLO: clean=${clean} forged=${forged}"
-            echo '::error title=Spoofing de IP en el borde::la IP cambió con cabeceras falsas'
-            exit 1
-          fi
+          node --input-type=module -e '
+            import https from "node:https";
+            const get = (extra) =>
+              new Promise((resolve, reject) => {
+                const req = https.request(
+                  { host: "127.0.0.1", port: 18443, path: "/v1/health", method: "GET",
+                    hostname: "127.0.0.1", rejectUnauthorized: false, setHost: false,
+                    headers: { Host: "api.localhost", Accept: "application/json", ...extra } },
+                  (res) => { let d = ""; res.setEncoding("utf8");
+                    res.on("data", (c) => (d += c));
+                    res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(d) })); },
+                );
+                req.on("error", reject);
+                req.end();
+              });
+            const clean = await get({});
+            const forged = await get({
+              "X-Forwarded-For": "203.0.113.9",
+              "CF-Connecting-IP": "203.0.113.9",
+              "X-Real-IP": "203.0.113.9",
+            });
+            console.log(`sin cabeceras: ${clean.body.clientIp} | con cabeceras falsas: ${forged.body.clientIp}`);
+            if (clean.body.clientIp !== forged.body.clientIp) {
+              console.log("::error title=Spoofing de IP en el borde::la IP cambió con cabeceras falsas");
+              process.exit(1);
+            }
+            if (forged.body.clientIp === "203.0.113.9") {
+              console.log("::error title=Spoofing de IP en el borde::se aceptó la IP falsificada");
+              process.exit(1);
+            }
+          '
 
       # Sólo Caddy publica puertos: cualquier upstream expuesto es un fallo.
       - name: Only Caddy publishes ports

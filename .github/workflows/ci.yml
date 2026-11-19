@@ -80,6 +80,11 @@ jobs:
       - name: Scan tracked files for secrets
         run: node scripts/scan-secrets.mjs
 
+      # Verifica que las reglas detecten cada tipo de secreto (señuelos) y que no
+      # marquen placeholders legítimos (M8c).
+      - name: Test secrets scanner with decoys
+        run: node scripts/test-scan-secrets.mjs
+
       - name: Check formatting
         run: pnpm format:check
 
@@ -111,6 +116,29 @@ jobs:
           # `env_file: ../.env` es obligatorio para Compose: se genera desde el ejemplo.
           cp .env.example .env
           docker compose -f infra/docker-compose.staging.yml config -q
+
+      # Perímetro (M8c): Caddy es el único servicio publicado, TLS en 80/443 y
+      # trusted_proxies desde los rangos de Cloudflare.
+      - name: Check Caddyfile and client-IP policy (static)
+        run: |
+          node scripts/check-caddyfile.mjs
+          node scripts/verify-client-ip.mjs --caddyfile
+
+      - name: Validate Caddyfile syntax (official image)
+        run: |
+          docker run --rm \
+            -e APP_DOMAIN=ci.example.com \
+            -e ACME_EMAIL=ci@example.com \
+            -e TRUSTED_PROXY_CIDRS=173.245.48.0/20 \
+            -v "$PWD/infra/caddy:/etc/caddy" \
+            caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      # Reglas de firewall que limitan 80/443 a Cloudflare (DOCKER-USER).
+      - name: Lint Cloudflare firewall ruleset
+        run: |
+          command -v iptables-restore >/dev/null || sudo apt-get install -y iptables
+          sudo iptables-restore --test infra/firewall/docker-user-cloudflare.rules
+          echo 'Reglas DOCKER-USER válidas.'
 
   backup-restore:
     name: Respaldo y restauración de PostgreSQL

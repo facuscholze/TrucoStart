@@ -115,40 +115,31 @@ function buildEmailProviderFromEnv(): EmailProvider {
     return new ResendEmailProvider(process.env['RESEND_API_KEY'] ?? '', from, webBaseUrl);
   }
   if (kind === 'smtp') {
-    // SMTP se construye asincrónicamente; para simplificar el módulo
-    // construimos el transporte al primer envío (wrapper lazy).
+    // El transporte se construye (y se valida con verify()) en el primer envío:
+    // un SMTP caído no debe impedir que arranque la API.
     return lazySmtp(process.env['SMTP_CONNECTION_URL'] ?? '', from, webBaseUrl);
   }
   return new ConsoleEmailProvider({ logToStdout: process.env['NODE_ENV'] !== 'production' });
 }
 
+/**
+ * Envoltura perezosa sobre `SmtpEmailProvider.create()`: el handshake con el
+ * servidor SMTP (`verify()`) ocurre en el primer envío, no en el arranque.
+ */
 function lazySmtp(connectionUrl: string, from: string, webBaseUrl: string): EmailProvider {
-  let cached: SmtpEmailProvider | null = null;
   let pending: Promise<SmtpEmailProvider> | null = null;
-  const get = async (): Promise<SmtpEmailProvider> => {
-    if (cached) return cached;
-    if (pending) return pending;
-    pending = SmtpEmailProvider.create({
-      connectionUrl,
-      fromAddress: from,
-      webBaseUrl,
-    }).then((p) => {
-      cached = p;
-      pending = null;
-      return p;
-    });
+  const get = (): Promise<SmtpEmailProvider> => {
+    pending ??= SmtpEmailProvider.create({ connectionUrl, fromAddress: from, webBaseUrl });
     return pending;
   };
   return {
     providerName: 'smtp',
     isSimulated: false,
     async sendVerificationEmail(params) {
-      const p = await get();
-      await p.sendVerificationEmail(params);
+      await (await get()).sendVerificationEmail(params);
     },
     async sendPasswordResetEmail(params) {
-      const p = await get();
-      await p.sendPasswordResetEmail(params);
+      await (await get()).sendPasswordResetEmail(params);
     },
   };
 }

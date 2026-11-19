@@ -49,6 +49,24 @@ jobs:
           echo 'POSTGRES_DB=truco_staging' >> .env
           docker compose -f infra/docker-compose.staging.yml config -q
 
+      # Política perimetral: TLS en 80/443, sin puertos upstream publicados y
+      # trusted_proxies de Caddy desde los rangos de Cloudflare (M8c).
+      - name: Check Caddyfile and client-IP policy (static)
+        run: |
+          node scripts/check-caddyfile.mjs
+          node scripts/verify-client-ip.mjs --caddyfile
+
+      # Sintaxis real del Caddyfile con la imagen oficial. El bloque `servers`
+      # global se valida con el resto (no hay parciales).
+      - name: Validate Caddyfile syntax (official image)
+        run: |
+          docker run --rm \
+            -e APP_DOMAIN=staging.example.com \
+            -e ACME_EMAIL=ci@example.com \
+            -e TRUSTED_PROXY_CIDRS=173.245.48.0/20 \
+            -v "$PWD/infra/caddy:/etc/caddy" \
+            caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
       # Smoke test: levanta stack temporal, espera healthchecks, verifica
       # /v1/health, /health y una conexión WS mínima; luego apaga todo.
       - name: Smoke test (docker compose)
@@ -68,6 +86,8 @@ jobs:
           REDIS_URL=redis://redis:6379
           ADMIN_ORIGIN=http://localhost:5174
           EOF
+          # Puertos altos del runner para no chocar con nada y no necesitar root
+          # para 80/443. En el VPS el compose publica 80/443 (ver DEPLOY.md).
           docker compose -f infra/docker-compose.staging.yml up -d
           # Espera hasta 60s a que api y game-server queden healthy.
           for i in $(seq 1 30); do

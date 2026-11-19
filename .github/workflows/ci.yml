@@ -320,33 +320,46 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # `.env` de CI: sin secretos reales, credenciales efímeras para los
-      # contenedores. `env_file: ../.env` es obligatorio para Compose.
+      # contenedores. Compose interpola `${POSTGRES_USER}` desde el `.env` del
+      # DIRECTORIO DEL COMPOSE (infra/), así que hay que pasarlo con --env-file.
+      # Lo usa tanto la interpolación como `env_file: ../.env` de los servicios.
       - name: Prepare CI env file
         run: |
-          cp .env.example .env
-          cat >> .env <<'EOF'
+          cat > .env <<'EOF'
           NODE_ENV=staging
+          APP_DOMAIN=localhost
           POSTGRES_USER=truco_perimeter
           POSTGRES_PASSWORD=ci_perimeter_password
           POSTGRES_DB=truco_perimeter
+          DATABASE_URL=postgres://truco_perimeter:ci_perimeter_password@postgres:5432/truco_perimeter
+          REDIS_URL=redis://redis:6379
           SESSION_SECRET=ci_perimeter_session_secret_at_least_32_chars
           SEED_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           INTERNAL_RPC_SECRET=ci_perimeter_internal_secret_at_least_32_chars
           COOKIE_DOMAIN=localhost
           CORS_ORIGINS=http://localhost:5173
           ADMIN_ORIGIN=http://localhost:5174
-          DATABASE_URL=postgres://truco_perimeter:ci_perimeter_password@postgres:5432/truco_perimeter
-          REDIS_URL=redis://redis:6379
           EMAIL_PROVIDER=console
           CAPTCHA_PROVIDER=disabled
+          HTTP_PORT=18080
+          HTTPS_PORT=18443
+          TRUSTED_PROXY_CIDRS=173.245.48.0/20
           EOF
+
+      # Guarda contra la regresión que rompió este job: si la interpolación no
+      # resuelve las credenciales, postgres arranca sin usuario y todo falla.
+      - name: Assert compose interpolation resolves secrets from .env
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.staging.yml config \
+            | grep -q 'POSTGRES_USER: truco_perimeter' \
+            || { echo 'La interpolación de compose no toma POSTGRES_USER de .env'; exit 1; }
 
       # `--progress=plain` y anotaciones con el error: los logs del job no son
       # accesibles desde todas partes, las anotaciones del check-run sí.
       - name: Build images
         run: |
           set -o pipefail
-          if ! docker compose -f infra/docker-compose.staging.yml build --progress=plain > build.log 2>&1; then
+          if ! docker compose --env-file .env -f infra/docker-compose.staging.yml build --progress=plain > build.log 2>&1; then
             echo '--- últimas 60 líneas del build ---'
             tail -60 build.log
             message=$(tail -60 build.log | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
@@ -359,21 +372,20 @@ jobs:
           # Puertos altos para no necesitar root; APP_DOMAIN=localhost hace que
           # Caddy emita el certificado INTERNO en vez de intentar ACME contra un
           # dominio que no existe en CI.
-          export HTTP_PORT=18080 HTTPS_PORT=18443 APP_DOMAIN=localhost
-          export TRUSTED_PROXY_CIDRS='173.245.48.0/20'
-          if ! docker compose -f infra/docker-compose.staging.yml up -d --wait --wait-timeout 240 > up.log 2>&1; then
+          COMPOSE='docker compose --env-file .env -f infra/docker-compose.staging.yml'
+          if ! ${COMPOSE} up -d --wait --wait-timeout 240 > up.log 2>&1; then
             echo '--- up falló ---'; tail -40 up.log
-            docker compose -f infra/docker-compose.staging.yml ps || true
-            for svc in api game-server web admin caddy migrate; do
+            ${COMPOSE} ps || true
+            for svc in api game-server web admin caddy migrate postgres; do
               echo "===== logs $svc ====="
-              docker compose -f infra/docker-compose.staging.yml logs --tail 40 "$svc" || true
+              ${COMPOSE} logs --tail 40 "$svc" || true
             done > diag.log 2>&1
             tail -80 diag.log
             message=$(tail -80 diag.log | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
             echo "::error title=Stack startup failed::${message}"
             exit 1
           fi
-          docker compose -f infra/docker-compose.staging.yml ps
+          ${COMPOSE} ps
 
       # La prueba central: cabeceras falsas contra la API REAL, a través de Caddy.
       - name: Client IP cannot be spoofed (through Caddy)
@@ -401,7 +413,7 @@ jobs:
       # Sólo Caddy publica puertos: cualquier upstream expuesto es un fallo.
       - name: Only Caddy publishes ports
         run: |
-          docker compose -f infra/docker-compose.staging.yml ps --format json > /tmp/ps.jsonl
+          docker compose --env-file .env -f infra/docker-compose.staging.yml ps --format json > /tmp/ps.jsonl
           node -e '
             const fs = require("fs");
             const lines = fs.readFileSync("/tmp/ps.jsonl","utf8").trim().split(/\n/).filter(Boolean);
@@ -419,8 +431,8 @@ jobs:
 
       - name: Dump logs on failure
         if: failure()
-        run: docker compose -f infra/docker-compose.staging.yml logs --tail 200
+        run: docker compose --env-file .env -f infra/docker-compose.staging.yml logs --tail 200
 
       - name: Tear down
         if: always()
-        run: docker compose -f infra/docker-compose.staging.yml down -v
+        run: docker compose --env-file .env -f infra/docker-compose.staging.yml down -v

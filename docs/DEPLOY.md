@@ -173,13 +173,22 @@ TRUSTED_PROXY_HEADER=x-forwarded-for
 
 ### Fase 5 — Primer `up`
 
+> **`--env-file .env` es obligatorio.** Docker Compose interpola `${POSTGRES_USER}`, `${POSTGRES_PASSWORD}`,
+> `${APP_DOMAIN}`, etc. desde un `.env` ubicado en el **directorio del archivo compose**
+> (`infra/`), no en la raíz del repo. Si se omite `--env-file .env`, esos valores quedan
+> vacíos, Postgres arranca sin usuario y el stack falla. Los servicios además usan
+> `env_file: ../.env` para sus variables de runtime, así que el mismo archivo sirve para ambos.
+> (Este error se reprodujo en CI y está cubierto por el job `perimeter-smoke`.)
+
 ```bash
 cd ~/truco-start
-docker compose -f infra/docker-compose.staging.yml build
-docker compose -f infra/docker-compose.staging.yml run --rm migrate   # migraciones (aborta el deploy si fallan)
-docker compose -f infra/docker-compose.staging.yml up -d --wait
-docker compose -f infra/docker-compose.staging.yml ps                 # todo "healthy"
-docker compose -f infra/docker-compose.staging.yml logs -f caddy      # emisión ACME
+COMPOSE="docker compose --env-file .env -f infra/docker-compose.staging.yml"
+
+$COMPOSE build
+$COMPOSE run --rm migrate     # migraciones (aborta el deploy si fallan)
+$COMPOSE up -d --wait
+$COMPOSE ps                   # todo "healthy"
+$COMPOSE logs -f caddy        # emisión ACME (Let's Encrypt)
 ```
 
 Si Caddy no obtiene el certificado: el registro DNS no está proxied, o el puerto 80 no llega
@@ -374,6 +383,7 @@ curl -fsS https://game.truco.ar/health
 curl -fsSI https://app.truco.ar | grep -iE 'strict-transport-security|x-content-type'
 curl -fsSI https://admin.truco.ar | grep -i 'x-robots-tag'
 ssh <user>@<ip> "sudo iptables -S DOCKER-USER | head -5"   # reglas aplicadas
+ssh <user>@<ip> "cd ~/truco-start && docker compose --env-file .env -f infra/docker-compose.staging.yml ps"
 ./scripts/cloudflare-ufw.sh verify <ip>                    # IP directa rechaza 80/443
 ```
 

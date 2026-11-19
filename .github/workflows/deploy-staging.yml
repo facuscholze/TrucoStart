@@ -47,7 +47,7 @@ jobs:
           echo 'POSTGRES_PASSWORD=ci_staging_password' >> .env
           echo 'POSTGRES_USER=truco_staging' >> .env
           echo 'POSTGRES_DB=truco_staging' >> .env
-          docker compose -f infra/docker-compose.staging.yml config -q
+          docker compose --env-file .env -f infra/docker-compose.staging.yml config -q
 
       # Política perimetral: TLS en 80/443, sin puertos upstream publicados y
       # trusted_proxies de Caddy desde los rangos de Cloudflare (M8c).
@@ -89,10 +89,15 @@ jobs:
           # Puertos altos del runner para no chocar con nada y no necesitar root
           # para 80/443. En el VPS el compose publica 80/443 (ver DEPLOY.md).
           # Caddy usa el certificado interno (no intenta ACME contra un dominio
-          # inexistente en CI) y con un CIDR de proxy confiable ficticio.
-          HTTP_PORT=18080 HTTPS_PORT=18443 APP_DOMAIN=localhost \
-            TRUSTED_PROXY_CIDRS='173.245.48.0/20' \
-            docker compose -f infra/docker-compose.staging.yml up -d
+          # inexistente en CI). Se agregan estas variables al `.env` para que la
+          # interpolación de compose las tome (ver DEPLOY.md#primer-despliegue).
+          cat >> .env <<'EOPORTS'
+          APP_DOMAIN=localhost
+          HTTP_PORT=18080
+          HTTPS_PORT=18443
+          TRUSTED_PROXY_CIDRS=173.245.48.0/20
+          EOPORTS
+          docker compose --env-file .env -f infra/docker-compose.staging.yml up -d
           # Espera hasta 60s a que api y game-server queden healthy.
           for i in $(seq 1 30); do
             api=$(docker inspect -f '{{.State.Health.Status}}' mesa-de-truco-staging-api-1 2>/dev/null || echo starting)
@@ -101,20 +106,20 @@ jobs:
             if [ "$api" = healthy ] && [ "$gs" = healthy ]; then break; fi
             sleep 2
           done
-          test "$api" = healthy || { echo 'API no healthy'; docker compose -f infra/docker-compose.staging.yml logs api; exit 1; }
-          test "$gs" = healthy || { echo 'game-server no healthy'; docker compose -f infra/docker-compose.staging.yml logs game-server; exit 1; }
+          test "$api" = healthy || { echo 'API no healthy'; docker compose --env-file .env -f infra/docker-compose.staging.yml logs api; exit 1; }
+          test "$gs" = healthy || { echo 'game-server no healthy'; docker compose --env-file .env -f infra/docker-compose.staging.yml logs game-server; exit 1; }
 
           # IP real del cliente: un cliente con cabeceras falsificadas NO puede
           # cambiar la IP que ve la aplicación (ADR-020/022).
           node scripts/test-client-ip-spoofing.mjs --url http://127.0.0.1:18080 --host api.localhost || {
             echo 'FALLO: las cabeceras falsas alteraron la IP del cliente';
-            docker compose -f infra/docker-compose.staging.yml logs caddy api;
+            docker compose --env-file .env -f infra/docker-compose.staging.yml logs caddy api;
             exit 1;
           }
 
           # El borde no debe exponer puertos de upstream en el host: sólo 80/443
           # (18080/18443 en CI). Cualquier otro puerto publicado es un fallo.
-          published=$(docker compose -f infra/docker-compose.staging.yml ps --format json \
+          published=$(docker compose --env-file .env -f infra/docker-compose.staging.yml ps --format json \
             | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{for(const l of d.trim().split(/\n/)){if(!l)continue;const s=JSON.parse(l);if(s.Publishers)for(const p of s.Publishers)if(p.PublishedPort)console.log(s.Service+":"+p.PublishedPort)}})')
           echo "puertos publicados: ${published}"
           if echo "${published}" | grep -vE '^caddy:(18080|18443)$' | grep -q .; then
@@ -122,7 +127,7 @@ jobs:
             exit 1
           fi
 
-          docker compose -f infra/docker-compose.staging.yml down -v
+          docker compose --env-file .env -f infra/docker-compose.staging.yml down -v
 
   approve-deploy:
     name: Aprobación manual
@@ -177,16 +182,16 @@ jobs:
             set -euo pipefail
             cd ~/truco-start
             # 1. Pull/build de imágenes sin tocar las que están corriendo.
-            docker compose -f infra/docker-compose.staging.yml build
+            docker compose --env-file .env -f infra/docker-compose.staging.yml build
             # 2. Correr migraciones; si fallan se aborta el deploy.
-            docker compose -f infra/docker-compose.staging.yml run --rm migrate
+            docker compose --env-file .env -f infra/docker-compose.staging.yml run --rm migrate
             # 3. Drenaje del game-server antes de reiniciarlo: le damos 45s
             #    para que termine/broadcastée la partida y cierre sockets.
             #    Al bajar la instancia nueva se activa sólo cuando la vieja
             #    dejó de marcarse como healthy (healthcheck apunta a /ready,
             #    que devuelve 503 mientras draining=true).
-            docker compose -f infra/docker-compose.staging.yml up -d --no-deps --wait migrate
-            docker compose -f infra/docker-compose.staging.yml up -d \
+            docker compose --env-file .env -f infra/docker-compose.staging.yml up -d --no-deps --wait migrate
+            docker compose --env-file .env -f infra/docker-compose.staging.yml up -d \
               --wait --wait-timeout 90 api game-server web admin
             # 4. Prueba de humo remoto.
             for i in $(seq 1 20); do
@@ -196,7 +201,7 @@ jobs:
               sleep 2
             done
             test "$api" = ok && test "$gs" = ok
-            docker compose -f infra/docker-compose.staging.yml ps
+            docker compose --env-file .env -f infra/docker-compose.staging.yml ps
           REMOTE
         env:
           STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}

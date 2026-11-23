@@ -117,6 +117,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       await this.provisioner.deleteRoom(item.id).catch(() => undefined);
       this.realtimeGateway.broadcastTableRemoved(item.id, item.visibility);
     }
+    await this.realtimeGateway.refreshSocialPresence(expired.flatMap((item) => item.userIds));
     if (expired.length > 0) this.invalidateLobbyListCache();
     return expired.length;
   }
@@ -343,6 +344,121 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
     }
 
     return aggregate;
+  }
+
+  async acceptSocialTableInvitation(
+    principal: AuthenticatedPrincipal,
+    invitationId: string,
+  ): Promise<TableDetailResponse> {
+    await this.sweepExpiredTables();
+    await this.assertNotInMatchmakingQueue(principal.userId);
+    const now = new Date(this.config.nowFn());
+    const outcome = await this.lobbyRepository.acceptSocialTableInvitationTx({
+      invitationId,
+      recipientId: principal.userId,
+      nickname: principal.nickname,
+      now,
+      tableTtlMs: this.config.tableTtlMs,
+    });
+    if (outcome.kind === 'EXPIRED') {
+      throw new DomainApiException(410, 'INVALID_STATE', 'La invitación o la mesa ya expiró.');
+    }
+    if (outcome.kind === 'CANCELLED') {
+      throw new DomainApiException(404, 'NOT_FOUND', 'La invitación ya no está disponible.');
+    }
+    const aggregate = outcome.aggregate;
+    this.realtimeGateway.broadcastTableUpsert(
+      aggregate.row.visibility as TableVisibility,
+      toPublicTableSummary(aggregate),
+    );
+    this.invalidateLobbyListCache();
+    const invite = this.mintInviteForAggregate(aggregate);
+    return TableDetailResponseSchema.parse(
+      toTableDetailResponse(aggregate, {
+        viewerUserId: principal.userId,
+        includeJoinCredentials: true,
+        inviteToken: invite.inviteToken,
+        inviteExpiresAt: invite.inviteExpiresAt,
+      }),
+    );
+  }
+
+  async acceptSocialChallenge(input: {
+    readonly principal: AuthenticatedPrincipal;
+    readonly invitationId: string;
+    readonly senderId: string;
+    readonly rulesetCode: RulesetCode;
+  }): Promise<TableDetailResponse> {
+    await this.sweepExpiredTables();
+    await this.assertNotInMatchmakingQueue(input.principal.userId);
+    await this.assertNotInMatchmakingQueue(input.senderId);
+    const ruleset = resolveRuleSetByCode(input.rulesetCode);
+    const rulesetRow = await this.lobbyRepository.ensureRulesetRow(ruleset);
+    const nowMs = this.config.nowFn();
+    const now = new Date(nowMs);
+    const expiresAt = new Date(nowMs + this.config.tableTtlMs);
+    const targetScore: 15 | 30 = ruleset.targetScore === 15 ? 15 : 30;
+    const outcome = await this.lobbyRepository.acceptSocialChallengeAndCreateTableTx({
+      invitationId: input.invitationId,
+      senderId: input.senderId,
+      recipientId: input.principal.userId,
+      recipientNickname: input.principal.nickname,
+      rulesetId: rulesetRow.id,
+      rulesetCode: input.rulesetCode,
+      targetScore,
+      florEnabled: ruleset.flor.enabled,
+      turnTimeoutMs: this.config.defaultTurnTimeoutMs,
+      now,
+      expiresAt,
+    });
+    if (outcome.kind === 'EXPIRED') {
+      throw new DomainApiException(410, 'INVALID_STATE', 'El desafío ya expiró.');
+    }
+    if (outcome.kind === 'CANCELLED') {
+      throw new DomainApiException(404, 'NOT_FOUND', 'El desafío ya no está disponible.');
+    }
+
+    const aggregate = outcome.aggregate;
+    try {
+      await this.provisioner.provisionRoom({
+        roomId: aggregate.row.id,
+        mode: '1v1',
+        visibility: 'PRIVATE',
+        rulesetCode: input.rulesetCode,
+        ruleset: ruleset as unknown as Record<string, unknown>,
+        targetScore,
+        florEnabled: ruleset.flor.enabled,
+        turnTimeoutMs: this.config.defaultTurnTimeoutMs,
+      });
+    } catch (error) {
+      await this.lobbyRepository.rollbackCreatedTable(aggregate.row.id).catch(() => undefined);
+      await this.lobbyRepository
+        .resetAcceptedChallenge(
+          input.invitationId,
+          input.principal.userId,
+          new Date(this.config.nowFn()),
+        )
+        .catch(() => undefined);
+      throw error;
+    }
+
+    await this.auditRepository.record({
+      actorId: input.principal.userId,
+      action: 'lobby.challenge.accepted',
+      entity: 'social_invitation',
+      entityId: input.invitationId,
+      now,
+      afterState: { tableId: aggregate.row.id, mode: '1v1', rulesetCode: input.rulesetCode },
+    });
+    const invite = this.mintInviteForAggregate(aggregate);
+    return TableDetailResponseSchema.parse(
+      toTableDetailResponse(aggregate, {
+        viewerUserId: input.principal.userId,
+        includeJoinCredentials: true,
+        inviteToken: invite.inviteToken,
+        inviteExpiresAt: invite.inviteExpiresAt,
+      }),
+    );
   }
 
   async getTableDetail(

@@ -1,15 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { UserMatchHistoryItem, UserSettings, UserStatsResponse } from '@truco/shared';
-import { and, desc, eq, isNull, lt } from 'drizzle-orm';
+import type {
+  UserMatchDetailResponse,
+  UserMatchHistoryItem,
+  UserMatchHistoryQuery,
+  UserModeStats,
+  UserSettings,
+  UserStatsResponse,
+} from '@truco/shared';
+import { and, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { type AppDatabase, DRIZZLE_DB } from '../../db/database.provider.js';
 import {
   authTokensTable,
+  friendshipsTable,
   matchesTable,
+  matchEventsTable,
   matchPlayersTable,
   type ProfileRow,
   profilesTable,
   sessionsTable,
   tutorialProgressTable,
+  userBlocksTable,
   type UserRow,
   usersTable,
 } from '../../db/schema/index.js';
@@ -36,6 +46,60 @@ export class UsersRepository {
     if (!profile) return null;
 
     return { user, profile };
+  }
+
+  private async canViewWithVisibility(
+    viewerId: string,
+    targetId: string,
+    setting: 'historyVisibility' | 'statsVisibility',
+  ): Promise<boolean> {
+    if (viewerId === targetId) return true;
+    const [profile] = await this.db
+      .select({ settings: profilesTable.settings })
+      .from(profilesTable)
+      .where(eq(profilesTable.userId, targetId))
+      .limit(1);
+    if (!profile) return false;
+
+    // Bloqueo siempre prevalece sobre una configuración pública explícita.
+    const [block] = await this.db
+      .select({ blockerId: userBlocksTable.blockerId })
+      .from(userBlocksTable)
+      .where(
+        or(
+          and(eq(userBlocksTable.blockerId, viewerId), eq(userBlocksTable.blockedId, targetId)),
+          and(eq(userBlocksTable.blockerId, targetId), eq(userBlocksTable.blockedId, viewerId)),
+        ),
+      )
+      .limit(1);
+    if (block) return false;
+
+    const visibility = profile.settings?.[setting] ?? 'FRIENDS';
+    if (visibility === 'ALL') return true;
+    if (visibility === 'NOBODY') return false;
+
+    const [friendship] = await this.db
+      .select({ id: friendshipsTable.id })
+      .from(friendshipsTable)
+      .where(
+        and(
+          eq(friendshipsTable.status, 'ACCEPTED'),
+          or(
+            and(eq(friendshipsTable.userLow, viewerId), eq(friendshipsTable.userHigh, targetId)),
+            and(eq(friendshipsTable.userLow, targetId), eq(friendshipsTable.userHigh, viewerId)),
+          ),
+        ),
+      )
+      .limit(1);
+    return Boolean(friendship);
+  }
+
+  async canViewHistory(viewerId: string, targetId: string): Promise<boolean> {
+    return this.canViewWithVisibility(viewerId, targetId, 'historyVisibility');
+  }
+
+  async canViewStats(viewerId: string, targetId: string): Promise<boolean> {
+    return this.canViewWithVisibility(viewerId, targetId, 'statsVisibility');
   }
 
   async findUserByNicknameLower(nicknameLower: string): Promise<UserRow | null> {
@@ -76,6 +140,16 @@ export class UsersRepository {
       animationsReduced:
         patch.settings?.animationsReduced ?? currentProfile.settings?.animationsReduced ?? false,
       confirmCalls: patch.settings?.confirmCalls ?? currentProfile.settings?.confirmCalls ?? false,
+      historyVisibility:
+        patch.settings?.historyVisibility ??
+        currentProfile.settings?.historyVisibility ??
+        'FRIENDS',
+      statsVisibility:
+        patch.settings?.statsVisibility ?? currentProfile.settings?.statsVisibility ?? 'FRIENDS',
+      presenceVisibility:
+        patch.settings?.presenceVisibility ??
+        currentProfile.settings?.presenceVisibility ??
+        'FRIENDS',
     };
 
     const [updated] = await this.db
@@ -122,29 +196,128 @@ export class UsersRepository {
 
   async computeUserStats(userId: string): Promise<UserStatsResponse> {
     const entries = await this.db
-      .select({ outcome: matchPlayersTable.outcome })
+      .select({
+        matchId: matchesTable.id,
+        mode: matchesTable.mode,
+        outcome: matchPlayersTable.outcome,
+        team: matchPlayersTable.team,
+      })
       .from(matchPlayersTable)
-      .where(eq(matchPlayersTable.userId, userId));
+      .innerJoin(matchesTable, eq(matchPlayersTable.matchId, matchesTable.id))
+      .where(eq(matchPlayersTable.userId, userId))
+      .orderBy(desc(matchesTable.startedAt), desc(matchesTable.id));
 
+    const stats = {
+      '1v1': this.emptyModeStats(),
+      '2v2': this.emptyModeStats(),
+    };
+    const modeByMatch = new Map<string, '1v1' | '2v2'>();
+    const teamByMatch = new Map<string, number>();
     let wins = 0;
     let losses = 0;
     let abandons = 0;
+    const streakOpen = { '1v1': true, '2v2': true };
+
     for (const row of entries) {
-      if (row.outcome === 'WIN') wins++;
-      else if (row.outcome === 'LOSS') losses++;
-      else if (row.outcome === 'ABANDON') abandons++;
+      if (row.mode !== '1v1' && row.mode !== '2v2') continue;
+      const modeStats = stats[row.mode];
+      modeStats.matchesPlayed++;
+      if (row.outcome === 'WIN') {
+        wins++;
+        modeStats.wins++;
+        if (streakOpen[row.mode]) modeStats.currentStreak++;
+      } else {
+        streakOpen[row.mode] = false;
+        if (row.outcome === 'LOSS') {
+          losses++;
+          modeStats.losses++;
+        } else if (row.outcome === 'ABANDON') {
+          abandons++;
+          modeStats.abandons++;
+        }
+      }
+      modeByMatch.set(row.matchId, row.mode);
+      teamByMatch.set(row.matchId, row.team);
     }
 
-    const matchesPlayed = entries.length;
-    const winRate = matchesPlayed === 0 ? 0 : Math.round((wins / matchesPlayed) * 10_000) / 10_000;
+    const matchIds = [...modeByMatch.keys()];
+    if (matchIds.length > 0) {
+      const events = await this.db
+        .select({ matchId: matchEventsTable.matchId, payload: matchEventsTable.payload })
+        .from(matchEventsTable)
+        .where(
+          and(
+            inArray(matchEventsTable.matchId, matchIds),
+            eq(matchEventsTable.type, 'game.callResolved'),
+          ),
+        );
+      for (const event of events) {
+        const mode = modeByMatch.get(event.matchId);
+        const team = teamByMatch.get(event.matchId);
+        const family = event.payload['family'];
+        if (!mode || team === undefined || (family !== 'ENVIDO' && family !== 'TRUCO')) continue;
+        const winningTeam = event.payload['winningTeam'];
+        const bucket = family === 'ENVIDO' ? stats[mode].envido : stats[mode].truco;
+        bucket.resolved++;
+        if (typeof winningTeam === 'number' && winningTeam === team) bucket.won++;
+      }
+    }
 
+    const matchesPlayed = wins + losses + abandons;
     return {
       userId,
       matchesPlayed,
       wins,
       losses,
       abandons,
-      winRate,
+      winRate: this.rate(wins, matchesPlayed),
+      byMode: {
+        '1v1': this.finalizeModeStats(stats['1v1']),
+        '2v2': this.finalizeModeStats(stats['2v2']),
+      },
+    };
+  }
+
+  private emptyModeStats(): {
+    matchesPlayed: number;
+    wins: number;
+    losses: number;
+    abandons: number;
+    winRate: number;
+    currentStreak: number;
+    envido: { resolved: number; won: number; winRate: number };
+    truco: { resolved: number; won: number; winRate: number };
+  } {
+    return {
+      matchesPlayed: 0,
+      wins: 0,
+      losses: 0,
+      abandons: 0,
+      winRate: 0,
+      currentStreak: 0,
+      envido: { resolved: 0, won: 0, winRate: 0 },
+      truco: { resolved: 0, won: 0, winRate: 0 },
+    };
+  }
+
+  private rate(wins: number, played: number): number {
+    return played === 0 ? 0 : Math.round((wins / played) * 10_000) / 10_000;
+  }
+
+  private finalizeModeStats<T extends ReturnType<UsersRepository['emptyModeStats']>>(
+    stats: T,
+  ): UserModeStats {
+    return {
+      ...stats,
+      winRate: this.rate(stats.wins, stats.matchesPlayed),
+      envido: {
+        ...stats.envido,
+        winRate: this.rate(stats.envido.won, stats.envido.resolved),
+      },
+      truco: {
+        ...stats.truco,
+        winRate: this.rate(stats.truco.won, stats.truco.resolved),
+      },
     };
   }
 
@@ -152,12 +325,22 @@ export class UsersRepository {
     readonly userId: string;
     readonly cursor?: string;
     readonly limit: number;
+    readonly filters?: UserMatchHistoryQuery;
   }): Promise<{ items: UserMatchHistoryItem[]; nextCursor: string | null }> {
+    const filters = params.filters;
+    const conditions = [eq(matchPlayersTable.userId, params.userId)];
+    if (params.cursor) conditions.push(lt(matchesTable.id, params.cursor));
+    if (filters?.mode) conditions.push(eq(matchesTable.mode, filters.mode));
+    if (filters?.outcome) conditions.push(eq(matchPlayersTable.outcome, filters.outcome));
+    if (filters?.bots === 'BOTS') conditions.push(eq(matchesTable.hasBots, true));
+    if (filters?.bots === 'HUMANS') conditions.push(eq(matchesTable.hasBots, false));
+
     const rows = await this.db
       .select({
         matchId: matchesTable.id,
         mode: matchesTable.mode,
         rulesetCode: matchesTable.rulesetCode,
+        hasBots: matchesTable.hasBots,
         startedAt: matchesTable.startedAt,
         endedAt: matchesTable.endedAt,
         seat: matchPlayersTable.seat,
@@ -167,15 +350,8 @@ export class UsersRepository {
       })
       .from(matchPlayersTable)
       .innerJoin(matchesTable, eq(matchPlayersTable.matchId, matchesTable.id))
-      .where(
-        params.cursor
-          ? and(
-              eq(matchPlayersTable.userId, params.userId),
-              lt(matchPlayersTable.matchId, params.cursor),
-            )
-          : eq(matchPlayersTable.userId, params.userId),
-      )
-      .orderBy(desc(matchPlayersTable.matchId))
+      .where(and(...conditions))
+      .orderBy(desc(matchesTable.id))
       .limit(params.limit + 1);
 
     const hasMore = rows.length > params.limit;
@@ -188,6 +364,7 @@ export class UsersRepository {
       team: r.team,
       score: r.score,
       outcome: r.outcome,
+      hasBots: r.hasBots,
       startedAt: r.startedAt.toISOString(),
       endedAt: r.endedAt ? r.endedAt.toISOString() : null,
     }));
@@ -196,6 +373,91 @@ export class UsersRepository {
     return {
       items,
       nextCursor: hasMore && last ? last.matchId : null,
+    };
+  }
+
+  async getUserMatchDetail(params: {
+    readonly matchId: string;
+    readonly targetUserId: string;
+    readonly viewerUserId: string;
+  }): Promise<UserMatchDetailResponse | null> {
+    const [match] = await this.db
+      .select()
+      .from(matchesTable)
+      .innerJoin(matchPlayersTable, eq(matchPlayersTable.matchId, matchesTable.id))
+      .where(
+        and(eq(matchesTable.id, params.matchId), eq(matchPlayersTable.userId, params.targetUserId)),
+      )
+      .limit(1);
+    if (!match) return null;
+
+    const [matchRow] = await this.db
+      .select()
+      .from(matchesTable)
+      .where(eq(matchesTable.id, params.matchId))
+      .limit(1);
+    if (!matchRow) return null;
+
+    const players = await this.db
+      .select({
+        userId: matchPlayersTable.userId,
+        nickname: usersTable.nickname,
+        seat: matchPlayersTable.seat,
+        team: matchPlayersTable.team,
+        score: matchPlayersTable.score,
+        outcome: matchPlayersTable.outcome,
+      })
+      .from(matchPlayersTable)
+      .innerJoin(usersTable, eq(usersTable.id, matchPlayersTable.userId))
+      .where(eq(matchPlayersTable.matchId, params.matchId))
+      .orderBy(matchPlayersTable.seat);
+    const result = matchRow.result ?? {};
+    const events = await this.db
+      .select({
+        seq: matchEventsTable.seq,
+        type: matchEventsTable.type,
+        at: matchEventsTable.createdAt,
+      })
+      .from(matchEventsTable)
+      .where(
+        and(
+          eq(matchEventsTable.matchId, params.matchId),
+          inArray(matchEventsTable.type, [
+            'game.callMade',
+            'game.callResolved',
+            'game.handEnded',
+            'game.scoreUpdated',
+            'game.ended',
+          ]),
+        ),
+      )
+      .orderBy(matchEventsTable.seq);
+
+    return {
+      matchId: matchRow.id,
+      mode: matchRow.mode,
+      rulesetCode: matchRow.rulesetCode,
+      hasBots: matchRow.hasBots,
+      seedCommitment: matchRow.seedCommitment,
+      startedAt: matchRow.startedAt.toISOString(),
+      endedAt: matchRow.endedAt?.toISOString() ?? null,
+      result: {
+        winnerTeam: typeof result['winnerTeam'] === 'number' ? result['winnerTeam'] : null,
+        scoresByTeam:
+          result['scoresByTeam'] && typeof result['scoresByTeam'] === 'object'
+            ? (result['scoresByTeam'] as Record<string, number>)
+            : {},
+        reason: typeof result['reason'] === 'string' ? result['reason'] : null,
+      },
+      players: players.map((player) => ({
+        ...player,
+        isSelf: player.userId === params.viewerUserId,
+      })),
+      events: events.map((event) => ({
+        seq: event.seq,
+        type: event.type as UserMatchDetailResponse['events'][number]['type'],
+        at: event.at.toISOString(),
+      })),
     };
   }
 
@@ -234,7 +496,14 @@ export class UsersRepository {
       .set({
         avatarId: 'mate-classic',
         bio: '',
-        settings: { soundEnabled: true, animationsReduced: false, confirmCalls: false },
+        settings: {
+          soundEnabled: true,
+          animationsReduced: false,
+          confirmCalls: false,
+          historyVisibility: 'FRIENDS',
+          statsVisibility: 'FRIENDS',
+          presenceVisibility: 'FRIENDS',
+        },
         updatedAt: now,
       })
       .where(eq(profilesTable.userId, userId));

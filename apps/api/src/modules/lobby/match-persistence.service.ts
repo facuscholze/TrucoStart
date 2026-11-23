@@ -127,6 +127,10 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       return { row: nextRows[0]!, activeSeats };
     });
 
+    await this.realtimeGateway.refreshSocialPresence(
+      event.seats.map((seat) => seat.userId).filter((userId) => UUID_REGEX.test(userId)),
+    );
+
     if (updated) {
       this.realtimeGateway.broadcastTableUpsert(
         updated.row.visibility as TableVisibility,
@@ -216,6 +220,11 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       const tableRow = locked[0];
       if (!tableRow) return null;
 
+      const seatRows = await tx
+        .select({ userId: tableSeatsTable.userId })
+        .from(tableSeatsTable)
+        .where(eq(tableSeatsTable.tableId, tableRow.id));
+
       const nextStatus =
         tableRow.status === 'FINISHED' || tableRow.status === 'CLOSED' ? tableRow.status : 'CLOSED';
 
@@ -237,10 +246,12 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       return {
         row: updated[0]!,
         visibility: tableRow.visibility as TableVisibility,
+        userIds: seatRows.map((seat) => seat.userId),
       };
     });
 
     if (!outcome) return;
+    await this.realtimeGateway.refreshSocialPresence(outcome.userIds);
     this.realtimeGateway.broadcastTableRemoved(outcome.row.id, outcome.visibility);
   }
 
@@ -295,6 +306,7 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
           seedCommitment: event.seedCommitment,
           startedAt: new Date(event.startedAtMs),
           endedAt: new Date(event.endedAtMs),
+          hasBots: event.hasBots ?? false,
           result: {
             winnerTeam: event.winnerTeam,
             team0Score,
@@ -370,6 +382,10 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
 
       return { matchId: event.matchId, tableId, tableVisibility };
     });
+
+    await this.realtimeGateway.refreshSocialPresence(
+      event.players.map((player) => player.userId).filter((userId) => UUID_REGEX.test(userId)),
+    );
 
     if (committed?.tableId && committed.tableVisibility) {
       if (event.reason === 'ABANDON') {

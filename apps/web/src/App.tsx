@@ -8,6 +8,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { AppShell } from './components/AppShell.js';
 import { OnboardingModal } from './components/OnboardingModal.js';
 import type { AuthTab } from './features/auth/AuthScreen.js';
+import { SocialRealtimeProvider } from './features/social/SocialRealtimeProvider.js';
 import { HomeScreen } from './features/home/HomeScreen.js';
 import { messagesEsAr } from './i18n/messages.es-AR.js';
 import {
@@ -41,6 +42,9 @@ const PlayerProfileScreenLazy = lazy(() =>
     default: m.PlayerProfileScreen,
   })),
 );
+const SocialScreenLazy = lazy(() =>
+  import('./features/social/SocialScreen.js').then((m) => ({ default: m.SocialScreen })),
+);
 const ProfileScreenLazy = lazy(() =>
   import('./features/profile/ProfileScreen.js').then((m) => ({ default: m.ProfileScreen })),
 );
@@ -63,6 +67,7 @@ type ParsedAppRoute =
   | { kind: 'waiting-room'; tableId: string }
   | { kind: 'lobby'; inviteOrCode: string | null }
   | { kind: 'profile' }
+  | { kind: 'social' }
   | { kind: 'player-profile'; userId: string }
   | { kind: 'learn' }
   | { kind: 'scorer' }
@@ -106,6 +111,10 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
 
   if (pathname === '/perfil') {
     return { kind: 'profile' };
+  }
+
+  if (pathname === '/amigos') {
+    return { kind: 'social' };
   }
 
   const jugadorMatch = /^\/jugador\/([a-zA-Z0-9_-]{3,64})$/.exec(pathname);
@@ -215,6 +224,9 @@ export function App() {
     });
     window.scrollTo?.({ top: 0 });
   }, []);
+  const handleSessionChanged = useCallback((user: AuthUserSummary | null) => {
+    setCurrentUser(user);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -250,42 +262,48 @@ export function App() {
 
   if (route.kind === 'dev-mesa' && DevMesaLazy) {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-surface text-ivory p-6" />}>
-        <DevMesaLazy onExitHome={() => navigate('/')} />
-      </Suspense>
+      <SocialRealtimeProvider enabled={currentUser !== null}>
+        <Suspense fallback={<div className="min-h-screen bg-surface text-ivory p-6" />}>
+          <DevMesaLazy onExitHome={() => navigate('/')} />
+        </Suspense>
+      </SocialRealtimeProvider>
     );
   }
 
   if (route.kind === 'live-mesa') {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-surface text-ivory p-6" />}>
-        <LiveMesaRouteLazy
-          roomId={route.roomId}
-          joinCode={route.joinCode}
-          isPractice={route.isPractice}
-          onNavigateHome={() => navigate('/lobby')}
-          onNavigate={navigate}
-        />
-      </Suspense>
+      <SocialRealtimeProvider enabled={currentUser !== null}>
+        <Suspense fallback={<div className="min-h-screen bg-surface text-ivory p-6" />}>
+          <LiveMesaRouteLazy
+            roomId={route.roomId}
+            joinCode={route.joinCode}
+            isPractice={route.isPractice}
+            onNavigateHome={() => navigate('/lobby')}
+            onNavigate={navigate}
+          />
+        </Suspense>
+      </SocialRealtimeProvider>
     );
   }
 
   if (route.kind === 'waiting-room') {
     return (
-      <Suspense
-        fallback={
-          <AppShell activeSection="lobby" currentUser={currentUser} onNavigate={navigate}>
-            <RouteFallback />
-          </AppShell>
-        }
-      >
-        <WaitingRoomScreenLazy
-          tableId={route.tableId}
-          currentUser={currentUser}
-          onSessionChanged={(u) => setCurrentUser(u)}
-          onNavigate={navigate}
-        />
-      </Suspense>
+      <SocialRealtimeProvider enabled={currentUser !== null}>
+        <Suspense
+          fallback={
+            <AppShell activeSection="lobby" currentUser={currentUser} onNavigate={navigate}>
+              <RouteFallback />
+            </AppShell>
+          }
+        >
+          <WaitingRoomScreenLazy
+            tableId={route.tableId}
+            currentUser={currentUser}
+            onSessionChanged={handleSessionChanged}
+            onNavigate={navigate}
+          />
+        </Suspense>
+      </SocialRealtimeProvider>
     );
   }
 
@@ -298,97 +316,109 @@ export function App() {
           ? 'scorer'
           : route.kind === 'profile' || route.kind === 'player-profile'
             ? 'profile'
-            : route.kind === 'auth'
-              ? 'auth'
-              : 'home';
+            : route.kind === 'social'
+              ? 'social'
+              : route.kind === 'auth'
+                ? 'auth'
+                : 'home';
 
   return (
-    <AppShell activeSection={activeSection} currentUser={currentUser} onNavigate={navigate}>
-      <Suspense fallback={<RouteFallback />}>
-        {route.kind === 'home' && (
-          <HomeScreen
-            currentUser={currentUser}
-            sessionLoading={sessionLoading}
-            onSessionChanged={(u) => setCurrentUser(u)}
-            onNavigate={navigate}
-            onOpenOnboarding={() => setOnboardingOpen(true)}
-          />
-        )}
+    <SocialRealtimeProvider enabled={currentUser !== null}>
+      <AppShell activeSection={activeSection} currentUser={currentUser} onNavigate={navigate}>
+        <Suspense fallback={<RouteFallback />}>
+          {route.kind === 'home' && (
+            <HomeScreen
+              currentUser={currentUser}
+              sessionLoading={sessionLoading}
+              onSessionChanged={handleSessionChanged}
+              onNavigate={navigate}
+              onOpenOnboarding={() => setOnboardingOpen(true)}
+            />
+          )}
 
-        {route.kind === 'lobby' && (
-          <LobbyScreenLazy
-            currentUser={currentUser}
-            initialInviteOrCode={route.inviteOrCode}
-            onSessionChanged={(u) => setCurrentUser(u)}
-            onNavigate={navigate}
-          />
-        )}
+          {route.kind === 'lobby' && (
+            <LobbyScreenLazy
+              currentUser={currentUser}
+              initialInviteOrCode={route.inviteOrCode}
+              onSessionChanged={handleSessionChanged}
+              onNavigate={navigate}
+            />
+          )}
 
-        {route.kind === 'profile' && (
-          <ProfileScreenLazy
-            currentUser={currentUser}
-            onSessionChanged={(u) => setCurrentUser(u)}
-            onNavigate={navigate}
-          />
-        )}
+          {route.kind === 'social' && (
+            <SocialScreenLazy
+              currentUser={currentUser}
+              onSessionChanged={handleSessionChanged}
+              onNavigate={navigate}
+            />
+          )}
 
-        {route.kind === 'player-profile' && (
-          <PlayerProfileScreenLazy
-            userId={route.userId}
-            currentUserId={currentUser?.id ?? null}
-            onNavigate={navigate}
-          />
-        )}
+          {route.kind === 'profile' && (
+            <ProfileScreenLazy
+              currentUser={currentUser}
+              onSessionChanged={handleSessionChanged}
+              onNavigate={navigate}
+            />
+          )}
 
-        {route.kind === 'learn' && <LearnScreenLazy />}
+          {route.kind === 'player-profile' && (
+            <PlayerProfileScreenLazy
+              userId={route.userId}
+              currentUserId={currentUser?.id ?? null}
+              onNavigate={navigate}
+            />
+          )}
 
-        {route.kind === 'scorer' && <ScorerScreenLazy />}
+          {route.kind === 'learn' && <LearnScreenLazy />}
 
-        {route.kind === 'legal' && (
-          <LegalScreenLazy activeSlug={route.slug} minAge={legalMinAge} onNavigate={navigate} />
-        )}
+          {route.kind === 'scorer' && <ScorerScreenLazy />}
 
-        {route.kind === 'auth' && (
-          <AuthScreenLazy
-            currentUser={currentUser}
-            {...(route.tab ? { initialTab: route.tab } : {})}
-            initialResetToken={route.resetToken}
-            initialVerifyToken={route.verifyToken}
-            legalMinAge={legalMinAge}
-            onSessionChanged={(u) => setCurrentUser(u)}
-            onNavigate={navigate}
-          />
-        )}
-      </Suspense>
+          {route.kind === 'legal' && (
+            <LegalScreenLazy activeSlug={route.slug} minAge={legalMinAge} onNavigate={navigate} />
+          )}
 
-      <OnboardingModal
-        open={onboardingOpen}
-        busy={onboardingBusy}
-        onClose={() => {
-          markOnboardingSeen();
-          setOnboardingOpen(false);
-        }}
-        onGoToLogin={() => {
-          markOnboardingSeen();
-          setOnboardingOpen(false);
-          navigate('/acceso');
-        }}
-        onEnterAsGuest={() => {
-          setOnboardingBusy(true);
-          void createGuestSessionRequest()
-            .then((res) => {
-              markOnboardingSeen();
-              setCurrentUser(res.user);
-              setOnboardingOpen(false);
-              navigate('/lobby');
-            })
-            .catch(() => {
-              setOnboardingOpen(false);
-              navigate('/acceso');
-            })
-            .finally(() => setOnboardingBusy(false));
-        }}
-      />
-    </AppShell>
+          {route.kind === 'auth' && (
+            <AuthScreenLazy
+              currentUser={currentUser}
+              {...(route.tab ? { initialTab: route.tab } : {})}
+              initialResetToken={route.resetToken}
+              initialVerifyToken={route.verifyToken}
+              legalMinAge={legalMinAge}
+              onSessionChanged={handleSessionChanged}
+              onNavigate={navigate}
+            />
+          )}
+        </Suspense>
+
+        <OnboardingModal
+          open={onboardingOpen}
+          busy={onboardingBusy}
+          onClose={() => {
+            markOnboardingSeen();
+            setOnboardingOpen(false);
+          }}
+          onGoToLogin={() => {
+            markOnboardingSeen();
+            setOnboardingOpen(false);
+            navigate('/acceso');
+          }}
+          onEnterAsGuest={() => {
+            setOnboardingBusy(true);
+            void createGuestSessionRequest()
+              .then((res) => {
+                markOnboardingSeen();
+                setCurrentUser(res.user);
+                setOnboardingOpen(false);
+                navigate('/lobby');
+              })
+              .catch(() => {
+                setOnboardingOpen(false);
+                navigate('/acceso');
+              })
+              .finally(() => setOnboardingBusy(false));
+          }}
+        />
+      </AppShell>
+    </SocialRealtimeProvider>
   );
 }

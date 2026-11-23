@@ -7,16 +7,23 @@ ALTER TABLE "matches"
 UPDATE "profiles"
 SET "settings" = jsonb_set(
   jsonb_set(
-    "settings",
-    '{historyVisibility}',
-    coalesce("settings" -> 'historyVisibility', '"FRIENDS"'::jsonb),
+    jsonb_set(
+      "settings",
+      '{historyVisibility}',
+      coalesce("settings" -> 'historyVisibility', '"FRIENDS"'::jsonb),
+      true
+    ),
+    '{statsVisibility}',
+    coalesce("settings" -> 'statsVisibility', '"FRIENDS"'::jsonb),
     true
   ),
   '{presenceVisibility}',
   coalesce("settings" -> 'presenceVisibility', '"FRIENDS"'::jsonb),
   true
 )
-WHERE NOT ("settings" ? 'historyVisibility') OR NOT ("settings" ? 'presenceVisibility');
+WHERE NOT ("settings" ? 'historyVisibility')
+   OR NOT ("settings" ? 'statsVisibility')
+   OR NOT ("settings" ? 'presenceVisibility');
 --> statement-breakpoint
 CREATE TABLE "friendships" (
   "id" uuid PRIMARY KEY NOT NULL,

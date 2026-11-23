@@ -39,6 +39,9 @@ export function mapProfileRowToDetails(profile: ProfileRow): ProfileDetails {
       soundEnabled: profile.settings?.soundEnabled ?? true,
       animationsReduced: profile.settings?.animationsReduced ?? false,
       confirmCalls: profile.settings?.confirmCalls ?? false,
+      historyVisibility: profile.settings?.historyVisibility ?? 'FRIENDS',
+      statsVisibility: profile.settings?.statsVisibility ?? 'FRIENDS',
+      presenceVisibility: profile.settings?.presenceVisibility ?? 'FRIENDS',
     },
   };
 }
@@ -145,7 +148,14 @@ export class AuthRepository {
         level: 1,
         xp: 0,
         bio: '',
-        settings: { soundEnabled: true, animationsReduced: false, confirmCalls: false },
+        settings: {
+          soundEnabled: true,
+          animationsReduced: false,
+          confirmCalls: false,
+          historyVisibility: 'FRIENDS',
+          statsVisibility: 'FRIENDS',
+          presenceVisibility: 'FRIENDS',
+        },
         createdAt: params.now,
         updatedAt: params.now,
       })

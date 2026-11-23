@@ -1,11 +1,21 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { RuleSet } from '@truco/engine';
 import type { GameMode, ListTablesQuery, RulesetCode, TableVisibility } from '@truco/shared';
-import { and, asc, desc, eq, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { DomainApiException } from '../../common/api-exception.js';
 import { generateUuidV7 } from '../../common/uuidv7.js';
 import { type AppDatabase, DRIZZLE_DB } from '../../db/database.provider.js';
-import { rulesetsTable, tableSeatsTable, tablesTable } from '../../db/schema/index.js';
+import {
+  friendshipsTable,
+  rulesetsTable,
+  sanctionsTable,
+  socialInvitationsTable,
+  socialNotificationsTable,
+  tableSeatsTable,
+  tablesTable,
+  userBlocksTable,
+  usersTable,
+} from '../../db/schema/index.js';
 import { generateJoinCode } from './join-code.js';
 import { maxSeatsForMode, type TableAggregate, type TableRow } from './lobby-row-mapper.js';
 
@@ -252,6 +262,462 @@ export class LobbyRepository {
       row,
       activeSeats: seatsByTable.get(row.id) ?? [],
     }));
+  }
+
+  async acceptSocialTableInvitationTx(input: {
+    readonly invitationId: string;
+    readonly recipientId: string;
+    readonly nickname: string;
+    readonly now: Date;
+    readonly tableTtlMs: number;
+  }): Promise<
+    | { readonly kind: 'JOINED'; readonly aggregate: TableAggregate }
+    | { readonly kind: 'EXPIRED' }
+    | { readonly kind: 'CANCELLED' }
+  > {
+    return this.db.transaction(async (tx) => {
+      const [candidate] = await tx
+        .select()
+        .from(socialInvitationsTable)
+        .where(
+          and(
+            eq(socialInvitationsTable.id, input.invitationId),
+            eq(socialInvitationsTable.recipientId, input.recipientId),
+          ),
+        )
+        .limit(1);
+      if (!candidate || candidate.kind !== 'TABLE') {
+        throw new DomainApiException(404, 'NOT_FOUND', 'Invitación de mesa no encontrada.');
+      }
+      const low =
+        candidate.senderId < candidate.recipientId ? candidate.senderId : candidate.recipientId;
+      const high =
+        candidate.senderId < candidate.recipientId ? candidate.recipientId : candidate.senderId;
+      const pair = await tx
+        .select({ id: usersTable.id, status: usersTable.status, deletedAt: usersTable.deletedAt })
+        .from(usersTable)
+        .where(inArray(usersTable.id, [low, high]))
+        .orderBy(asc(usersTable.id))
+        .for('update');
+      if (
+        pair.length !== 2 ||
+        pair.some((user) => user.status !== 'ACTIVE' || user.deletedAt !== null)
+      ) {
+        throw new DomainApiException(
+          403,
+          'FORBIDDEN',
+          'Una de las cuentas no puede aceptar esta invitación.',
+        );
+      }
+      const [sanction] = await tx
+        .select({ id: sanctionsTable.id })
+        .from(sanctionsTable)
+        .where(
+          and(
+            inArray(sanctionsTable.userId, [low, high]),
+            isNull(sanctionsTable.revokedAt),
+            or(isNull(sanctionsTable.expiresAt), gt(sanctionsTable.expiresAt, input.now)),
+            inArray(sanctionsTable.type, ['MUTE', 'SUSPEND', 'BAN']),
+          ),
+        )
+        .limit(1);
+      if (sanction)
+        throw new DomainApiException(403, 'FORBIDDEN', 'Una de las cuentas está sancionada.');
+
+      const [invitation] = await tx
+        .select()
+        .from(socialInvitationsTable)
+        .where(
+          and(
+            eq(socialInvitationsTable.id, input.invitationId),
+            eq(socialInvitationsTable.recipientId, input.recipientId),
+          ),
+        )
+        .for('update');
+      if (
+        !invitation ||
+        invitation.kind !== 'TABLE' ||
+        invitation.senderId !== candidate.senderId
+      ) {
+        throw new DomainApiException(404, 'NOT_FOUND', 'Invitación de mesa no encontrada.');
+      }
+
+      if (invitation.status === 'ACCEPTED') {
+        const [tableRow] = await tx
+          .select()
+          .from(tablesTable)
+          .where(eq(tablesTable.id, invitation.tableId!))
+          .limit(1);
+        const seats = tableRow
+          ? await tx
+              .select()
+              .from(tableSeatsTable)
+              .where(
+                and(eq(tableSeatsTable.tableId, tableRow.id), eq(tableSeatsTable.isActive, true)),
+              )
+              .orderBy(asc(tableSeatsTable.seat))
+          : [];
+        if (tableRow && seats.some((seat) => seat.userId === input.recipientId)) {
+          return { kind: 'JOINED', aggregate: { row: tableRow, activeSeats: seats } };
+        }
+        throw new DomainApiException(409, 'CONFLICT', 'La invitación ya fue utilizada.');
+      }
+      if (invitation.status !== 'PENDING') {
+        throw new DomainApiException(409, 'CONFLICT', 'La invitación ya no está pendiente.');
+      }
+      if (invitation.expiresAt.getTime() <= input.now.getTime()) {
+        await tx
+          .update(socialInvitationsTable)
+          .set({ status: 'EXPIRED', updatedAt: input.now })
+          .where(eq(socialInvitationsTable.id, invitation.id));
+        return { kind: 'EXPIRED' };
+      }
+
+      const [friendship] = await tx
+        .select({ id: friendshipsTable.id })
+        .from(friendshipsTable)
+        .where(
+          and(
+            eq(friendshipsTable.userLow, low),
+            eq(friendshipsTable.userHigh, high),
+            eq(friendshipsTable.status, 'ACCEPTED'),
+          ),
+        )
+        .limit(1);
+      const [block] = await tx
+        .select({ blockerId: userBlocksTable.blockerId })
+        .from(userBlocksTable)
+        .where(
+          or(
+            and(
+              eq(userBlocksTable.blockerId, invitation.senderId),
+              eq(userBlocksTable.blockedId, invitation.recipientId),
+            ),
+            and(
+              eq(userBlocksTable.blockerId, invitation.recipientId),
+              eq(userBlocksTable.blockedId, invitation.senderId),
+            ),
+          ),
+        )
+        .limit(1);
+      if (!friendship || block) {
+        await tx
+          .update(socialInvitationsTable)
+          .set({ status: 'CANCELLED', updatedAt: input.now })
+          .where(eq(socialInvitationsTable.id, invitation.id));
+        return { kind: 'CANCELLED' };
+      }
+
+      const [tableRow] = await tx
+        .select()
+        .from(tablesTable)
+        .where(eq(tablesTable.id, invitation.tableId!))
+        .for('update');
+      if (!tableRow || tableRow.isPractice) {
+        throw new DomainApiException(404, 'NOT_FOUND', 'La mesa ya no está disponible.');
+      }
+      if (tableRow.status === 'WAITING' && tableRow.expiresAt.getTime() <= input.now.getTime()) {
+        await tx
+          .update(tablesTable)
+          .set({ status: 'EXPIRED', closedReason: 'TTL_EXPIRED', updatedAt: input.now })
+          .where(eq(tablesTable.id, tableRow.id));
+        await tx
+          .update(socialInvitationsTable)
+          .set({ status: 'EXPIRED', updatedAt: input.now })
+          .where(eq(socialInvitationsTable.id, invitation.id));
+        return { kind: 'EXPIRED' };
+      }
+      if (tableRow.status !== 'WAITING') {
+        throw new DomainApiException(409, 'INVALID_STATE', 'La mesa ya inició o fue cerrada.');
+      }
+      const activeSeats = await tx
+        .select()
+        .from(tableSeatsTable)
+        .where(and(eq(tableSeatsTable.tableId, tableRow.id), eq(tableSeatsTable.isActive, true)))
+        .orderBy(asc(tableSeatsTable.seat));
+      if (activeSeats.some((seat) => seat.userId === input.recipientId)) {
+        await tx
+          .update(socialInvitationsTable)
+          .set({ status: 'ACCEPTED', acceptedAt: input.now, updatedAt: input.now })
+          .where(eq(socialInvitationsTable.id, invitation.id));
+        return { kind: 'JOINED', aggregate: { row: tableRow, activeSeats } };
+      }
+      const [otherTable] = await tx
+        .select({ tableId: tableSeatsTable.tableId })
+        .from(tableSeatsTable)
+        .where(
+          and(eq(tableSeatsTable.userId, input.recipientId), eq(tableSeatsTable.isActive, true)),
+        )
+        .limit(1);
+      if (otherTable) {
+        throw new DomainApiException(409, 'CONFLICT', 'Ya participás de otra mesa activa.');
+      }
+      const maxSeats = maxSeatsForMode(tableRow.mode);
+      if (activeSeats.length >= maxSeats) {
+        throw new DomainApiException(409, 'ROOM_FULL', 'La mesa acaba de completarse.');
+      }
+      const occupied = new Set(activeSeats.map((seat) => seat.seat));
+      let seat = 0;
+      while (occupied.has(seat) && seat < maxSeats) seat++;
+      if (seat >= maxSeats)
+        throw new DomainApiException(409, 'ROOM_FULL', 'La mesa acaba de completarse.');
+      const [insertedSeat] = await tx
+        .insert(tableSeatsTable)
+        .values({
+          tableId: tableRow.id,
+          seat,
+          team: seat % 2,
+          userId: input.recipientId,
+          nickname: input.nickname,
+          isActive: true,
+          joinedAt: input.now,
+        })
+        .returning();
+      const [updatedTable] = await tx
+        .update(tablesTable)
+        .set({ updatedAt: input.now, expiresAt: new Date(input.now.getTime() + input.tableTtlMs) })
+        .where(eq(tablesTable.id, tableRow.id))
+        .returning();
+      await tx
+        .update(socialInvitationsTable)
+        .set({ status: 'ACCEPTED', acceptedAt: input.now, updatedAt: input.now })
+        .where(
+          and(
+            eq(socialInvitationsTable.id, invitation.id),
+            eq(socialInvitationsTable.status, 'PENDING'),
+          ),
+        );
+      return {
+        kind: 'JOINED',
+        aggregate: {
+          row: updatedTable!,
+          activeSeats: [...activeSeats, insertedSeat!].sort((a, b) => a.seat - b.seat),
+        },
+      };
+    });
+  }
+
+  async acceptSocialChallengeAndCreateTableTx(input: {
+    readonly invitationId: string;
+    readonly senderId: string;
+    readonly recipientId: string;
+    readonly recipientNickname: string;
+    readonly rulesetId: string;
+    readonly rulesetCode: RulesetCode;
+    readonly targetScore: 15 | 30;
+    readonly florEnabled: boolean;
+    readonly turnTimeoutMs: number;
+    readonly now: Date;
+    readonly expiresAt: Date;
+  }): Promise<
+    | { readonly kind: 'CREATED'; readonly aggregate: TableAggregate }
+    | { readonly kind: 'EXPIRED' }
+    | { readonly kind: 'CANCELLED' }
+  > {
+    return this.db.transaction(async (tx) => {
+      const [candidate] = await tx
+        .select()
+        .from(socialInvitationsTable)
+        .where(
+          and(
+            eq(socialInvitationsTable.id, input.invitationId),
+            eq(socialInvitationsTable.recipientId, input.recipientId),
+          ),
+        )
+        .limit(1);
+      if (!candidate || candidate.kind !== 'CHALLENGE' || candidate.senderId !== input.senderId) {
+        throw new DomainApiException(404, 'NOT_FOUND', 'Desafío no encontrado.');
+      }
+      const low =
+        candidate.senderId < candidate.recipientId ? candidate.senderId : candidate.recipientId;
+      const high =
+        candidate.senderId < candidate.recipientId ? candidate.recipientId : candidate.senderId;
+      const pair = await tx
+        .select({
+          id: usersTable.id,
+          nickname: usersTable.nickname,
+          status: usersTable.status,
+          deletedAt: usersTable.deletedAt,
+        })
+        .from(usersTable)
+        .where(inArray(usersTable.id, [low, high]))
+        .orderBy(asc(usersTable.id))
+        .for('update');
+      if (
+        pair.length !== 2 ||
+        pair.some((user) => user.status !== 'ACTIVE' || user.deletedAt !== null)
+      ) {
+        throw new DomainApiException(
+          403,
+          'FORBIDDEN',
+          'Una de las cuentas no puede aceptar el desafío.',
+        );
+      }
+      const [activeSanction] = await tx
+        .select({ id: sanctionsTable.id })
+        .from(sanctionsTable)
+        .where(
+          and(
+            inArray(sanctionsTable.userId, [low, high]),
+            isNull(sanctionsTable.revokedAt),
+            or(isNull(sanctionsTable.expiresAt), gt(sanctionsTable.expiresAt, input.now)),
+            inArray(sanctionsTable.type, ['MUTE', 'SUSPEND', 'BAN']),
+          ),
+        )
+        .limit(1);
+      if (activeSanction)
+        throw new DomainApiException(403, 'FORBIDDEN', 'Una de las cuentas está sancionada.');
+      const [invitation] = await tx
+        .select()
+        .from(socialInvitationsTable)
+        .where(
+          and(
+            eq(socialInvitationsTable.id, input.invitationId),
+            eq(socialInvitationsTable.recipientId, input.recipientId),
+          ),
+        )
+        .for('update');
+      if (
+        !invitation ||
+        invitation.kind !== 'CHALLENGE' ||
+        invitation.senderId !== input.senderId ||
+        invitation.mode !== '1v1' ||
+        invitation.rulesetCode !== input.rulesetCode
+      ) {
+        throw new DomainApiException(404, 'NOT_FOUND', 'Desafío no encontrado.');
+      }
+      if (invitation.status !== 'PENDING') {
+        throw new DomainApiException(409, 'CONFLICT', 'El desafío ya fue utilizado o respondido.');
+      }
+      if (invitation.expiresAt.getTime() <= input.now.getTime()) {
+        await tx
+          .update(socialInvitationsTable)
+          .set({ status: 'EXPIRED', updatedAt: input.now })
+          .where(eq(socialInvitationsTable.id, invitation.id));
+        return { kind: 'EXPIRED' };
+      }
+      const [block] = await tx
+        .select({ blockerId: userBlocksTable.blockerId })
+        .from(userBlocksTable)
+        .where(
+          or(
+            and(
+              eq(userBlocksTable.blockerId, invitation.senderId),
+              eq(userBlocksTable.blockedId, invitation.recipientId),
+            ),
+            and(
+              eq(userBlocksTable.blockerId, invitation.recipientId),
+              eq(userBlocksTable.blockedId, invitation.senderId),
+            ),
+          ),
+        )
+        .limit(1);
+      const [friendship] = await tx
+        .select({ id: friendshipsTable.id })
+        .from(friendshipsTable)
+        .where(
+          and(
+            eq(friendshipsTable.userLow, low),
+            eq(friendshipsTable.userHigh, high),
+            eq(friendshipsTable.status, 'ACCEPTED'),
+          ),
+        )
+        .limit(1);
+      if (block || !friendship) {
+        await tx
+          .update(socialInvitationsTable)
+          .set({ status: 'CANCELLED', updatedAt: input.now })
+          .where(eq(socialInvitationsTable.id, invitation.id));
+        return { kind: 'CANCELLED' };
+      }
+
+      const [activeSeat] = await tx
+        .select({ userId: tableSeatsTable.userId, tableId: tableSeatsTable.tableId })
+        .from(tableSeatsTable)
+        .where(
+          and(inArray(tableSeatsTable.userId, [low, high]), eq(tableSeatsTable.isActive, true)),
+        )
+        .limit(1);
+      if (activeSeat)
+        throw new DomainApiException(409, 'CONFLICT', 'Uno de los jugadores ya está en otra mesa.');
+
+      const tableId = generateUuidV7(input.now.getTime());
+      const [sender] = pair.filter((user) => user.id === invitation.senderId);
+      const senderNickname = sender?.nickname ?? 'Jugador';
+      const [tableRow] = await tx
+        .insert(tablesTable)
+        .values({
+          id: tableId,
+          ownerId: invitation.senderId,
+          mode: '1v1',
+          rulesetId: input.rulesetId,
+          rulesetCode: input.rulesetCode,
+          targetScore: input.targetScore,
+          florEnabled: input.florEnabled,
+          turnTimeoutMs: input.turnTimeoutMs,
+          visibility: 'PRIVATE',
+          joinCode: generateJoinCode(),
+          status: 'WAITING',
+          isPractice: false,
+          expiresAt: input.expiresAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+        })
+        .returning();
+      const participants = [
+        { userId: invitation.senderId, nickname: senderNickname, seat: 0, team: 0 },
+        { userId: invitation.recipientId, nickname: input.recipientNickname, seat: 1, team: 1 },
+      ];
+      const seats = await tx
+        .insert(tableSeatsTable)
+        .values(
+          participants.map((participant) => ({
+            ...participant,
+            tableId,
+            isActive: true,
+            joinedAt: input.now,
+          })),
+        )
+        .returning();
+      await tx
+        .update(socialInvitationsTable)
+        .set({ status: 'ACCEPTED', acceptedAt: input.now, updatedAt: input.now })
+        .where(
+          and(
+            eq(socialInvitationsTable.id, invitation.id),
+            eq(socialInvitationsTable.status, 'PENDING'),
+          ),
+        );
+      return { kind: 'CREATED', aggregate: { row: tableRow!, activeSeats: seats } };
+    });
+  }
+
+  async resetAcceptedChallenge(
+    invitationId: string,
+    recipientId: string,
+    now: Date,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(socialInvitationsTable)
+        .set({ status: 'PENDING', acceptedAt: null, updatedAt: now })
+        .where(
+          and(
+            eq(socialInvitationsTable.id, invitationId),
+            eq(socialInvitationsTable.recipientId, recipientId),
+            eq(socialInvitationsTable.kind, 'CHALLENGE'),
+            eq(socialInvitationsTable.status, 'ACCEPTED'),
+          ),
+        );
+      await tx
+        .delete(socialNotificationsTable)
+        .where(
+          and(
+            eq(socialNotificationsTable.referenceId, invitationId),
+            inArray(socialNotificationsTable.type, ['CHALLENGE_ACCEPTED']),
+          ),
+        );
+    });
   }
 
   async joinTableAtomicallyTx(input: {
@@ -553,7 +1019,13 @@ export class LobbyRepository {
   async expireStaleTablesTx(input: {
     readonly now: Date;
     readonly zombieInProgressBefore: Date;
-  }): Promise<Array<{ readonly id: string; readonly visibility: TableVisibility }>> {
+  }): Promise<
+    Array<{
+      readonly id: string;
+      readonly visibility: TableVisibility;
+      readonly userIds: readonly string[];
+    }>
+  > {
     return this.db.transaction(async (tx) => {
       const staleRows = await tx
         .select({
@@ -576,6 +1048,17 @@ export class LobbyRepository {
       if (staleRows.length === 0) return [];
 
       const staleIds = staleRows.map((r) => r.id);
+      const activeSeats = await tx
+        .select({ tableId: tableSeatsTable.tableId, userId: tableSeatsTable.userId })
+        .from(tableSeatsTable)
+        .where(and(inArray(tableSeatsTable.tableId, staleIds), eq(tableSeatsTable.isActive, true)));
+      const userIdsByTable = new Map<string, string[]>();
+      for (const seat of activeSeats) {
+        const userIds = userIdsByTable.get(seat.tableId) ?? [];
+        userIds.push(seat.userId);
+        userIdsByTable.set(seat.tableId, userIds);
+      }
+
       await tx
         .update(tablesTable)
         .set({
@@ -593,6 +1076,7 @@ export class LobbyRepository {
       return staleRows.map((r) => ({
         id: r.id,
         visibility: r.visibility as TableVisibility,
+        userIds: userIdsByTable.get(r.id) ?? [],
       }));
     });
   }

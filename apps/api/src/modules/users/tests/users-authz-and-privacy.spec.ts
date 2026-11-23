@@ -172,7 +172,12 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
       });
     }
 
-    const statsRes = await app.inject({ method: 'GET', url: `/v1/users/${userId}/stats` });
+    const authHeaders = { cookie: buildCookieHeader(jar) };
+    const statsRes = await app.inject({
+      method: 'GET',
+      url: `/v1/users/${userId}/stats`,
+      headers: authHeaders,
+    });
     expect(statsRes.statusCode).toBe(200);
     expect(statsRes.json()).toEqual({
       userId,
@@ -181,11 +186,34 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
       losses: 1,
       abandons: 0,
       winRate: 0.6667,
+      byMode: {
+        '1v1': {
+          matchesPlayed: 3,
+          wins: 2,
+          losses: 1,
+          abandons: 0,
+          winRate: 0.6667,
+          currentStreak: 1,
+          envido: { resolved: 0, won: 0, winRate: 0 },
+          truco: { resolved: 0, won: 0, winRate: 0 },
+        },
+        '2v2': {
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          abandons: 0,
+          winRate: 0,
+          currentStreak: 0,
+          envido: { resolved: 0, won: 0, winRate: 0 },
+          truco: { resolved: 0, won: 0, winRate: 0 },
+        },
+      },
     });
 
     const page1 = await app.inject({
       method: 'GET',
       url: `/v1/users/${userId}/matches?limit=2`,
+      headers: authHeaders,
     });
     expect(page1.statusCode).toBe(200);
     expect(page1.json().items).toHaveLength(2);
@@ -194,6 +222,7 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     const page2 = await app.inject({
       method: 'GET',
       url: `/v1/users/${userId}/matches?limit=2&cursor=${page1.json().nextCursor}`,
+      headers: authHeaders,
     });
     expect(page2.statusCode).toBe(200);
     expect(page2.json().items).toHaveLength(1);

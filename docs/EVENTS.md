@@ -1,6 +1,6 @@
 # Protocolo de Eventos WebSocket (`Socket.IO`) — `@truco/game-server`
 
-> **Estado:** Implementado y verificado en **M2** (`@truco/shared` + `@truco/game-server`).
+> **Estado:** eventos de juego implementados y verificados en **M2** (`@truco/shared` + `@truco/game-server`); canal social aislado implementado en **M9a** (véase §8.1).
 
 ## 1. Transporte y Autenticación de Handshake
 
@@ -226,6 +226,20 @@ El tráfico en tiempo real del lobby corre en un namespace Socket.IO **estrictam
 | `matchmaking.matched`     | Sala privada `user:<userId>` del jugador emparejado | `{ "tableId": "019a8d85-...", "roomId": "019a8d85-...", "mode": "1v1", "rulesetCode": "ar-standard-v1", "seat": 0, "team": 0 }`                                                                                                                                                                  |
 
 ---
+
+### 8.1 Canal social aislado de `/lobby` — M9a
+
+La PWA puede solicitar el mismo namespace con el ticket single-use `POST /v1/auth/ws-ticket` y `auth: { token, purpose: 'social' }`. El socket se une únicamente a la sala privada `user:<userId>`: no recibe `lobby.snapshot`, `lobby.tableUpsert` ni `lobby.tableRemoved`. Estos eventos sociales son eventos Socket.IO tipados directamente (no el envelope de juego) y no contienen estado de mesa ni datos de cartas.
+
+| Evento                | Dirección / audiencia                            | Payload y garantía                                                                                                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `social.notification` | API → sockets de `user:<recipientId>` únicamente | `SocialNotificationItem` validado: `id`, `type`, actor opcional, referencia, mesa y fechas de lectura. Tipos: solicitudes, invitaciones a mesa/desafíos y sus resultados. Nunca se emite al namespace público.                                                            |
+| `social.presence`     | API → amigos elegibles o audiencia `ALL`         | `{ userId, status: ONLINE\|IN_GAME\|OFFLINE, visible, observedAt }`. `ALL` excluye al propio usuario y a cualquier usuario bloqueado por cualquiera de las dos partes; `FRIENDS` se limita a amistades aceptadas y `NOBODY` limpia el estado previo con `visible: false`. |
+| `social.ping`         | API → cada socket conectado                      | Señal cada 15 s para sostener la presencia.                                                                                                                                                                                                                               |
+| `social.heartbeat`    | Cliente → API                                    | Renueva el lease del socket autenticado; la presencia expira tras 45 s sin heartbeat.                                                                                                                                                                                     |
+| `social.pong`         | API → socket emisor                              | Confirma conexión/heartbeat con `serverAt`.                                                                                                                                                                                                                               |
+
+Las notificaciones se guardan por usuario y se leen con `/v1/social/notifications`; la emisión WebSocket es sólo una señal de actualización. Cambiar la visibilidad de presencia limpia de inmediato la caché de los destinatarios previos. Los bloqueos prevalecen incluso cuando la persona elige presencia `ALL`.
 
 ## 9. Eventos Asíncronos de Ciclo de Vida (`apps/game-server -> BullMQ -> apps/api`)
 

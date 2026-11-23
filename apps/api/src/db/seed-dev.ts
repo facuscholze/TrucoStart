@@ -110,6 +110,7 @@ export async function seedDevelopmentUsers(
             animationsReduced: false,
             confirmCalls: false,
             historyVisibility: 'FRIENDS',
+            statsVisibility: 'FRIENDS',
             presenceVisibility: 'FRIENDS',
           },
           createdAt: now,

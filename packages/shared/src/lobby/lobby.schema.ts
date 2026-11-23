@@ -321,6 +321,8 @@ export const MatchCompletedLifecycleEventSchema = z.object({
   kind: z.literal('match.completed'),
   /** `true` en mesas de práctica: no se persiste como partida competitiva. */
   practice: z.boolean().optional(),
+  /** `true` si un bot de reemplazo ocupó uno o más asientos en la partida. */
+  hasBots: z.boolean().optional(),
   matchId: z.string().uuid(),
   roomId: z.string().min(3).max(64),
   mode: GameModeSchema,

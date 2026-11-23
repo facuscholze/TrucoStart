@@ -1,14 +1,17 @@
-import type { AuthUserSummary, TableDetailResponse } from '@truco/shared';
+import type { AuthUserSummary, FriendListItem, TableDetailResponse } from '@truco/shared';
 import { Avatar, Badge, CallButton, Toast } from '@truco/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell.js';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
 import {
+  createSocialTableInvitationRequest,
   createTableInviteRequest,
   deleteTableRequest,
   ensureGuestOrActiveSession,
   getTableDetailRequest,
   leaveTableRequest,
+  listFriendsRequest,
+  listSocialInvitationsRequest,
 } from '../../lib/api-client.js';
 import { GameTableView } from '../mesa/GameTableView.js';
 import { useLiveGameRoom } from '../mesa/useLiveGameRoom.js';
@@ -42,6 +45,13 @@ function WaitingRoomConnected({
   const [copiedInvite, setCopiedInvite] = useState<boolean>(false);
   const [busyAction, setBusyAction] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [friendInvitePanelOpen, setFriendInvitePanelOpen] = useState(false);
+  const [friends, setFriends] = useState<FriendListItem[]>([]);
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [sendingFriendInvite, setSendingFriendInvite] = useState<string | null>(null);
+  const [sentFriendInviteIds, setSentFriendInviteIds] = useState<Set<string>>(() => new Set());
 
   const isGameActive =
     session.tableStatus === 'IN_GAME' || session.view !== null || session.matchEnded !== null;
@@ -109,6 +119,60 @@ function WaitingRoomConnected({
     }
   };
 
+  const canInviteFriends = Boolean(
+    currentUser &&
+    detail.mySeat !== null &&
+    !detail.isPractice &&
+    detail.status === 'WAITING' &&
+    detail.occupiedSeats < detail.maxSeats,
+  );
+
+  const handleToggleFriendInvitePanel = async () => {
+    const open = !friendInvitePanelOpen;
+    setFriendInvitePanelOpen(open);
+    setInviteNotice(null);
+    if (!open || friendsLoaded) return;
+    setFriendsLoading(true);
+    setErrorMsg(null);
+    try {
+      const [friendsResponse, invitationsResponse] = await Promise.all([
+        listFriendsRequest(),
+        listSocialInvitationsRequest('OUTGOING'),
+      ]);
+      setFriends(friendsResponse.items);
+      setSentFriendInviteIds(
+        new Set(
+          invitationsResponse.items
+            .filter((invitation) => invitation.kind === 'TABLE' && invitation.tableId === detail.id)
+            .map((invitation) => invitation.otherUserId),
+        ),
+      );
+      setFriendsLoaded(true);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : messagesEsAr.launcher.sessionErrorFallback);
+    } finally {
+      setFriendsLoading(false);
+    }
+  };
+
+  const handleInviteFriendToTable = async (friend: FriendListItem) => {
+    setSendingFriendInvite(friend.userId);
+    setErrorMsg(null);
+    setInviteNotice(null);
+    try {
+      await createSocialTableInvitationRequest({
+        recipientUserId: friend.userId,
+        tableId: detail.id,
+      });
+      setSentFriendInviteIds((previous) => new Set(previous).add(friend.userId));
+      setInviteNotice(messagesEsAr.social.tableInviteSent);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : messagesEsAr.launcher.sessionErrorFallback);
+    } finally {
+      setSendingFriendInvite(null);
+    }
+  };
+
   if (isGameActive) {
     return <GameTableView {...session} onLeaveTable={() => void handleLeave()} />;
   }
@@ -171,6 +235,9 @@ function WaitingRoomConnected({
   };
 
   const seatIndices = Array.from({ length: detail.maxSeats }, (_, i) => i);
+  const inviteableFriends = friends.filter(
+    (friend) => !session.seats.some((seat) => seat.userId === friend.userId),
+  );
   const usSeats = seatIndices.filter((i) => i % 2 === 0);
   const themSeats = seatIndices.filter((i) => i % 2 === 1);
 
@@ -201,6 +268,9 @@ function WaitingRoomConnected({
         {errorMsg && <Toast message={errorMsg} tone="danger" onDismiss={() => setErrorMsg(null)} />}
         {session.toastMessage && (
           <Toast message={session.toastMessage} tone="info" onDismiss={session.onDismissToast} />
+        )}
+        {inviteNotice && (
+          <Toast message={inviteNotice} tone="success" onDismiss={() => setInviteNotice(null)} />
         )}
 
         {/* Código de acceso e invitación */}
@@ -234,6 +304,67 @@ function WaitingRoomConnected({
                   : messagesEsAr.waitingRoom.generateInviteCta}
               </CallButton>
             </div>
+          </section>
+        )}
+
+        {canInviteFriends && (
+          <section className="rounded-2xl border border-sky/25 bg-surface p-4 tablet:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-display text-lg font-bold text-ivory">
+                {messagesEsAr.social.tableInviteFriendsHeading}
+              </h2>
+              <CallButton
+                tone="envido"
+                disabled={friendsLoading}
+                onClick={() => void handleToggleFriendInvitePanel()}
+              >
+                {friendInvitePanelOpen
+                  ? messagesEsAr.social.tableInviteFriendsClose
+                  : messagesEsAr.social.tableInviteFriendsOpen}
+              </CallButton>
+            </div>
+            {friendInvitePanelOpen &&
+              (friendsLoading ? (
+                <p role="status" className="text-xs text-muted">
+                  {messagesEsAr.social.tableInviteFriendsLoading}
+                </p>
+              ) : inviteableFriends.length === 0 ? (
+                <p className="rounded-xl bg-elevated p-4 text-sm text-muted">
+                  {messagesEsAr.social.tableInviteFriendsEmpty}
+                </p>
+              ) : (
+                <ul className="grid grid-cols-1 tablet:grid-cols-2 gap-2.5">
+                  {inviteableFriends.map((friend) => {
+                    const alreadyInvited = sentFriendInviteIds.has(friend.userId);
+                    return (
+                      <li
+                        key={friend.userId}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-ivory/15 bg-elevated p-3"
+                      >
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <Avatar nickname={friend.nickname} sizePx={36} />
+                          <span className="truncate text-sm font-semibold text-ivory">
+                            {friend.nickname}
+                          </span>
+                        </div>
+                        <CallButton
+                          tone={alreadyInvited ? 'neutral' : 'accept'}
+                          disabled={
+                            alreadyInvited || sendingFriendInvite === friend.userId || busyAction
+                          }
+                          onClick={() => void handleInviteFriendToTable(friend)}
+                        >
+                          {alreadyInvited
+                            ? messagesEsAr.social.tableInvitePending
+                            : sendingFriendInvite === friend.userId
+                              ? messagesEsAr.social.challengeBusy
+                              : messagesEsAr.social.tableInviteFriendCta}
+                        </CallButton>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ))}
           </section>
         )}
 

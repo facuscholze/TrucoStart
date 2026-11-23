@@ -131,15 +131,16 @@
 
 ## 4. Cuenta Propia y Usuarios (`/v1/me` y `/v1/users/:id`)
 
-| Método   | Ruta                    | Auth           | Código OK | Descripción                                                                                    |
-| -------- | ----------------------- | -------------- | --------- | ---------------------------------------------------------------------------------------------- |
-| `GET`    | `/v1/me`                | `truco_access` | `200`     | Cuenta y perfil privados del usuario autenticado (`email`, `settings`, `bio`, `xp`, `level`).  |
-| `PATCH`  | `/v1/me`                | `truco_access` | `200`     | Actualiza `nickname`, `avatarId`, `bio` o `settings` propios.                                  |
-| `GET`    | `/v1/me/export`         | `truco_access` | `200`     | Exportación portátil JSON de datos personales, estadísticas y partidas recientes (Ley 25.326). |
-| `DELETE` | `/v1/me`                | `truco_access` | `200`     | Elimina cuenta propia (exige `password` si aplica), anonimiza PII y revoca todas las sesiones. |
-| `GET`    | `/v1/users/:id`         | No             | `200`     | Perfil estrictamente público (`id`, `nickname`, `isGuest`, `avatarId`, `level`, `xp`, `bio`).  |
-| `GET`    | `/v1/users/:id/stats`   | No             | `200`     | Estadísticas agregadas públicas (`matchesPlayed`, `wins`, `losses`, `abandons`, `winRate`).    |
-| `GET`    | `/v1/users/:id/matches` | No             | `200`     | Historial público de partidas paginado por cursor (`?limit=20&cursor=<matchId>`).              |
+| Método   | Ruta                             | Auth           | Código OK     | Descripción                                                                                         |
+| -------- | -------------------------------- | -------------- | ------------- | --------------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1/me`                         | `truco_access` | `200`         | Cuenta y perfil privados del usuario autenticado (`email`, `settings`, `bio`, `xp`, `level`).       |
+| `PATCH`  | `/v1/me`                         | `truco_access` | `200`         | Actualiza `nickname`, `avatarId`, `bio` o `settings` propios.                                       |
+| `GET`    | `/v1/me/export`                  | `truco_access` | `200`         | Exportación portátil JSON de datos personales, estadísticas y partidas recientes (Ley 25.326).      |
+| `DELETE` | `/v1/me`                         | `truco_access` | `200`         | Elimina cuenta propia (exige `password` si aplica), anonimiza PII y revoca todas las sesiones.      |
+| `GET`    | `/v1/users/:id`                  | No             | `200`         | Perfil estrictamente público (`id`, `nickname`, `isGuest`, `avatarId`, `level`, `xp`, `bio`).       |
+| `GET`    | `/v1/users/:id/stats`            | `truco_access` | `200` / `404` | Estadísticas agregadas, condicionadas por `statsVisibility` (independiente del historial).          |
+| `GET`    | `/v1/users/:id/matches`          | `truco_access` | `200` / `404` | Historial paginado por cursor, condicionado por `historyVisibility` (`?limit=20&cursor=<matchId>`). |
+| `GET`    | `/v1/users/:id/matches/:matchId` | `truco_access` | `200` / `404` | Detalle público filtrado de una partida visible; nunca devuelve cartas ni señas privadas.           |
 
 ### Ejemplos de Request / Response — Users
 
@@ -181,7 +182,10 @@
     "settings": {
       "soundEnabled": true,
       "animationsReduced": false,
-      "confirmCalls": true
+      "confirmCalls": true,
+      "historyVisibility": "FRIENDS",
+      "statsVisibility": "FRIENDS",
+      "presenceVisibility": "FRIENDS"
     }
   },
   "activeSessionsCount": 1,
@@ -298,3 +302,62 @@ Respuesta:
   "myTeam": 1
 }
 ```
+
+---
+
+## 6. Social, presencia e historial — M9a
+
+Todas las rutas de `/v1/social/*` requieren cookie de sesión `truco_access` y una cuenta elegible (sin sanción social activa). Las entradas se validan con esquemas estrictos de `@truco/shared`; búsqueda y mutaciones tienen límites por cuenta/IP.
+
+### Grafo social e invitaciones
+
+| Método            | Ruta                                                  | Descripción y garantías                                                                                                                                                                 |
+| ----------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`             | `/v1/social/search?nickname=<prefijo>`                | Busca apodos activos; no enumera al propio usuario, jugadores bloqueados ni cuentas con sanción activa.                                                                                 |
+| `GET`             | `/v1/social/friends`                                  | Lista amistades aceptadas y presencia que el amigo permite mostrar.                                                                                                                     |
+| `GET` / `POST`    | `/v1/social/friend-requests`                          | Lista solicitudes entrantes/salientes o crea `{ "targetUserId": "<uuid>" }`. Solicitudes cruzadas se resuelven como una amistad aceptada y las aceptaciones repetidas son idempotentes. |
+| `POST`            | `/v1/social/friend-requests/:requestId/accept`        | Sólo el destinatario puede aceptar.                                                                                                                                                     |
+| `POST`            | `/v1/social/friend-requests/:requestId/decline`       | Sólo el destinatario puede rechazar.                                                                                                                                                    |
+| `POST`            | `/v1/social/friend-requests/:requestId/cancel`        | Sólo quien inició puede cancelar.                                                                                                                                                       |
+| `DELETE`          | `/v1/social/friends/:userId`                          | Quita la amistad y cancela invitaciones sociales pendientes entre ambas cuentas.                                                                                                        |
+| `GET`             | `/v1/social/blocks`                                   | Lista los bloqueos propios.                                                                                                                                                             |
+| `POST` / `DELETE` | `/v1/social/blocks/:userId`                           | Bloquea/desbloquea; un bloqueo también quita la amistad, cancela invitaciones pendientes y limpia presencia visible para ambas cuentas.                                                 |
+| `POST`            | `/v1/social/table-invitations`                        | Crea una invitación dirigida a una amistad para una mesa propia/en espera. Body: `{ "recipientUserId": "<uuid>", "tableId": "<uuid>" }`.                                                |
+| `POST`            | `/v1/social/challenges`                               | Desafío directo 1v1 a una amistad. Body: `{ "recipientUserId": "<uuid>", "mode": "1v1", "rulesetCode": "ar-standard-v1" }`.                                                             |
+| `GET`             | `/v1/social/invitations?direction=INCOMING\|OUTGOING` | Lista invitaciones pendientes por dirección. La omisión de `direction` equivale a `INCOMING`.                                                                                           |
+| `POST`            | `/v1/social/invitations/:invitationId/accept`         | Acepta una invitación/desafío una sola vez y crea/abre la mesa. Se vuelve a validar amistad, bloqueo, sanción y expiración en servidor.                                                 |
+| `POST`            | `/v1/social/invitations/:invitationId/decline`        | Rechaza una invitación recibida.                                                                                                                                                        |
+| `POST`            | `/v1/social/invitations/:invitationId/cancel`         | Cancela una invitación propia pendiente.                                                                                                                                                |
+
+Un bloqueo prevalece sobre visibilidad pública, solicitudes, invitaciones, desafíos y aceptación. Las respuestas `404` para pares bloqueados evitan confirmar la existencia de una relación. Las cuentas sancionadas no aparecen en búsqueda y no pueden enviar solicitudes ni invitaciones.
+
+### Notificaciones
+
+| Método | Ruta                                                  | Descripción                                                          |
+| ------ | ----------------------------------------------------- | -------------------------------------------------------------------- |
+| `GET`  | `/v1/social/notifications?cursor=&limit=&unreadOnly=` | Lista notificaciones propias (`limit` 1–50; cursor UUIDv7 opcional). |
+| `GET`  | `/v1/social/notifications/unread-count`               | Cuenta notificaciones propias no leídas.                             |
+| `POST` | `/v1/social/notifications/:notificationId/read`       | Marca una notificación propia como leída.                            |
+| `POST` | `/v1/social/notifications/read-all`                   | Marca todas las propias como leídas.                                 |
+
+### Privacidad de presencia, historial y estadísticas
+
+`PATCH /v1/me` acepta por separado en `settings`:
+
+```json
+{
+  "settings": {
+    "historyVisibility": "FRIENDS",
+    "statsVisibility": "NOBODY",
+    "presenceVisibility": "FRIENDS"
+  }
+}
+```
+
+Cada valor admite `ALL`, `FRIENDS` o `NOBODY`; el default es `FRIENDS`. La propia cuenta siempre puede consultar sus datos. Bloquear a alguien invalida la visibilidad entre ese par aun si una de las partes eligió `ALL`. El historial y las estadísticas se autorizan de forma independiente; el endpoint devuelve `404` si la política no permite el acceso.
+
+- `GET /v1/users/:id/stats`: estadísticas derivadas en servidor desde partidas/eventos finalizados; no se mantienen contadores editables.
+- `GET /v1/users/:id/matches`: historial paginado, filtrable por modalidad, resultado y presencia de bots.
+- `GET /v1/users/:id/matches/:matchId`: detalle resumido y timeline de eventos permitidos. Nunca incluye cartas, señas privadas ni semilla antes de la revelación.
+
+El esquema OpenAPI completo y versionado está en `docs/openapi.v1.json` y se valida en la suite API.

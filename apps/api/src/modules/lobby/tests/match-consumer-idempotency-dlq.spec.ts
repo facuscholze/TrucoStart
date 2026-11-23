@@ -147,7 +147,11 @@ describe('Pre-M5 Item 1: Match Result Consumer Idempotency (matchId), Backoff Re
     expect(eventRows).toHaveLength(2);
 
     // Estadísticas públicas exactas (1 victoria para P1, 1 derrota para P2; jamás duplicadas)
-    const statsP1 = await app.inject({ method: 'GET', url: `/v1/users/${p1User.id}/stats` });
+    const statsP1 = await app.inject({
+      method: 'GET',
+      url: `/v1/users/${p1User.id}/stats`,
+      headers: { cookie: p1Cookie },
+    });
     expect(statsP1.json()).toMatchObject({
       userId: p1User.id,
       matchesPlayed: 1,
@@ -157,7 +161,11 @@ describe('Pre-M5 Item 1: Match Result Consumer Idempotency (matchId), Backoff Re
       winRate: 1,
     });
 
-    const statsP2 = await app.inject({ method: 'GET', url: `/v1/users/${p2User.id}/stats` });
+    const statsP2 = await app.inject({
+      method: 'GET',
+      url: `/v1/users/${p2User.id}/stats`,
+      headers: { cookie: p2Cookie },
+    });
     expect(statsP2.json()).toMatchObject({
       userId: p2User.id,
       matchesPlayed: 1,

@@ -34,6 +34,25 @@ import type {
   MyModerationState,
   TutorialProgressResponse,
   TutorialProgressUpdateRequest,
+  UserMatchDetailResponse,
+  PlayerSearchResponse,
+  FriendListResponse,
+  FriendRequestListResponse,
+  FriendRequestMutationResponse,
+  BlockListResponse,
+  BlockMutationResponse,
+  SocialInvitationListResponse,
+  SocialInvitationListQuery,
+  CreateSocialInvitationResponse,
+  AcceptSocialInvitationResponse,
+  SocialInvitationActionResponse,
+  SocialNotificationListResponse,
+  UnreadNotificationCountResponse,
+  ReadNotificationResponse,
+  MarkAllNotificationsReadResponse,
+  CreateFriendRequest,
+  CreateTableInvitationRequest,
+  CreateChallengeRequest,
 } from '@truco/shared';
 
 export class WebApiError extends Error {
@@ -211,15 +230,35 @@ export async function getUserStatsRequest(userId: string): Promise<UserStatsResp
   });
 }
 
+export interface UserHistoryFilters {
+  readonly mode?: '1v1' | '2v2';
+  readonly outcome?: 'WIN' | 'LOSS' | 'ABANDON';
+  readonly bots?: 'ANY' | 'BOTS' | 'HUMANS';
+}
+
 export async function getUserMatchesRequest(
   userId: string,
   cursor?: string | null,
   limit = 10,
+  filters: UserHistoryFilters = {},
 ): Promise<UserMatchesResponse> {
   const qs = new URLSearchParams({ limit: String(limit) });
   if (cursor) qs.set('cursor', cursor);
+  if (filters.mode) qs.set('mode', filters.mode);
+  if (filters.outcome) qs.set('outcome', filters.outcome);
+  if (filters.bots) qs.set('bots', filters.bots);
   return requestJson<UserMatchesResponse>(
     `/v1/users/${encodeURIComponent(userId)}/matches?${qs.toString()}`,
+    { method: 'GET' },
+  );
+}
+
+export async function getUserMatchDetailRequest(
+  userId: string,
+  matchId: string,
+): Promise<UserMatchDetailResponse> {
+  return requestJson<UserMatchDetailResponse>(
+    `/v1/users/${encodeURIComponent(userId)}/matches/${encodeURIComponent(matchId)}`,
     { method: 'GET' },
   );
 }
@@ -230,6 +269,166 @@ export async function createReportRequest(
   return requestJson<CreateReportResponse>('/v1/me/reports', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export async function searchPlayersRequest(
+  nickname: string,
+  limit = 10,
+): Promise<PlayerSearchResponse> {
+  const qs = new URLSearchParams({ nickname, limit: String(limit) });
+  return requestJson<PlayerSearchResponse>(`/v1/social/search?${qs}`, { method: 'GET' });
+}
+
+export async function listFriendsRequest(): Promise<FriendListResponse> {
+  return requestJson<FriendListResponse>('/v1/social/friends', { method: 'GET' });
+}
+
+export async function listFriendRequestsRequest(): Promise<FriendRequestListResponse> {
+  return requestJson<FriendRequestListResponse>('/v1/social/friend-requests', { method: 'GET' });
+}
+
+export async function createFriendRequestRequest(
+  input: CreateFriendRequest,
+): Promise<FriendRequestMutationResponse> {
+  return requestJson<FriendRequestMutationResponse>('/v1/social/friend-requests', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function acceptFriendRequestRequest(
+  requestId: string,
+): Promise<FriendRequestMutationResponse> {
+  return requestJson<FriendRequestMutationResponse>(
+    `/v1/social/friend-requests/${encodeURIComponent(requestId)}/accept`,
+    { method: 'POST' },
+  );
+}
+
+export async function declineFriendRequestRequest(
+  requestId: string,
+): Promise<FriendRequestMutationResponse> {
+  return requestJson<FriendRequestMutationResponse>(
+    `/v1/social/friend-requests/${encodeURIComponent(requestId)}/decline`,
+    { method: 'POST' },
+  );
+}
+
+export async function cancelFriendRequestRequest(
+  requestId: string,
+): Promise<FriendRequestMutationResponse> {
+  return requestJson<FriendRequestMutationResponse>(
+    `/v1/social/friend-requests/${encodeURIComponent(requestId)}/cancel`,
+    { method: 'POST' },
+  );
+}
+
+export async function removeFriendRequest(userId: string): Promise<{ removed: true }> {
+  return requestJson<{ removed: true }>(`/v1/social/friends/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listBlockedUsersRequest(): Promise<BlockListResponse> {
+  return requestJson<BlockListResponse>('/v1/social/blocks', { method: 'GET' });
+}
+
+export async function blockUserRequest(userId: string): Promise<BlockMutationResponse> {
+  return requestJson<BlockMutationResponse>(`/v1/social/blocks/${encodeURIComponent(userId)}`, {
+    method: 'POST',
+  });
+}
+
+export async function unblockUserRequest(userId: string): Promise<BlockMutationResponse> {
+  return requestJson<BlockMutationResponse>(`/v1/social/blocks/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function createSocialTableInvitationRequest(
+  input: CreateTableInvitationRequest,
+): Promise<CreateSocialInvitationResponse> {
+  return requestJson<CreateSocialInvitationResponse>('/v1/social/table-invitations', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function createDirectChallengeRequest(
+  input: CreateChallengeRequest,
+): Promise<CreateSocialInvitationResponse> {
+  return requestJson<CreateSocialInvitationResponse>('/v1/social/challenges', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listSocialInvitationsRequest(
+  direction: SocialInvitationListQuery['direction'] = 'INCOMING',
+): Promise<SocialInvitationListResponse> {
+  const qs = new URLSearchParams({ direction });
+  return requestJson<SocialInvitationListResponse>(`/v1/social/invitations?${qs}`, {
+    method: 'GET',
+  });
+}
+
+export async function acceptSocialInvitationRequest(
+  invitationId: string,
+): Promise<AcceptSocialInvitationResponse> {
+  return requestJson<AcceptSocialInvitationResponse>(
+    `/v1/social/invitations/${encodeURIComponent(invitationId)}/accept`,
+    { method: 'POST' },
+  );
+}
+
+export async function declineSocialInvitationRequest(
+  invitationId: string,
+): Promise<SocialInvitationActionResponse> {
+  return requestJson<SocialInvitationActionResponse>(
+    `/v1/social/invitations/${encodeURIComponent(invitationId)}/decline`,
+    { method: 'POST' },
+  );
+}
+
+export async function cancelSocialInvitationRequest(
+  invitationId: string,
+): Promise<SocialInvitationActionResponse> {
+  return requestJson<SocialInvitationActionResponse>(
+    `/v1/social/invitations/${encodeURIComponent(invitationId)}/cancel`,
+    { method: 'POST' },
+  );
+}
+
+export async function listSocialNotificationsRequest(
+  options: { cursor?: string | null; limit?: number; unreadOnly?: boolean } = {},
+): Promise<SocialNotificationListResponse> {
+  const qs = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.cursor) qs.set('cursor', options.cursor);
+  if (options.unreadOnly !== undefined) qs.set('unreadOnly', String(options.unreadOnly));
+  return requestJson<SocialNotificationListResponse>(`/v1/social/notifications?${qs}`, {
+    method: 'GET',
+  });
+}
+
+export async function getUnreadSocialNotificationCountRequest(): Promise<UnreadNotificationCountResponse> {
+  return requestJson<UnreadNotificationCountResponse>('/v1/social/notifications/unread-count', {
+    method: 'GET',
+  });
+}
+
+export async function markSocialNotificationReadRequest(
+  notificationId: string,
+): Promise<ReadNotificationResponse> {
+  return requestJson<ReadNotificationResponse>(
+    `/v1/social/notifications/${encodeURIComponent(notificationId)}/read`,
+    { method: 'POST' },
+  );
+}
+
+export async function markAllSocialNotificationsReadRequest(): Promise<MarkAllNotificationsReadResponse> {
+  return requestJson<MarkAllNotificationsReadResponse>('/v1/social/notifications/read-all', {
+    method: 'POST',
   });
 }
 

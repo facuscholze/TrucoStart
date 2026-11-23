@@ -10,7 +10,7 @@ import {
 import { MATCH_LIFECYCLE_QUEUE_NAME, type WsEnvelope, WsEnvelopeSchema } from '@truco/shared';
 import { asc, eq } from 'drizzle-orm';
 import { io as createSocketClient, type Socket as ClientSocket } from 'socket.io-client';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApiApp } from '../../../bootstrap.js';
 import {
   createAdaptiveTestDatabase,
@@ -25,6 +25,8 @@ import {
 } from '../../../db/schema/index.js';
 import { buildCookieHeader, extractAuthCookies } from '../../auth/tests/test-cookie-jar.js';
 import { HttpGameRoomProvisioner } from '../ports/game-room-provisioner.js';
+import { LobbyRealtimeGateway } from '../lobby-realtime.gateway.js';
+import { USER_PRESENCE_STORE } from '../../social/presence-store.interface.js';
 import {
   BullMqMatchLifecycleConsumer,
   InMemoryMatchLifecycleConsumer,
@@ -238,7 +240,7 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
     await dbHandle.close();
   });
 
-  it('creates private table in apps/api, joins by 6-char code, plays full match on real apps/game-server, and persists matches + match_players + match_events atomically in PostgreSQL', async () => {
+  it('adds two real users as friends, invites them to a table, plays a full match on apps/game-server, and persists verifiable history in PostgreSQL', async () => {
     // 1. Autenticar dos clientes reales en apps/api
     const p1Auth = await apiApp.inject({
       method: 'POST',
@@ -258,7 +260,23 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
     const p2Cookie = buildCookieHeader(extractAuthCookies(p2Auth.headers['set-cookie']).map);
     const p2User = p2Auth.json<{ user: { id: string; nickname: string } }>().user;
 
-    // 2. P1 crea mesa privada a 15 puntos sin flor -> apps/api aprovisiona sala en apps/game-server vía HTTP HMAC firmado
+    // 2. P1 y P2 completan el flujo social real de solicitud y aceptación de amistad.
+    const friendRequest = await apiApp.inject({
+      method: 'POST',
+      url: '/v1/social/friend-requests',
+      headers: { cookie: p1Cookie },
+      payload: { targetUserId: p2User.id },
+    });
+    expect(friendRequest.statusCode).toBe(201);
+    const friendAccepted = await apiApp.inject({
+      method: 'POST',
+      url: `/v1/social/friend-requests/${friendRequest.json<{ requestId: string }>().requestId}/accept`,
+      headers: { cookie: p2Cookie },
+    });
+    expect(friendAccepted.statusCode).toBe(200);
+    expect(friendAccepted.json<{ status: string }>().status).toBe('ACCEPTED');
+
+    // 3. P1 crea mesa privada a 15 puntos sin flor -> apps/api aprovisiona sala en apps/game-server vía HTTP HMAC firmado
     const createRes = await apiApp.inject({
       method: 'POST',
       url: '/v1/tables',
@@ -283,19 +301,27 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
     expect(createdTable.joinCode).toHaveLength(6);
     expect(createdTable.mySeat).toBe(0);
 
-    // 3. P2 se une usando el código de 6 caracteres (POST /v1/tables/join-by-code)
+    // 4. P1 invita a su amigo a la mesa privada y P2 acepta una única invitación.
+    const tableInvitation = await apiApp.inject({
+      method: 'POST',
+      url: '/v1/social/table-invitations',
+      headers: { cookie: p1Cookie },
+      payload: { recipientUserId: p2User.id, tableId: createdTable.id },
+    });
+    expect(tableInvitation.statusCode).toBe(201);
     const joinRes = await apiApp.inject({
       method: 'POST',
-      url: '/v1/tables/join-by-code',
+      url: `/v1/social/invitations/${tableInvitation.json<{ invitationId: string }>().invitationId}/accept`,
       headers: { cookie: p2Cookie },
-      payload: { code: createdTable.joinCode },
     });
     expect(joinRes.statusCode).toBe(200);
-    const joinedTable = joinRes.json<{ id: string; roomId: string; mySeat: number }>();
+    expect(joinRes.json<{ kind: string }>().kind).toBe('TABLE');
+    const joinedTable = joinRes.json<{ table: { id: string; roomId: string; mySeat: number } }>()
+      .table;
     expect(joinedTable.id).toBe(createdTable.id);
     expect(joinedTable.mySeat).toBe(1);
 
-    // 4. Ambos emiten ws-ticket efímero en apps/api y conectan a apps/game-server real
+    // 5. Ambos emiten ws-ticket efímero en apps/api y conectan a apps/game-server real
     const t1Res = await apiApp.inject({
       method: 'POST',
       url: '/v1/auth/ws-ticket',
@@ -313,6 +339,21 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
     const wsP2 = new RealGameWsPlayer(1);
     await wsP1.connect(gameServerUrl, ticket1);
     await wsP2.connect(gameServerUrl, ticket2);
+
+    const presenceStore = apiApp.get(USER_PRESENCE_STORE);
+    const presenceSocketId = 'full-match-e2e-social-p2';
+    await presenceStore.connect(p2User.id, presenceSocketId, Date.now(), 45_000);
+    const presenceSpy = vi
+      .spyOn(apiApp.get(LobbyRealtimeGateway), 'emitSocialPresence')
+      .mockImplementation(() => undefined);
+    const sawPresenceForP1 = (status: 'IN_GAME' | 'ONLINE') =>
+      presenceSpy.mock.calls.some(
+        ([recipientId, event]) =>
+          recipientId === p1User.id &&
+          event.userId === p2User.id &&
+          event.status === status &&
+          event.visible,
+      );
 
     try {
       wsP1.send('table.join', { roomId: createdTable.roomId, preferredSeat: 0 });
@@ -337,6 +378,22 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
         if (row[0]?.status === 'IN_GAME') break;
         await new Promise((r) => setTimeout(r, 25));
       }
+
+      const presenceStartDeadline = Date.now() + 3_000;
+      while (!sawPresenceForP1('IN_GAME') && Date.now() < presenceStartDeadline) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(sawPresenceForP1('IN_GAME')).toBe(true);
+      const friendsDuringMatch = await apiApp.inject({
+        method: 'GET',
+        url: '/v1/social/friends',
+        headers: { cookie: p1Cookie },
+      });
+      expect(
+        friendsDuringMatch
+          .json<{ items: Array<{ userId: string; presence: string | null }> }>()
+          .items.find((friend) => friend.userId === p2User.id)?.presence,
+      ).toBe('IN_GAME');
 
       const deleteAfterStart = await apiApp.inject({
         method: 'DELETE',
@@ -415,6 +472,11 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
         .from(tablesTable)
         .where(eq(tablesTable.id, createdTable.id));
       expect(finalTable[0]!.status).toBe('FINISHED');
+      const presenceEndDeadline = Date.now() + 3_000;
+      while (!sawPresenceForP1('ONLINE') && Date.now() < presenceEndDeadline) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(sawPresenceForP1('ONLINE')).toBe(true);
 
       const remainingActiveSeats = await dbHandle.db
         .select()
@@ -424,9 +486,11 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
 
       // Las estadísticas públicas y el historial de partidas reflejan la partida persistida
       const winnerUserId = winnerTeam === 0 ? p1User.id : p2User.id;
+      const winnerCookie = winnerUserId === p1User.id ? p1Cookie : p2Cookie;
       const statsRes = await apiApp.inject({
         method: 'GET',
         url: `/v1/users/${winnerUserId}/stats`,
+        headers: { cookie: winnerCookie },
       });
       expect(statsRes.statusCode).toBe(200);
       expect(statsRes.json<{ matchesPlayed: number; wins: number }>()).toMatchObject({
@@ -434,6 +498,8 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
         wins: 1,
       });
     } finally {
+      presenceSpy.mockRestore();
+      await presenceStore.disconnect(p2User.id, presenceSocketId, Date.now());
       wsP1.disconnect();
       wsP2.disconnect();
     }

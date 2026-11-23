@@ -66,6 +66,7 @@ export const profilesTable = pgTable('profiles', {
     animationsReduced: false,
     confirmCalls: false,
     historyVisibility: 'FRIENDS',
+    statsVisibility: 'FRIENDS',
     presenceVisibility: 'FRIENDS',
   }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

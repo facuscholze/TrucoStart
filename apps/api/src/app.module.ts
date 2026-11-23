@@ -21,6 +21,7 @@ import {
   type ObservabilityModuleOptions,
 } from './modules/observability/observability.module.js';
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
+import { SocialModule } from './modules/social/social.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 export interface CreateAppModuleOptions {
@@ -76,6 +77,7 @@ export class AppModule {
             ...(sharedSessionSecret !== undefined ? { sessionSecret: sharedSessionSecret } : {}),
           },
         }),
+        SocialModule,
         MatchmakingModule,
         ModerationModule.register({
           ...options.moderationOptions,

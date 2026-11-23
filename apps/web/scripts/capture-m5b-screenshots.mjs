@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Captura las 14 screenshots de M5b (7 pantallas x 360px / 1200px) en docs/screenshots/.
+ * Captura las pantallas M5b/M6 y las 10 vistas M9a (amigos, solicitudes, notificaciones,
+ * historial y estadísticas a 360/1200 px) en docs/screenshots/.
  *
  * Requisitos: `pnpm --filter @truco/web build` ya ejecutado (usa `vite preview`).
  *
@@ -204,9 +205,109 @@ async function seedRealMatch(browser) {
   console.log('✓ Partida semilla completada (estadísticas e historial reales en PostgreSQL)');
 
   const storageStateA = await ctxA.storageState();
+  const storageStateB = await ctxB.storageState();
   await ctxA.close();
   await ctxB.close();
-  return storageStateA;
+  return { playerA: storageStateA, playerB: storageStateB };
+}
+
+async function apiJson(context, pathname, method = 'GET', data = undefined) {
+  const response = await context.request.fetch(`${BASE_URL}${pathname}`, {
+    method,
+    ...(data !== undefined ? { data } : {}),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok()) {
+    throw new Error(`${method} ${pathname}: HTTP ${response.status()} ${JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
+/** Crea fixtures sociales mediante las rutas reales de la API para capturas M9a. */
+async function seedM9aSocialFixtures(browser, playerAState, playerBState) {
+  const contextA = await browser.newContext({ locale: 'es-AR', storageState: playerAState });
+  const contextB = await browser.newContext({ locale: 'es-AR', storageState: playerBState });
+  const contextC = await browser.newContext({ locale: 'es-AR' });
+
+  const meA = await apiJson(contextA, '/v1/me');
+  const meB = await apiJson(contextB, '/v1/me');
+  const friendRequest = await apiJson(contextA, '/v1/social/friend-requests', 'POST', {
+    targetUserId: meB.user.id,
+  });
+  await apiJson(contextB, `/v1/social/friend-requests/${friendRequest.requestId}/accept`, 'POST');
+
+  await apiJson(contextC, '/v1/auth/guest', 'POST', {
+    deviceName: 'Captura M9a · tercer jugador',
+  });
+  await apiJson(contextC, '/v1/social/friend-requests', 'POST', {
+    targetUserId: meA.user.id,
+  });
+  await apiJson(contextB, '/v1/social/challenges', 'POST', {
+    recipientUserId: meA.user.id,
+    mode: '1v1',
+    rulesetCode: 'ar-standard-v1',
+  });
+
+  // Mantener a B conectado al canal social para que A muestre presencia ONLINE.
+  const friendPage = await contextB.newPage();
+  await friendPage.goto(`${BASE_URL}/amigos`);
+  await friendPage.getByRole('heading', { name: /Amigos y notificaciones/i }).waitFor();
+  await friendPage
+    .getByText('Notificaciones en vivo', { exact: true })
+    .waitFor({ timeout: 30_000 });
+
+  await contextA.close();
+  await contextC.close();
+  console.log(
+    `✓ Fixtures sociales M9a: ${meA.user.nickname} y ${meB.user.nickname} son amigos; solicitud, desafío y notificaciones reales sembrados`,
+  );
+  return { friendContext: contextB, friendNickname: meB.user.nickname };
+}
+
+async function captureSection(page, headingText, fileName) {
+  const heading = page.getByRole('heading', { name: headingText, exact: true });
+  const section = page.locator('section').filter({ has: heading }).first();
+  await section.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  const file = path.join(OUT_DIR, `${fileName}.png`);
+  await page.screenshot({ path: file, fullPage: false });
+  console.log(`✓ ${path.relative(REPO_ROOT, file)}`);
+}
+
+async function captureM9aScreenshots(browser, playerAState, friendNickname) {
+  for (const viewport of VIEWPORTS) {
+    const context = await browser.newContext({
+      viewport: { width: viewport.width, height: viewport.height },
+      isMobile: viewport.isMobile,
+      hasTouch: viewport.isMobile,
+      deviceScaleFactor: 2,
+      locale: 'es-AR',
+      storageState: playerAState,
+    });
+    const page = await context.newPage();
+    const suffix = viewport.suffix;
+
+    await page.goto(`${BASE_URL}/amigos`);
+    await page.getByRole('heading', { name: /Amigos y notificaciones/i }).waitFor();
+    await page.getByRole('heading', { name: 'Tus amigos', exact: true }).waitFor();
+    const friendsSection = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Tus amigos', exact: true }) })
+      .first();
+    await friendsSection
+      .getByText(friendNickname, { exact: true })
+      .first()
+      .waitFor({ timeout: 30_000 });
+    await captureSection(page, 'Tus amigos', `m9a-amigos-${suffix}`);
+    await captureSection(page, 'Solicitudes de amistad', `m9a-solicitudes-${suffix}`);
+    await captureSection(page, 'Notificaciones', `m9a-notificaciones-${suffix}`);
+
+    await page.goto(`${BASE_URL}/perfil`);
+    await page.getByRole('heading', { name: 'Estadísticas oficiales', exact: true }).waitFor();
+    await captureSection(page, 'Estadísticas oficiales', `m9a-estadisticas-${suffix}`);
+    await captureSection(page, 'Historial reciente de partidas', `m9a-historial-${suffix}`);
+    await context.close();
+  }
 }
 
 /** Publica una mesa pública 2v2 para que el Lobby muestre mesas reales en la captura. */
@@ -269,21 +370,45 @@ async function main() {
   await mkdir(OUT_DIR, { recursive: true });
 
   console.log('Levantando stack E2E (API :3001 + game-server :3002) y vite preview :4173…');
-  run('api', 'pnpm', ['--filter', '@truco/api', 'exec', 'tsx', 'scripts/e2e-stack.ts'], REPO_ROOT);
+  run(
+    'api',
+    'corepack',
+    ['pnpm', '--filter', '@truco/api', 'exec', 'tsx', 'scripts/e2e-stack.ts'],
+    REPO_ROOT,
+  );
   await waitForHttp(API_HEALTH_URL, 'API E2E');
 
   run(
     'web',
-    'pnpm',
-    ['--filter', '@truco/web', 'exec', 'vite', 'preview', '--host', '0.0.0.0', '--port', '4173'],
+    'corepack',
+    [
+      'pnpm',
+      '--filter',
+      '@truco/web',
+      'exec',
+      'vite',
+      'preview',
+      '--host',
+      '0.0.0.0',
+      '--port',
+      '4173',
+    ],
     REPO_ROOT,
   );
   await waitForHttp(`${BASE_URL}/`, 'vite preview');
 
   const browser = await launchChromium();
   let publicTableContext = null;
+  let socialFriendContext = null;
   try {
-    const storageState = await seedRealMatch(browser);
+    const playerStates = await seedRealMatch(browser);
+    const socialFixtures = await seedM9aSocialFixtures(
+      browser,
+      playerStates.playerA,
+      playerStates.playerB,
+    );
+    socialFriendContext = socialFixtures.friendContext;
+    const storageState = playerStates.playerA;
     publicTableContext = await seedPublicTable(browser);
 
     for (const viewport of VIEWPORTS) {
@@ -446,15 +571,18 @@ async function main() {
         await first.context.close();
       }
     }
+
+    await captureM9aScreenshots(browser, playerStates.playerA, socialFixtures.friendNickname);
   } finally {
+    await socialFriendContext?.close().catch(() => undefined);
     await publicTableContext?.close().catch(() => undefined);
     await browser.close();
     shutdownChildren();
     const { readdir } = await import('node:fs/promises');
     const files = (await readdir(OUT_DIR))
-      .filter((f) => f.startsWith('m5b-') || f.startsWith('m6-'))
+      .filter((f) => f.startsWith('m5b-') || f.startsWith('m6-') || f.startsWith('m9a-'))
       .sort();
-    console.log(`\n${files.length} screenshots M5b/M6 en docs/screenshots/`);
+    console.log(`\n${files.length} screenshots M5b/M6/M9a en docs/screenshots/`);
     for (const file of files) console.log(` - ${file}`);
   }
 }

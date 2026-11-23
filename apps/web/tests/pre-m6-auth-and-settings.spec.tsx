@@ -70,15 +70,50 @@ const guestUser: AuthUserSummary = {
 function mockProfileLoads() {
   getMeRequest.mockResolvedValue({
     user: registeredUser,
-    profile: { bio: 'Juego de mano', avatarSeed: 'gaucho', settings: {} },
+    profile: {
+      bio: 'Juego de mano',
+      avatarId: 'gaucho',
+      level: 1,
+      xp: 0,
+      settings: {
+        soundEnabled: true,
+        animationsReduced: false,
+        confirmCalls: false,
+        historyVisibility: 'FRIENDS',
+        statsVisibility: 'FRIENDS',
+        presenceVisibility: 'FRIENDS',
+      },
+    },
   });
   getUserStatsRequest.mockResolvedValue({
     userId: registeredUser.id,
-    played: 4,
+    matchesPlayed: 4,
     wins: 3,
     losses: 1,
     abandons: 0,
     winRate: 0.75,
+    byMode: {
+      '1v1': {
+        matchesPlayed: 4,
+        wins: 3,
+        losses: 1,
+        abandons: 0,
+        winRate: 0.75,
+        currentStreak: 2,
+        envido: { resolved: 1, won: 1, winRate: 1 },
+        truco: { resolved: 2, won: 1, winRate: 0.5 },
+      },
+      '2v2': {
+        matchesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        abandons: 0,
+        winRate: 0,
+        currentStreak: 0,
+        envido: { resolved: 0, won: 0, winRate: 0 },
+        truco: { resolved: 0, won: 0, winRate: 0 },
+      },
+    },
   });
   getUserMatchesRequest.mockResolvedValue({ items: [], nextCursor: null });
   listActiveSessionsRequest.mockResolvedValue({

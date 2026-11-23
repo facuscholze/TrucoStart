@@ -100,6 +100,8 @@ export const matchesTable = pgTable('matches', {
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
   result: jsonb('result').$type<Record<string, unknown>>(),
+  /** Si hubo uno o más bots como asiento durante esta partida competitiva. */
+  hasBots: boolean('has_bots').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

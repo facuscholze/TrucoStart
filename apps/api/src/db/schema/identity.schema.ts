@@ -61,10 +61,13 @@ export const profilesTable = pgTable('profiles', {
   level: integer('level').notNull().default(1),
   xp: integer('xp').notNull().default(0),
   bio: varchar('bio', { length: 280 }).notNull().default(''),
-  settings: jsonb('settings')
-    .$type<UserSettings>()
-    .notNull()
-    .default({ soundEnabled: true, animationsReduced: false, confirmCalls: false }),
+  settings: jsonb('settings').$type<UserSettings>().notNull().default({
+    soundEnabled: true,
+    animationsReduced: false,
+    confirmCalls: false,
+    historyVisibility: 'FRIENDS',
+    presenceVisibility: 'FRIENDS',
+  }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -109,6 +109,8 @@ export async function seedDevelopmentUsers(
             soundEnabled: true,
             animationsReduced: false,
             confirmCalls: false,
+            historyVisibility: 'FRIENDS',
+            presenceVisibility: 'FRIENDS',
           },
           createdAt: now,
           updatedAt: now,

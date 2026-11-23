@@ -50,6 +50,13 @@
       "when": 1795050000000,
       "tag": "0006_legal_acceptance",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795090000000,
+      "tag": "0007_m9a_social_history",
+      "breakpoints": true
     }
   ]
 }

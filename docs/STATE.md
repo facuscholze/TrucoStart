@@ -1,8 +1,8 @@
 # Estado del Proyecto ("Mesa de Truco")
 
-- **Última actualización:** 2026-11-18
-- **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M8c cerrado** — despliegue a staging (Caddy perimetral en 80/443, firewall en `DOCKER-USER` limitado a Cloudflare, IP real del cliente resuelta en el borde, adaptadores reales con `jose`/`nodemailer`, escáner de secretos con test de señuelos, `docs/DEPLOY.md` con primer despliegue y regiones de São Paulo, ADR-022). **M8d pendiente.** _(M8b se mantiene cerrado: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
+- **Última actualización:** 2026-11-19
+- **Etapa activa:** Etapa 2 — M9a (amistades, presencia, invitaciones, privacidad, notificaciones e historial/estadísticas; **sin rankings ni gamificación**).
+- **Módulo actual:** **M8d cerrado en código; infraestructura real pendiente. M9a implementado en la rama, en verificación local y CI.** El alcance y evidencia de M9a se registran al final de este documento. _(M8b se mantiene cerrado: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
 
 ---
 
@@ -196,8 +196,7 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ## Próximos pasos inmediatos
 
-1. **M7 cerrado** ⏸ — esperando confirmación del usuario para arrancar **M8** (observabilidad, endurecimiento, carga k6, staging, `PERF.md`/`THREAT_MODEL.md`/`RUNBOOKS.md`).
-2. Antes de M8: revisión legal de datos personales (`STATE-09`) y proveedores reales de email/Google/Captcha (`STATE-10`..`STATE-12`), que hoy son adaptadores simulados.
+Este bloque es histórico de M7; el estado vigente de M9a está al final del documento. Cerrar la verificación, actualizar documentación/capturas y consultar CI antes de marcar M9a como verificado. No iniciar rankings ni gamificación en esta entrega.
 
 ## M8c — despliegue a staging (cerrado en código; infra real pendiente)
 
@@ -329,8 +328,29 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 | **M8c Despliegue a staging**       | **Cerrado** | Ver sección «M8c — despliegue a staging» para el detalle y las filas marcadas como pendientes de infra real.                                                                                                                                                                          |
 | **M8d Cierre legal y de producto** | **Cerrado** | Ver «M8d — cierre legal y de producto». Queda pendiente de revisión profesional de los textos y de correr el smoke test contra el despliegue real.                                                                                                                                    |
 
-## Próximos pasos inmediatos
+## Pendientes de infraestructura real de M8 (siguen abiertos)
 
 1. **Revisión legal** de los cuatro documentos (`docs/LEGAL_CHECKLIST.md`) y, recién después, quitar la marca de borrador.
-2. **M8c/M8d (infra)**: ejecutar el primer despliegue real (fases 1–7 de `docs/DEPLOY.md`), confirmar `cloudflare-ufw.sh verify <ip>` y correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>`.
-3. Cierre de M8: ejecutar escenarios k6/WS en CI y en infra real para actualizar `docs/PERF.md` con números reales de p95 y capacidad sostenida.
+2. Ejecutar el primer despliegue real (fases 1–7 de `docs/DEPLOY.md`), confirmar `cloudflare-ufw.sh verify <ip>` y correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>`.
+3. Ejecutar escenarios k6/WS en CI e infraestructura real para actualizar `docs/PERF.md` con p95 y capacidad sostenida reales.
+
+---
+
+## M9a — Social, historial y privacidad (sin rankings ni gamificación)
+
+**Estado local:** implementación completa en `arena/5de7b045-trucostart`; formato, lint, typecheck, suite completa, build y capturas responsive verificados. El estado de CI remoto queda pendiente del push de esta rama.
+
+| Criterio                                                       | Implementación                                                                                                                                               | Evidencia / estado                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Solicitudes cruzadas simultáneas y aceptación duplicada        | Canonicalización transaccional del par; aceptación idempotente                                                                                               | Verificado: suite API completa; `social-and-privacy.spec.ts` (5 tests)                                  |
+| Dos clientes reales: amistad, invitación y partida completa    | API + game-server reales y PostgreSQL en el stack distribuido                                                                                                | Verificado: `full-match-e2e.spec.ts`                                                                    |
+| Privacidad configurable de historial, estadísticas y presencia | Settings independientes `historyVisibility`, `statsVisibility`, `presenceVisibility`; default `FRIENDS`; control en `/perfil`; bloqueo prevalece sobre `ALL` | Verificado: suites API/web; `m9a-social-reporting.spec.tsx` (3 tests)                                   |
+| Bloqueos en solicitudes, invitaciones, desafíos y presencia    | Bloqueo quita amistad, cancela pendientes, impide nueva aceptación y excluye presencia visible                                                               | Verificado: `social-and-privacy.spec.ts`, `lobby-rules-and-ws-privacy.spec.ts`                          |
+| Sanciones en búsqueda y envío de solicitudes                   | Filtrado de usuarios sancionados y guard de elegibilidad del solicitante                                                                                     | Verificado: `social-and-privacy.spec.ts`                                                                |
+| Reportar desde amigos e historial                              | `ReportButton` en lista de amigos; detalle de partida adjunta `matchId` al reporte                                                                           | Verificado: `apps/web/tests/m9a-social-reporting.spec.tsx`                                              |
+| Capturas responsive                                            | Amigos, solicitudes, notificaciones, historial y estadísticas a 360/1200 CSS px                                                                              | 10 PNG generados e inspeccionados en `docs/screenshots/m9a-*.png` con `screenshots:m5b`                 |
+| Contratos y riesgos documentados                               | API, eventos sociales WS, privacidad de bloqueos y datos personales actualizados                                                                             | `docs/API.md`, `docs/EVENTS.md`, `docs/THREAT_MODEL.md`, `docs/LEGAL_CHECKLIST.md`, `docs/DECISIONS.md` |
+
+**Verificación local final:** `corepack pnpm format:check`, `corepack pnpm -r lint`, `corepack pnpm -r typecheck`, `PATH=/tmp/trucostart-bin:$PATH corepack pnpm -r --workspace-concurrency=2 test` (28 archivos API: 122 aprobados/6 omitidos; web 42/42; game-server 41 aprobados/3 omitidos; resto de paquetes en verde) y `corepack pnpm -r --workspace-concurrency=2 build` terminaron correctamente. El primer intento de suite recursiva sin wrapper falló porque `apps/admin` invoca `pnpm` como subproceso y el binario no está en PATH; el rerun con Corepack vía wrapper pasó. La CI remota se registrará tras el push; todavía no se presume verde.
+
+**Fuera de alcance:** no se iniciaron rankings, Glicko-2, XP, logros, misiones ni otras funciones de gamificación.

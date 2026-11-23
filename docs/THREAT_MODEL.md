@@ -1,6 +1,6 @@
 # Modelo de amenazas y seguridad (`THREAT_MODEL.md`)
 
-> **Estado:** revisión de cierre de MVP (**M8a**, noviembre 2026). Cada control está marcado
+> **Estado:** revisión de seguridad M8a y controles sociales de **M9a** (noviembre 2026). Cada control está marcado
 > como **implementado** (con test o archivo que lo respalda), **parcial** o **pendiente**.
 > Lo pendiente requiere infraestructura que el sandbox de desarrollo no tiene (Docker,
 > proveedor real, usuarios reales) y está automatizado en CI o documentado en `DEPLOY.md`.
@@ -13,6 +13,7 @@
 4. Secretos de infraestructura (`SESSION_SECRET`, `INTERNAL_RPC_SECRET`,
    `ADMIN_TOTP_ENCRYPTION_KEY`, `SEED_ENCRYPTION_KEY`, `METRICS_TOKEN`, credenciales de email).
 5. Datos personales mínimos (email, IP) sujetos a la Ley 25.326.
+6. Grafo social, solicitudes, notificaciones, bloqueos, presencia y privacidad independiente de historial/estadísticas.
 
 ## Matriz STRIDE
 
@@ -29,6 +30,10 @@
 | **I**nformation disclosure | Un jugador ve manos ajenas                              | Proyección por asiento, tests anti-fuga, sin cartas en logs                                                                                        | Implementado                                                                           |
 | Information disclosure     | Fuga de PII en logs o métricas                          | `LOG_REDACT_PATHS` + `redactLogPayload()`; logs con patrón de ruta (sin ids ni query); email enmascarado salvo `users:read_pii`                    | Implementado (`observability.spec`)                                                    |
 | Information disclosure     | `/metrics` expuesto a Internet                          | Token Bearer obligatorio, comparación en tiempo constante, 503 si falta configuración                                                              | Implementado (`metrics.spec`)                                                          |
+| Information disclosure     | Un jugador consulta historial/estadísticas privadas     | Sesión obligatoria; `historyVisibility` y `statsVisibility` independientes; `404` para denegación y bloqueo prevalece sobre `ALL`                  | Implementado (`social-and-privacy.spec.ts`)                                            |
+| Information disclosure     | Notificaciones sociales llegan a otro usuario           | `social.notification` se emite sólo a la sala privada `user:<id>`; el socket social no recibe snapshots del lobby                                  | Implementado (`lobby-rules-and-ws-privacy.spec.ts`)                                    |
+| Information disclosure     | Un bloqueado sigue viendo la presencia `ALL`            | Broadcast excluye rooms de bloqueos en ambas direcciones; bloqueo quita amistad y limpia estado previo                                             | Implementado (`social-and-privacy.spec.ts`, `lobby-rules-and-ws-privacy.spec.ts`)      |
+| Elevation of privilege     | Cuenta sancionada usa búsqueda o mutaciones sociales    | Elegibilidad validada en API y transacción; sanciones activas excluidas de resultados y bloquean solicitudes/invitaciones                          | Implementado (`social-and-privacy.spec.ts`)                                            |
 | Information disclosure     | Fuga de secretos en el repo o en bundles                | `scripts/scan-secrets.mjs` y `scripts/check-bundles-no-secrets.mjs` en CI                                                                          | Implementado (CI)                                                                      |
 | Information disclosure     | Clickjacking / inyección en la web y el panel           | CSP estricta (`script-src 'self'`), `frame-ancestors 'none'`, HSTS, `nosniff`, `Referrer-Policy`, `Permissions-Policy` en web, admin y API + nginx | Implementado (`observability.spec`, `deploy-headers.spec`, `m8-security-headers.spec`) |
 | Information disclosure     | Panel admin indexado o cacheado                         | Origen separado, `no-store`, `X-Robots-Tag: noindex`, `Cache-Control` en assets                                                                    | Implementado                                                                           |

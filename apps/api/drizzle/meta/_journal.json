@@ -57,6 +57,13 @@
       "when": 1795090000000,
       "tag": "0007_m9a_social_history",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795200000000,
+      "tag": "0008_m9b_rankings",
+      "breakpoints": true
     }
   ]
 }

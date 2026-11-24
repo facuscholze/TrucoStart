@@ -1,12 +1,14 @@
 import type {
+  CompetitiveMatchingOptions,
   EnqueueAttemptOutcome,
   MatchmakingStore,
   QueuedPlayerEntry,
   UserQueueLookup,
 } from './matchmaking-store.interface.js';
+import { findCompetitiveMatch } from './competitive-matching.js';
 
-function bucketKey(mode: string, rulesetCode: string): string {
-  return `${mode}:${rulesetCode}`;
+function bucketKey(mode: string, rulesetCode: string, competitive = false): string {
+  return `${mode}:${rulesetCode}:${competitive ? 'competitive' : 'casual'}`;
 }
 
 export class InMemoryMatchmakingStore implements MatchmakingStore {
@@ -35,6 +37,7 @@ export class InMemoryMatchmakingStore implements MatchmakingStore {
     entry: QueuedPlayerEntry,
     quota: number,
     nowMs: number,
+    competitiveOptions?: CompetitiveMatchingOptions,
   ): Promise<EnqueueAttemptOutcome> {
     const existingBucket = this.userToBucket.get(entry.userId);
     if (existingBucket) {
@@ -49,12 +52,40 @@ export class InMemoryMatchmakingStore implements MatchmakingStore {
       }
     }
 
-    const bKey = bucketKey(entry.mode, entry.rulesetCode);
+    const bKey = bucketKey(entry.mode, entry.rulesetCode, entry.competitive ?? false);
     const active = this.purgeExpiredInBucket(bKey, nowMs);
     const cloned = structuredClone(entry);
     active.push(cloned);
     this.buckets.set(bKey, active);
     this.userToBucket.set(entry.userId, bKey);
+
+    if (entry.competitive) {
+      const match = findCompetitiveMatch(
+        active,
+        quota,
+        nowMs,
+        competitiveOptions ?? {
+          baseRatingWindow: 150,
+          waitGrowthPerTenSeconds: 25,
+          maximumRatingWindow: 800,
+          candidateScanLimit: 24,
+        },
+        entry.userId,
+      );
+      if (match) {
+        const matchedIds = new Set(match.map((player) => player.userId));
+        const remaining = active.filter((player) => !matchedIds.has(player.userId));
+        if (remaining.length === 0) this.buckets.delete(bKey);
+        else this.buckets.set(bKey, remaining);
+        for (const player of match) this.userToBucket.delete(player.userId);
+        return { kind: 'MATCHED', players: match.map((player) => structuredClone(player)) };
+      }
+      return {
+        kind: 'QUEUED',
+        entry: structuredClone(cloned),
+        position: active.findIndex((player) => player.userId === entry.userId) + 1,
+      };
+    }
 
     if (active.length >= quota) {
       const matched = active.splice(0, quota);

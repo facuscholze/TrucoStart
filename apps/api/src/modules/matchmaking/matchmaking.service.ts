@@ -14,6 +14,7 @@ import { LobbyRepository } from '../lobby/lobby.repository.js';
 import { LobbyService } from '../lobby/lobby.service.js';
 import { LobbyRealtimeGateway } from '../lobby/lobby-realtime.gateway.js';
 import { MATCHMAKING_STORE, type MatchmakingStore } from './store/matchmaking-store.interface.js';
+import { RatingsService } from '../ratings/ratings.service.js';
 
 @Injectable()
 export class MatchmakingService {
@@ -23,6 +24,7 @@ export class MatchmakingService {
     @Inject(LobbyRepository) private readonly lobbyRepository: LobbyRepository,
     @Inject(LobbyService) private readonly lobbyService: LobbyService,
     @Inject(LobbyRealtimeGateway) private readonly realtimeGateway: LobbyRealtimeGateway,
+    @Inject(RatingsService) private readonly ratingsService: RatingsService,
   ) {}
 
   async enqueue(
@@ -45,6 +47,9 @@ export class MatchmakingService {
     const expiresAtMs = nowMs + this.config.matchmakingTimeoutMs;
     const quota = body.mode === '1v1' ? 2 : 4;
 
+    const competitiveProfile = body.competitive
+      ? await this.ratingsService.getCompetitiveMatchmakingProfile(principal.userId, body.mode)
+      : null;
     const outcome = await this.matchmakingStore.enqueueAndTryMatch(
       {
         userId: principal.userId,
@@ -53,10 +58,27 @@ export class MatchmakingService {
         rulesetCode: body.rulesetCode,
         enqueuedAtMs: nowMs,
         expiresAtMs,
+        competitive: body.competitive,
+        ...(competitiveProfile
+          ? {
+              rating: competitiveProfile.rating,
+              ratingDeviation: competitiveProfile.deviation,
+              blockedOpponentIds: competitiveProfile.blockedOpponentIds,
+            }
+          : {}),
       },
       quota,
       nowMs,
+      body.competitive ? this.ratingsService.getCompetitiveMatchmakingOptions() : undefined,
     );
+
+    if (outcome.kind === 'QUEUED' && Boolean(outcome.entry.competitive) !== body.competitive) {
+      throw new DomainApiException(
+        409,
+        'CONFLICT',
+        'Ya tenés una búsqueda activa de otro tipo. Cancelala antes de cambiar entre cola casual y competitiva.',
+      );
+    }
 
     if (outcome.kind === 'QUEUED') {
       return {
@@ -65,6 +87,7 @@ export class MatchmakingService {
           status: 'QUEUED',
           mode: outcome.entry.mode,
           rulesetCode: outcome.entry.rulesetCode,
+          competitive: outcome.entry.competitive ?? false,
           enqueuedAt: new Date(outcome.entry.enqueuedAtMs).toISOString(),
           expiresAt: new Date(outcome.entry.expiresAtMs).toISOString(),
           position: outcome.position,
@@ -75,7 +98,12 @@ export class MatchmakingService {
     const aggregate = await this.lobbyService.createMatchmadeTable({
       mode: body.mode,
       rulesetCode: body.rulesetCode,
-      players: outcome.players.map((p) => ({ userId: p.userId, nickname: p.nickname })),
+      competitive: body.competitive,
+      players: outcome.players.map((p) => ({
+        userId: p.userId,
+        nickname: p.nickname,
+        team: p.team,
+      })),
     });
 
     let callerSeat = 0;
@@ -105,6 +133,7 @@ export class MatchmakingService {
         roomId: aggregate.row.id,
         mode: aggregate.row.mode,
         rulesetCode: aggregate.row.rulesetCode,
+        competitive: aggregate.row.isCompetitive,
         mySeat: callerSeat,
         myTeam: callerTeam,
       }),
@@ -121,6 +150,7 @@ export class MatchmakingService {
         status: 'QUEUED',
         mode: lookup.entry.mode,
         rulesetCode: lookup.entry.rulesetCode,
+        competitive: lookup.entry.competitive ?? false,
         enqueuedAt: new Date(lookup.entry.enqueuedAtMs).toISOString(),
         expiresAt: new Date(lookup.entry.expiresAtMs).toISOString(),
         position: lookup.position,
@@ -137,6 +167,7 @@ export class MatchmakingService {
           roomId: agg.row.id,
           mode: agg.row.mode,
           rulesetCode: agg.row.rulesetCode,
+          competitive: agg.row.isCompetitive,
           mySeat: activeSeat.seat,
           myTeam: activeSeat.team,
         });

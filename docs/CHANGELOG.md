@@ -18,7 +18,7 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 - QA local final: `corepack pnpm build`, lint, typecheck, suite completa del monorepo, `format:check` y `git diff --check` en verde. Total: 334 tests aprobados; 11 omitidos, incluidos los contratos Redis/BullMQ sin `REDIS_URL`.
 - Migraciones `0007`–`0009` ejecutadas mediante PGlite; el endpoint OpenAPI vivo pasó paridad exacta con `docs/openapi.v1.json`.
-- El sandbox no dispone de PostgreSQL 16 ni Redis 7; la CI del repositorio configura esos servicios reales para validar las integraciones.
+- CI remota run `45463088742`: 4/4 jobs exitosos. El job principal corrió tests, lint/typecheck, build y guardas de bundle con PostgreSQL 16 y Redis 7; el job de backup/restore con PostgreSQL 16 también terminó en verde.
 
 ---
 

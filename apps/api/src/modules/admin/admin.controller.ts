@@ -20,6 +20,9 @@ import {
   type AdminUserDetail,
   type AdminUserListResponse,
   ClaimReportRequestSchema,
+  CompetitiveReviewClaimRequestSchema,
+  CompetitiveReviewResolveRequestSchema,
+  type CompetitiveReviewListResponse,
   type CreateSanctionRequest,
   CreateSanctionRequestSchema,
   type CreateSanctionResponse,
@@ -27,6 +30,7 @@ import {
   ResolveReportRequestSchema,
 } from '@truco/shared';
 import type { FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { parseWithZod } from '../../common/zod-validation.js';
 import { extractClientMeta } from '../auth/guards/session-auth.guard.js';
 import { AdminAuthService, type AdminPrincipal } from './admin-auth.service.js';
@@ -34,6 +38,15 @@ import { AdminService } from './admin.service.js';
 import { CurrentAdmin } from './guards/current-admin.decorator.js';
 import { AdminAuthGuard, RequirePermission } from './guards/admin-auth.guard.js';
 import { AdminQueries } from './admin.queries.js';
+import { RatingsService } from '../ratings/ratings.service.js';
+
+const CompetitiveReviewQuerySchema = z
+  .object({
+    status: z.enum(['OPEN', 'IN_REVIEW', 'RESOLVED']).optional(),
+    cursor: z.coerce.number().int().nonnegative().optional().default(0),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  })
+  .strict();
 
 /** Endpoints del panel. Cada uno exige permiso explícito validado en el servidor. */
 @Controller('admin')
@@ -42,6 +55,7 @@ export class AdminController {
   constructor(
     @Inject(AdminService) private readonly adminService: AdminService,
     @Inject(AdminAuthService) private readonly authService: AdminAuthService,
+    @Inject(RatingsService) private readonly ratingsService: RatingsService,
   ) {}
 
   @Get('dashboard')
@@ -143,6 +157,56 @@ export class AdminController {
   ): Promise<{ status: string; version: number }> {
     const input = parseWithZod(ResolveReportRequestSchema, rawBody) as ResolveReportRequest;
     return this.adminService.resolveReport(principal, reportId, input, extractClientMeta(req).ip);
+  }
+
+  @Get('competitive-reviews')
+  @RequirePermission('competitive:review')
+  async listCompetitiveReviews(@Query() rawQuery: unknown): Promise<CompetitiveReviewListResponse> {
+    const query = parseWithZod(CompetitiveReviewQuerySchema, rawQuery ?? {});
+    return this.ratingsService.listCompetitiveReviewCases({
+      cursor: query.cursor,
+      limit: query.limit ?? this.ratingsService.getCompetitiveReviewPageSize(),
+      status: query.status ?? null,
+    });
+  }
+
+  @Post('competitive-reviews/:caseId/claim')
+  @RequirePermission('competitive:review')
+  @HttpCode(HttpStatus.OK)
+  async claimCompetitiveReview(
+    @CurrentAdmin() principal: AdminPrincipal,
+    @Param('caseId') caseId: string,
+    @Body() rawBody: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ status: string; version: number }> {
+    const input = parseWithZod(CompetitiveReviewClaimRequestSchema, rawBody);
+    return this.ratingsService.claimCompetitiveReviewCase({
+      caseId,
+      expectedVersion: input.expectedVersion,
+      actorId: principal.userId,
+      adminSessionId: principal.sessionId,
+      ip: extractClientMeta(req).ip,
+    });
+  }
+
+  @Post('competitive-reviews/:caseId/resolve')
+  @RequirePermission('competitive:review')
+  @HttpCode(HttpStatus.OK)
+  async resolveCompetitiveReview(
+    @CurrentAdmin() principal: AdminPrincipal,
+    @Param('caseId') caseId: string,
+    @Body() rawBody: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ status: string; version: number }> {
+    const input = parseWithZod(CompetitiveReviewResolveRequestSchema, rawBody);
+    return this.ratingsService.resolveCompetitiveReviewCase({
+      caseId,
+      expectedVersion: input.expectedVersion,
+      resolutionNote: input.resolutionNote,
+      actorId: principal.userId,
+      adminSessionId: principal.sessionId,
+      ip: extractClientMeta(req).ip,
+    });
   }
 
   @Get('matches/:matchId/replay')

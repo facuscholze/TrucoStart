@@ -9,6 +9,7 @@ import {
   type AdminSessionSummary,
   type AdminUserDetail,
   type AdminUserListItem,
+  type CompetitiveReviewListResponse,
 } from '@truco/shared';
 import type { AdminClient } from './api.js';
 
@@ -327,6 +328,45 @@ const AUDIT: readonly AdminAuditEntry[] = [
   },
 ];
 
+const COMPETITIVE_REVIEW_LIST: CompetitiveReviewListResponse = {
+  items: [
+    {
+      id: '019a7e40-0000-7000-8000-00000000c001',
+      status: 'OPEN',
+      severity: 'MEDIUM',
+      signals: ['REPEATED_OPPONENTS', 'SHORT_MATCH', 'COORDINATED_ABANDONS'],
+      users: [
+        {
+          id: USERS[0]!.id,
+          nickname: USERS[0]!.nickname,
+          accountCreatedAt: USERS[0]!.createdAt,
+        },
+        {
+          id: USERS[2]!.id,
+          nickname: USERS[2]!.nickname,
+          accountCreatedAt: USERS[2]!.createdAt,
+        },
+      ],
+      matchIds: [MATCH_ID, '019a7e40-0000-7000-8000-0000000000d2'],
+      evidence: {
+        mode: '1v1',
+        seasonId: '01900000-0000-7000-8000-000000000001',
+        repeatedPairCount: 5,
+        recentDurationsMs: [58_000, 71_000],
+        coordinatedAbandons: 2,
+        automaticSanction: false,
+      },
+      createdAt: iso(-44),
+      updatedAt: iso(-10),
+      claimedByNickname: null,
+      resolvedByNickname: null,
+      resolutionNote: null,
+      version: 3,
+    },
+  ],
+  nextCursor: null,
+};
+
 export function createDemoClient(): AdminClient {
   return {
     login: async () => SESSION,
@@ -352,6 +392,9 @@ export function createDemoClient(): AdminClient {
     claimReport: async () => ({ version: 1 }),
     resolveReport: async () => ({ status: 'RESOLVED_ACTIONED', version: 2 }),
     replay: async () => REPLAY,
+    listCompetitiveReviews: async () => COMPETITIVE_REVIEW_LIST,
+    claimCompetitiveReview: async () => ({ status: 'IN_REVIEW', version: 1 }),
+    resolveCompetitiveReview: async () => ({ status: 'RESOLVED', version: 2 }),
     listAudit: async () => ({ items: [...AUDIT], nextCursor: null }),
   };
 }

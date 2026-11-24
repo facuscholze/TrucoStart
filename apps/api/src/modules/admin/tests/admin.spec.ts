@@ -15,6 +15,8 @@ import {
   matchPlayersTable,
   matchesTable,
   profilesTable,
+  sanctionsTable,
+  competitiveReviewCasesTable,
   usersTable,
 } from '../../../db/schema/index.js';
 import { PasswordHasher } from '../../auth/security/password-hasher.js';
@@ -334,6 +336,123 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
     expect(ADMIN_ROLE_PERMISSIONS.MODERATOR).toContain('sanctions:issue');
     expect(ADMIN_ROLE_PERMISSIONS.MODERATOR).not.toContain('users:read_pii');
     expect(ADMIN_ROLE_PERMISSIONS.ADMIN).toContain('users:read_pii');
+    expect(ADMIN_ROLE_PERMISSIONS.SUPPORT).not.toContain('competitive:review');
+    expect(ADMIN_ROLE_PERMISSIONS.MODERATOR).toContain('competitive:review');
+  });
+
+  it('protege la cola de revisión competitiva por RBAC y audita claim/resolución sin sancionar', async () => {
+    const supportId = await createUser({
+      email: 'review-support@truco.ar',
+      nickname: 'ReviewSupport',
+      role: 'SUPPORT',
+      withTotp: true,
+    });
+    const reviewerId = await createUser({
+      email: 'review-mod@truco.ar',
+      nickname: 'ReviewModerator',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const secondReviewerId = await createUser({
+      email: 'review-mod-two@truco.ar',
+      nickname: 'ReviewModeratorTwo',
+      role: 'MODERATOR',
+      withTotp: true,
+    });
+    const supportCookie = await adminCookie(supportId, 'review-support@truco.ar');
+    const reviewerCookie = await adminCookie(reviewerId, 'review-mod@truco.ar');
+    const secondReviewerCookie = await adminCookie(secondReviewerId, 'review-mod-two@truco.ar');
+    const targetId = await createUser({
+      email: 'review-target@truco.ar',
+      nickname: 'ReviewTarget',
+    });
+    const caseId = generateUuidV7(clockMs + 100);
+    const matchId = generateUuidV7(clockMs + 101);
+    const createdAt = new Date(clockMs);
+
+    await dbHandle.db.insert(competitiveReviewCasesTable).values({
+      id: caseId,
+      fingerprint: `admin-test-${caseId}`,
+      status: 'OPEN',
+      severity: 'MEDIUM',
+      signals: ['REPEATED_OPPONENTS'],
+      userIds: [targetId],
+      matchIds: [matchId],
+      evidence: { message: 'Indicio para revisar manualmente.' },
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/competitive-reviews?status=OPEN',
+      headers: { cookie: supportCookie },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json().error.details.requiredPermission).toBe('competitive:review');
+
+    const queue = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/competitive-reviews?status=OPEN',
+      headers: { cookie: reviewerCookie },
+    });
+    expect(queue.statusCode).toBe(200);
+    expect(queue.json().items[0]).toMatchObject({ id: caseId, version: 0, status: 'OPEN' });
+
+    const claimed = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/competitive-reviews/${caseId}/claim`,
+      headers: { cookie: reviewerCookie },
+      payload: { expectedVersion: 0 },
+    });
+    expect(claimed.statusCode).toBe(200);
+    expect(claimed.json()).toMatchObject({ status: 'IN_REVIEW', version: 1 });
+
+    const competingClaim = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/competitive-reviews/${caseId}/claim`,
+      headers: { cookie: secondReviewerCookie },
+      payload: { expectedVersion: 0 },
+    });
+    expect(competingClaim.statusCode).toBe(409);
+
+    const wrongReviewer = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/competitive-reviews/${caseId}/resolve`,
+      headers: { cookie: secondReviewerCookie },
+      payload: { expectedVersion: 1, resolutionNote: 'La evidencia no es concluyente.' },
+    });
+    expect(wrongReviewer.statusCode).toBe(409);
+
+    const resolved = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/competitive-reviews/${caseId}/resolve`,
+      headers: { cookie: reviewerCookie },
+      payload: {
+        expectedVersion: 1,
+        resolutionNote: 'Se revisó la evidencia y no corresponde aplicar una medida.',
+      },
+    });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json()).toMatchObject({ status: 'RESOLVED', version: 2 });
+
+    const [storedCase] = await dbHandle.db
+      .select()
+      .from(competitiveReviewCasesTable)
+      .where(eq(competitiveReviewCasesTable.id, caseId));
+    expect(storedCase?.resolvedBy).toBe(reviewerId);
+    expect(storedCase?.resolutionNote).toContain('no corresponde');
+    expect(
+      await dbHandle.db.select().from(sanctionsTable).where(eq(sanctionsTable.userId, targetId)),
+    ).toHaveLength(0);
+    const reviewAudit = await dbHandle.db
+      .select()
+      .from(auditLogsTable)
+      .where(eq(auditLogsTable.entityId, caseId));
+    expect(reviewAudit).toHaveLength(2);
+    expect(reviewAudit.map((entry) => entry.action)).toEqual(
+      expect.arrayContaining(['COMPETITIVE_REVIEW_CLAIMED', 'COMPETITIVE_REVIEW_RESOLVED']),
+    );
   });
 
   it('impide sancionarse a sí mismo y sancionar a un admin desde un moderador', async () => {

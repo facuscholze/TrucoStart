@@ -9,6 +9,8 @@ export * from './lobby/lobby.schema.js';
 export * from './lobby/table-invite.js';
 export * from './moderation/moderation.schema.js';
 export * from './network/cidr.js';
+export * from './ratings/ratings.schema.js';
+export * from './social/social.schema.js';
 export * from './observability/logging.js';
 export * from './observability/metrics.js';
 export * from './observability/security-headers.js';

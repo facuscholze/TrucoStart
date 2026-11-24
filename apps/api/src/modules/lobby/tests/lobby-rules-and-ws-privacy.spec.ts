@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { LOBBY_WS_NAMESPACE, type PublicLobbyTableSummary } from '@truco/shared';
 import { io as createSocketClient, type Socket as ClientSocket } from 'socket.io-client';
@@ -8,6 +9,8 @@ import {
   type DatabaseConnectionHandle,
 } from '../../../db/database.provider.js';
 import { buildCookieHeader, extractAuthCookies } from '../../auth/tests/test-cookie-jar.js';
+import { LobbyRealtimeGateway } from '../lobby-realtime.gateway.js';
+import { USER_PRESENCE_STORE } from '../../social/presence-store.interface.js';
 import { LobbyService } from '../lobby.service.js';
 import { InMemoryGameRoomProvisioner } from '../ports/game-room-provisioner.js';
 
@@ -438,5 +441,134 @@ describe('M4 Lobby REST, Concurrency, Integrity Rules & /lobby WS Zero-Leakage',
       url: `/v1/tables/${freshId}`,
       headers: { cookie: second.cookieHeader },
     });
+  });
+
+  it('keeps social-only realtime sockets out of public snapshots and targets notifications to one user', async () => {
+    const player = await createGuestSession(app, 'SocialRealtimeOnly');
+    const otherPlayer = await createGuestSession(app, 'OtherSocialSocket');
+    const publicObserver = await createGuestSession(app, 'PublicPresenceObserver');
+    const ticket = await issueWsTicket(app, player.cookieHeader);
+    const otherTicket = await issueWsTicket(app, otherPlayer.cookieHeader);
+    const observerTicket = await issueWsTicket(app, publicObserver.cookieHeader);
+    const socialSocket: ClientSocket = createSocketClient(`${baseUrl}${LOBBY_WS_NAMESPACE}`, {
+      auth: { token: ticket, purpose: 'social' },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    const otherSocialSocket: ClientSocket = createSocketClient(`${baseUrl}${LOBBY_WS_NAMESPACE}`, {
+      auth: { token: otherTicket, purpose: 'social' },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    const observerSocialSocket: ClientSocket = createSocketClient(
+      `${baseUrl}${LOBBY_WS_NAMESPACE}`,
+      {
+        auth: { token: observerTicket, purpose: 'social' },
+        transports: ['websocket'],
+        reconnection: false,
+      },
+    );
+    let receivedSnapshot = false;
+    let receivedTableUpsert = false;
+    let otherUserReceivedNotification = false;
+    const blockedPresenceEvents: Array<{ userId: string; status: string; visible: boolean }> = [];
+    const observerPresenceEvents: Array<{ userId: string; status: string; visible: boolean }> = [];
+    socialSocket.on('lobby.snapshot', () => {
+      receivedSnapshot = true;
+    });
+    socialSocket.on('lobby.tableUpsert', () => {
+      receivedTableUpsert = true;
+    });
+    otherSocialSocket.on('social.notification', () => {
+      otherUserReceivedNotification = true;
+    });
+    otherSocialSocket.on(
+      'social.presence',
+      (event: { userId: string; status: string; visible: boolean }) =>
+        blockedPresenceEvents.push(event),
+    );
+    observerSocialSocket.on(
+      'social.presence',
+      (event: { userId: string; status: string; visible: boolean }) =>
+        observerPresenceEvents.push(event),
+    );
+
+    try {
+      await Promise.all(
+        [socialSocket, otherSocialSocket, observerSocialSocket].map(
+          (socket) =>
+            new Promise<void>((resolve, reject) => {
+              socket.once('connect', resolve);
+              socket.once('connect_error', reject);
+            }),
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(receivedSnapshot).toBe(false);
+
+      const publicTable = await app.inject({
+        method: 'POST',
+        url: '/v1/tables',
+        headers: { cookie: player.cookieHeader },
+        payload: { mode: '1v1', visibility: 'PUBLIC' },
+      });
+      expect(publicTable.statusCode).toBe(201);
+      expect(receivedTableUpsert).toBe(false);
+
+      const notificationReceived = new Promise<unknown>((resolve) => {
+        socialSocket.once('social.notification', resolve);
+      });
+      app.get(LobbyRealtimeGateway).emitSocialNotification(player.user.id, {
+        id: randomUUID(),
+        type: 'FRIEND_REQUEST',
+        actorUserId: null,
+        actorNickname: null,
+        referenceId: null,
+        tableId: null,
+        createdAt: new Date().toISOString(),
+        readAt: null,
+      });
+      expect(await notificationReceived).toMatchObject({ type: 'FRIEND_REQUEST' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(otherUserReceivedNotification).toBe(false);
+
+      const showPresenceToAll = await app.inject({
+        method: 'PATCH',
+        url: '/v1/me',
+        headers: { cookie: player.cookieHeader },
+        payload: { settings: { presenceVisibility: 'ALL' } },
+      });
+      expect(showPresenceToAll.statusCode).toBe(200);
+      const blockPresence = await app.inject({
+        method: 'POST',
+        url: `/v1/social/blocks/${player.user.id}`,
+        headers: { cookie: otherPlayer.cookieHeader },
+      });
+      expect(blockPresence.statusCode).toBe(200);
+      const presenceStore = app.get(USER_PRESENCE_STORE);
+      const presenceSocketId = 'social-presence-block-test';
+      await presenceStore.connect(player.user.id, presenceSocketId, fakeNowMs, 45_000);
+      blockedPresenceEvents.length = 0;
+      observerPresenceEvents.length = 0;
+      await app.get(LobbyRealtimeGateway).refreshSocialPresence([player.user.id]);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      // La limpieza puede enviar OFFLINE/visible:false para borrar una caché previa,
+      // pero nunca un estado ONLINE/IN_GAME al bloqueador.
+      expect(
+        blockedPresenceEvents.every((event) => !event.visible && event.status === 'OFFLINE'),
+      ).toBe(true);
+      expect(observerPresenceEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ userId: player.user.id, status: 'ONLINE', visible: true }),
+        ]),
+      );
+    } finally {
+      socialSocket.disconnect();
+      otherSocialSocket.disconnect();
+      observerSocialSocket.disconnect();
+      await app
+        .get(USER_PRESENCE_STORE)
+        .disconnect(player.user.id, 'social-presence-block-test', fakeNowMs);
+    }
   });
 });

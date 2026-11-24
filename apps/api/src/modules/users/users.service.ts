@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   type AccountExportResponse,
-  type CursorPaginationQuery,
   type DeleteAccountResponse,
   type MeResponse,
   normalizeNicknameLower,
@@ -10,6 +9,8 @@ import {
   TUTORIAL_LESSON_IDS,
   type TutorialProgressResponse,
   type TutorialProgressUpdateRequest,
+  type UserMatchDetailResponse,
+  type UserMatchHistoryQuery,
   type UserMatchesResponse,
   type UserStatsResponse,
   validateNickname,
@@ -28,6 +29,7 @@ import {
 } from '../auth/auth.repository.js';
 import type { AuthenticatedPrincipal } from '../auth/guards/session-auth.guard.js';
 import { PasswordHasher } from '../auth/security/password-hasher.js';
+import { SocialService } from '../social/social.service.js';
 import { UsersRepository } from './users.repository.js';
 
 @Injectable()
@@ -38,6 +40,7 @@ export class UsersService {
     @Inject(AuthRepository) private readonly authRepo: AuthRepository,
     @Inject(AuditRepository) private readonly audit: AuditRepository,
     @Inject(PasswordHasher) private readonly passwordHasher: PasswordHasher,
+    @Inject(SocialService) private readonly socialService: SocialService,
   ) {}
 
   async getMe(principal: AuthenticatedPrincipal): Promise<MeResponse> {
@@ -104,6 +107,12 @@ export class UsersService {
       },
       found.profile,
       now,
+    );
+
+    await this.socialService.onPresenceVisibilityChanged(
+      found.user.id,
+      found.profile.settings?.presenceVisibility ?? 'FRIENDS',
+      updatedProfile.settings?.presenceVisibility ?? 'FRIENDS',
     );
 
     await this.audit.record({
@@ -180,27 +189,78 @@ export class UsersService {
     };
   }
 
-  async getPublicUserStats(targetUserId: string): Promise<UserStatsResponse> {
+  private async assertCanViewHistory(viewerUserId: string, targetUserId: string): Promise<void> {
+    const canView = await this.usersRepo.canViewHistory(viewerUserId, targetUserId);
+    if (!canView) {
+      // 404 avoids confirming that a user's private history exists.
+      throw new DomainApiException(
+        404,
+        'NOT_FOUND',
+        'El historial de este jugador no está disponible.',
+      );
+    }
+  }
+
+  async getPublicUserStats(
+    principal: AuthenticatedPrincipal,
+    targetUserId: string,
+  ): Promise<UserStatsResponse> {
     const found = await this.usersRepo.findActiveUserWithProfile(targetUserId);
     if (!found) {
       throw new DomainApiException(404, 'NOT_FOUND', 'Jugador no encontrado.');
+    }
+    if (!(await this.usersRepo.canViewStats(principal.userId, targetUserId))) {
+      // Igual que el historial, 404 no confirma la existencia de estadísticas privadas.
+      throw new DomainApiException(
+        404,
+        'NOT_FOUND',
+        'Las estadísticas de este jugador no están disponibles.',
+      );
     }
     return this.usersRepo.computeUserStats(found.user.id);
   }
 
   async getUserMatches(
+    principal: AuthenticatedPrincipal,
     targetUserId: string,
-    query: CursorPaginationQuery,
+    query: UserMatchHistoryQuery,
   ): Promise<UserMatchesResponse> {
     const found = await this.usersRepo.findActiveUserWithProfile(targetUserId);
     if (!found) {
       throw new DomainApiException(404, 'NOT_FOUND', 'Jugador no encontrado.');
     }
+    await this.assertCanViewHistory(principal.userId, targetUserId);
     return this.usersRepo.listUserMatches({
       userId: found.user.id,
       cursor: query.cursor,
       limit: query.limit,
+      filters: query,
     });
+  }
+
+  async getUserMatchDetail(
+    principal: AuthenticatedPrincipal,
+    targetUserId: string,
+    matchId: string,
+  ): Promise<UserMatchDetailResponse> {
+    const found = await this.usersRepo.findActiveUserWithProfile(targetUserId);
+    if (!found) {
+      throw new DomainApiException(404, 'NOT_FOUND', 'Jugador no encontrado.');
+    }
+    await this.assertCanViewHistory(principal.userId, targetUserId);
+    const detail = await this.usersRepo.getUserMatchDetail({
+      matchId,
+      targetUserId,
+      viewerUserId: principal.userId,
+    });
+    if (!detail) {
+      throw new DomainApiException(
+        404,
+        'NOT_FOUND',
+        'Partida no encontrada en el historial del jugador.',
+      );
+    }
+    return detail;
   }
 
   async exportAccountData(

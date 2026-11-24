@@ -27,6 +27,7 @@ function buildService() {
     realtimeGateway as never,
     provisioner as never,
     consumer as never,
+    { processMatch: vi.fn() } as never,
   );
   return { service, dbTransaction, lobbyRepository, realtimeGateway, provisioner };
 }

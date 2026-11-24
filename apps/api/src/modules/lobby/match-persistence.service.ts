@@ -18,6 +18,7 @@ import {
   matchEventsTable,
   matchesTable,
   matchPlayersTable,
+  ratingSeasonsTable,
   tableSeatsTable,
   tablesTable,
   usersTable,
@@ -31,6 +32,7 @@ import {
   MATCH_LIFECYCLE_CONSUMER,
   type MatchLifecycleConsumer,
 } from './ports/match-lifecycle-consumer.js';
+import { RatingsService } from '../ratings/ratings.service.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -42,6 +44,7 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
     @Inject(LobbyRealtimeGateway) private readonly realtimeGateway: LobbyRealtimeGateway,
     @Inject(GAME_ROOM_PROVISIONER) private readonly provisioner: GameRoomProvisioner,
     @Inject(MATCH_LIFECYCLE_CONSUMER) private readonly consumer: MatchLifecycleConsumer,
+    @Inject(RatingsService) private readonly ratingsService: RatingsService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -83,14 +86,41 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
         .where(eq(tablesTable.id, event.roomId))
         .for('update');
       const tableRow = locked[0];
-      if (!tableRow || (tableRow.status !== 'WAITING' && tableRow.status !== 'FINISHED')) {
-        return null;
+      if (!tableRow || tableRow.isPractice) return null;
+
+      // BullMQ may retry an older match.started after match.completed has already committed.
+      // A FINISHED table is also a valid rematch source, so status alone cannot distinguish
+      // that stale delivery from a new match; the persisted matchId is the idempotency guard.
+      const [alreadyCompleted] = await tx
+        .select({ id: matchesTable.id })
+        .from(matchesTable)
+        .where(eq(matchesTable.id, event.matchId))
+        .limit(1);
+      if (alreadyCompleted) return null;
+
+      if (tableRow.status !== 'WAITING' && tableRow.status !== 'FINISHED') return null;
+
+      let competitiveSeasonId = tableRow.competitiveSeasonId;
+      if (tableRow.isCompetitive) {
+        const [activeSeason] = await tx
+          .select({ id: ratingSeasonsTable.id })
+          .from(ratingSeasonsTable)
+          .where(eq(ratingSeasonsTable.status, 'ACTIVE'))
+          .for('share')
+          .limit(1);
+        if (!activeSeason)
+          throw new Error('No hay una temporada activa para iniciar una partida competitiva.');
+        competitiveSeasonId = activeSeason.id;
       }
 
       const isRematch = tableRow.status === 'FINISHED';
       const nextRows = await tx
         .update(tablesTable)
-        .set({ status: 'IN_GAME', updatedAt: now })
+        .set({
+          status: 'IN_GAME',
+          ...(tableRow.isCompetitive ? { competitiveSeasonId } : {}),
+          updatedAt: now,
+        })
         .where(eq(tablesTable.id, tableRow.id))
         .returning();
 
@@ -126,6 +156,10 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
 
       return { row: nextRows[0]!, activeSeats };
     });
+
+    await this.realtimeGateway.refreshSocialPresence(
+      event.seats.map((seat) => seat.userId).filter((userId) => UUID_REGEX.test(userId)),
+    );
 
     if (updated) {
       this.realtimeGateway.broadcastTableUpsert(
@@ -216,6 +250,11 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       const tableRow = locked[0];
       if (!tableRow) return null;
 
+      const seatRows = await tx
+        .select({ userId: tableSeatsTable.userId })
+        .from(tableSeatsTable)
+        .where(eq(tableSeatsTable.tableId, tableRow.id));
+
       const nextStatus =
         tableRow.status === 'FINISHED' || tableRow.status === 'CLOSED' ? tableRow.status : 'CLOSED';
 
@@ -237,10 +276,12 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       return {
         row: updated[0]!,
         visibility: tableRow.visibility as TableVisibility,
+        userIds: seatRows.map((seat) => seat.userId),
       };
     });
 
     if (!outcome) return;
+    await this.realtimeGateway.refreshSocialPresence(outcome.userIds);
     this.realtimeGateway.broadcastTableRemoved(outcome.row.id, outcome.visibility);
   }
 
@@ -254,17 +295,24 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
     const committed = await this.db.transaction(async (tx) => {
       // Idempotencia ante reentrega at-least-once de BullMQ sobre matchId
       const existingById = await tx
-        .select({ id: matchesTable.id })
+        .select({ id: matchesTable.id, isCompetitive: matchesTable.isCompetitive })
         .from(matchesTable)
         .where(eq(matchesTable.id, event.matchId))
         .limit(1);
       if (existingById[0]) {
-        return null;
+        return {
+          matchId: existingById[0].id,
+          tableId: null,
+          tableVisibility: null,
+          isCompetitive: existingById[0].isCompetitive,
+        };
       }
 
       let tableId: string | null = null;
       let tableVisibility: TableVisibility | null = null;
       let effectiveRulesetId = rulesetRow.id;
+      let isCompetitive = false;
+      let seasonId: string | null = null;
 
       if (isUuidRoom) {
         const locked = await tx
@@ -273,11 +321,28 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
           .where(eq(tablesTable.id, event.roomId))
           .for('update');
 
+        if (locked[0]?.isPractice) return null;
         if (locked[0]) {
           tableId = locked[0].id;
           tableVisibility = locked[0].visibility as TableVisibility;
           effectiveRulesetId = locked[0].rulesetId;
+          isCompetitive = locked[0].isCompetitive;
+          seasonId = isCompetitive ? locked[0].competitiveSeasonId : null;
         }
+      }
+
+      // Lifecycle workers run concurrently. If match.completed wins the table lock before
+      // match.started, capture a season here so the durable match can still block season close.
+      if (isCompetitive && !seasonId) {
+        const [activeSeason] = await tx
+          .select({ id: ratingSeasonsTable.id })
+          .from(ratingSeasonsTable)
+          .where(eq(ratingSeasonsTable.status, 'ACTIVE'))
+          .for('share')
+          .limit(1);
+        if (!activeSeason)
+          throw new Error('No hay una temporada activa para completar una partida competitiva.');
+        seasonId = activeSeason.id;
       }
 
       const team0Score = Number(event.scoresByTeam['0'] ?? 0);
@@ -295,6 +360,9 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
           seedCommitment: event.seedCommitment,
           startedAt: new Date(event.startedAtMs),
           endedAt: new Date(event.endedAtMs),
+          hasBots: event.hasBots ?? false,
+          isCompetitive,
+          seasonId,
           result: {
             winnerTeam: event.winnerTeam,
             team0Score,
@@ -358,6 +426,7 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
           .set({
             status: 'FINISHED',
             closedReason: event.reason,
+            ...(isCompetitive && seasonId ? { competitiveSeasonId: seasonId } : {}),
             updatedAt: new Date(event.endedAtMs),
           })
           .where(eq(tablesTable.id, tableId));
@@ -368,8 +437,12 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
           .where(eq(tableSeatsTable.tableId, tableId));
       }
 
-      return { matchId: event.matchId, tableId, tableVisibility };
+      return { matchId: event.matchId, tableId, tableVisibility, isCompetitive };
     });
+
+    await this.realtimeGateway.refreshSocialPresence(
+      event.players.map((player) => player.userId).filter((userId) => UUID_REGEX.test(userId)),
+    );
 
     if (committed?.tableId && committed.tableVisibility) {
       if (event.reason === 'ABANDON') {
@@ -377,5 +450,9 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
       }
       this.realtimeGateway.broadcastTableRemoved(committed.tableId, committed.tableVisibility);
     }
+
+    // The durable match row is committed first; a failed rating job is safe to retry because
+    // processMatch uses the rating_jobs primary key as its transactional idempotency guard.
+    if (committed?.isCompetitive) await this.ratingsService.processMatch(committed.matchId);
   }
 }

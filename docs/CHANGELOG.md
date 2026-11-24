@@ -4,6 +4,24 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [0.9.0-m9b] — 2026-11-19 (M9b — Rating competitivo, rankings y revisión humana)
+
+### Agregado
+
+- **Glicko-2 por modo y temporada:** ratings, desviaciones y volatilidades independientes para 1v1/2v2; captura de temporada al iniciar, procesamiento idempotente tras persistir la partida, deltas por jugador y estadísticas semanales/mensuales.
+- **Matchmaking competitivo separado:** ventanas de rating crecientes con espera, balance de equipos 2v2 y límite de revancha; la cola casual permanece separada.
+- **Rankings públicos:** global/semanal/mensual por modo con paginación, mínimos de actividad, filtro `statsVisibility=ALL`, tarjeta en perfiles y nueva ruta web `/ranking`.
+- **Revisión humana de integridad:** evidencia de rivales repetidos, partidas breves, abandonos coordinados y posibles patrones de feeding; consola Admin con RBAC, claim/resolución optimista y auditoría. Las señales nunca aplican sanciones automáticamente.
+- **Persistencia y temporadas:** migraciones `0008_m9b_rankings.sql` y `0009_m9b_competitive_season_capture.sql`, outbox durable para Redis, snapshots de cierre y reinicio suave.
+
+### Verificación
+
+- QA local final: `corepack pnpm build`, lint, typecheck, suite completa del monorepo, `format:check` y `git diff --check` en verde. Total: 334 tests aprobados; 11 omitidos, incluidos los contratos Redis/BullMQ sin `REDIS_URL`.
+- Migraciones `0007`–`0009` ejecutadas mediante PGlite; el endpoint OpenAPI vivo pasó paridad exacta con `docs/openapi.v1.json`.
+- El sandbox no dispone de PostgreSQL 16 ni Redis 7; la CI del repositorio configura esos servicios reales para validar las integraciones.
+
+---
+
 ## [0.8.1-m8b-perf] — 2026-11-18 (M8b — Rendimiento y carga)
 
 ### Agregado

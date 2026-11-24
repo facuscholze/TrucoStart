@@ -1,8 +1,8 @@
 # Estado del Proyecto ("Mesa de Truco")
 
-- **Última actualización:** 2026-11-18
-- **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M8c cerrado** — despliegue a staging (Caddy perimetral en 80/443, firewall en `DOCKER-USER` limitado a Cloudflare, IP real del cliente resuelta en el borde, adaptadores reales con `jose`/`nodemailer`, escáner de secretos con test de señuelos, `docs/DEPLOY.md` con primer despliegue y regiones de São Paulo, ADR-022). **M8d pendiente.** _(M8b se mantiene cerrado: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
+- **Última actualización:** 2026-11-19
+- **Etapa activa:** Etapa 2 — M9b (ratings competitivos Glicko-2, rankings públicos y revisión humana de integridad), sobre las capacidades sociales M9a.
+- **Módulo actual:** M9b implementado y QA local integral aprobado; el sandbox no tiene PostgreSQL 16 ni Redis 7 para validar esos servicios directamente. La CI del repositorio configura ambos para las pruebas de integración. M8a–M8d siguen cerrados en código con dependencias de infraestructura real pendientes. El detalle y evidencia de M9a/M9b se registran al final de este documento. _(M8b: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
 
 ---
 
@@ -196,8 +196,7 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ## Próximos pasos inmediatos
 
-1. **M7 cerrado** ⏸ — esperando confirmación del usuario para arrancar **M8** (observabilidad, endurecimiento, carga k6, staging, `PERF.md`/`THREAT_MODEL.md`/`RUNBOOKS.md`).
-2. Antes de M8: revisión legal de datos personales (`STATE-09`) y proveedores reales de email/Google/Captcha (`STATE-10`..`STATE-12`), que hoy son adaptadores simulados.
+Este bloque es histórico de M7; el estado vigente de M9a está al final del documento. Cerrar la verificación, actualizar documentación/capturas y consultar CI antes de marcar M9a como verificado. No iniciar rankings ni gamificación en esta entrega.
 
 ## M8c — despliegue a staging (cerrado en código; infra real pendiente)
 
@@ -329,8 +328,52 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 | **M8c Despliegue a staging**       | **Cerrado** | Ver sección «M8c — despliegue a staging» para el detalle y las filas marcadas como pendientes de infra real.                                                                                                                                                                          |
 | **M8d Cierre legal y de producto** | **Cerrado** | Ver «M8d — cierre legal y de producto». Queda pendiente de revisión profesional de los textos y de correr el smoke test contra el despliegue real.                                                                                                                                    |
 
-## Próximos pasos inmediatos
+## Pendientes de infraestructura real de M8 (siguen abiertos)
 
 1. **Revisión legal** de los cuatro documentos (`docs/LEGAL_CHECKLIST.md`) y, recién después, quitar la marca de borrador.
-2. **M8c/M8d (infra)**: ejecutar el primer despliegue real (fases 1–7 de `docs/DEPLOY.md`), confirmar `cloudflare-ufw.sh verify <ip>` y correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>`.
-3. Cierre de M8: ejecutar escenarios k6/WS en CI y en infra real para actualizar `docs/PERF.md` con números reales de p95 y capacidad sostenida.
+2. Ejecutar el primer despliegue real (fases 1–7 de `docs/DEPLOY.md`), confirmar `cloudflare-ufw.sh verify <ip>` y correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>`.
+3. Ejecutar escenarios k6/WS en CI e infraestructura real para actualizar `docs/PERF.md` con p95 y capacidad sostenida reales.
+
+---
+
+## M9a — Social, historial y privacidad (sin rankings ni gamificación)
+
+**Estado:** implementación completa en `arena/5de7b045-trucostart`; formato, lint, typecheck, suite completa, build y capturas responsive verificados. CI remoto run `45207482192`: cuatro jobs en verde (calidad/build, tests lentos del motor, perímetro y backup/restore).
+
+| Criterio                                                       | Implementación                                                                                                                                               | Evidencia / estado                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Solicitudes cruzadas simultáneas y aceptación duplicada        | Canonicalización transaccional del par; aceptación idempotente                                                                                               | Verificado: suite API completa; `social-and-privacy.spec.ts` (5 tests)                                  |
+| Dos clientes reales: amistad, invitación y partida completa    | API + game-server reales y PostgreSQL en el stack distribuido                                                                                                | Verificado: `full-match-e2e.spec.ts`                                                                    |
+| Privacidad configurable de historial, estadísticas y presencia | Settings independientes `historyVisibility`, `statsVisibility`, `presenceVisibility`; default `FRIENDS`; control en `/perfil`; bloqueo prevalece sobre `ALL` | Verificado: suites API/web; `m9a-social-reporting.spec.tsx` (3 tests)                                   |
+| Bloqueos en solicitudes, invitaciones, desafíos y presencia    | Bloqueo quita amistad, cancela pendientes, impide nueva aceptación y excluye presencia visible                                                               | Verificado: `social-and-privacy.spec.ts`, `lobby-rules-and-ws-privacy.spec.ts`                          |
+| Sanciones en búsqueda y envío de solicitudes                   | Filtrado de usuarios sancionados y guard de elegibilidad del solicitante                                                                                     | Verificado: `social-and-privacy.spec.ts`                                                                |
+| Reportar desde amigos e historial                              | `ReportButton` en lista de amigos; detalle de partida adjunta `matchId` al reporte                                                                           | Verificado: `apps/web/tests/m9a-social-reporting.spec.tsx`                                              |
+| Capturas responsive                                            | Amigos, solicitudes, notificaciones, historial y estadísticas a 360/1200 CSS px                                                                              | 10 PNG generados e inspeccionados en `docs/screenshots/m9a-*.png` con `screenshots:m5b`                 |
+| Contratos y riesgos documentados                               | API, eventos sociales WS, privacidad de bloqueos y datos personales actualizados                                                                             | `docs/API.md`, `docs/EVENTS.md`, `docs/THREAT_MODEL.md`, `docs/LEGAL_CHECKLIST.md`, `docs/DECISIONS.md` |
+
+**Verificación local final:** `corepack pnpm format:check`, `corepack pnpm -r lint`, `corepack pnpm -r typecheck`, `PATH=/tmp/trucostart-bin:$PATH corepack pnpm -r --workspace-concurrency=2 test` (28 archivos API: 122 aprobados/6 omitidos; web 42/42; game-server 41 aprobados/3 omitidos; resto de paquetes en verde) y `corepack pnpm -r --workspace-concurrency=2 build` terminaron correctamente. El primer intento de suite recursiva sin wrapper falló porque `apps/admin` invoca `pnpm` como subproceso y el binario no está en PATH; el rerun con Corepack vía wrapper pasó. **CI 45207482192:** 4/4 jobs exitosos — Lint/Typecheck/Fast Tests/Build; Engine slow tests; Perímetro; Respaldo/restauración de PostgreSQL.
+
+**Fuera de alcance:** no se iniciaron rankings, Glicko-2, XP, logros, misiones ni otras funciones de gamificación.
+
+---
+
+## M9b — Ratings competitivos, rankings y revisión humana
+
+**Estado:** implementación integrada y comprometida localmente en la rama activa. El push y la CI remota están pendientes; las pruebas locales usan PGlite e implementaciones en memoria cuando no hay servicios. La evidencia real de PostgreSQL 16 y Redis 7 debe venir de la CI antes de cerrar el hito.
+
+| Criterio                           | Implementación                                                                                                                                            | Evidencia                                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Ratings Glicko-2 por modalidad     | Rating, desviación y volatilidad por `1v1`/`2v2`; cálculo post-partida transaccional, `rating_delta` e idempotencia durable                               | `apps/api/src/modules/ratings/glicko-2.spec.ts`, `ratings.service.spec.ts`                       |
+| Sólo partidas competitivas humanas | Separación de cola casual/competitiva; captura de temporada en `match.started`; práctica y partidas con bots registran el job excluido sin variar ratings | `ratings.matchmaking.integration.spec.ts`, `m6-practice-stats.spec.ts`                           |
+| Ranking público y perfiles         | Global/semanal/mensual por modalidad, cursor, mínimos de partidas/oponentes, filtros de `statsVisibility`, tarjeta `/ranking` y perfiles                  | `ratings.matchmaking.integration.spec.ts`; `apps/web/src/features/ratings/`                      |
+| E2E competitivo completo           | Encola humanos, juega una partida real en `apps/game-server`, persiste resultado y confirma ambos ratings y ranking público                               | `full-match-e2e.spec.ts` (3/3 local; requiere `DATABASE_URL` y `REDIS_URL` en CI)                |
+| Proyección Redis resiliente        | PostgreSQL es fuente de verdad; outbox durable e idempotente, proyecciones reconstruibles y fallback de lectura ante indisponibilidad                     | `apps/api/src/modules/ratings/ratings.service.ts`, `redis-leaderboard-store.ts`                  |
+| Ciclo de temporadas                | Cierre idempotente, diferido ante mesas activas/jobs pendientes, snapshots elegibles, auditoría y reinicio suave                                          | `ratings.service.spec.ts`                                                                        |
+| Señales de integridad para humanos | Rivalidades, partidos cortos, abandonos coordinados y posible feeding; caso versionado, reabrible con evidencia nueva y auditoría                         | `ratings.service.spec.ts`, `admin.spec.ts`                                                       |
+| Sin sanciones automáticas          | Detectores sólo crean evidencia; el permiso `competitive:review` permite claim/resolución humana y no modifica sanciones ni rating por una señal          | `admin.spec.ts`, `ratings.service.spec.ts`                                                       |
+| Migraciones y contratos            | Migraciones Drizzle `0008`/`0009`, tabla/captura de temporada, schemas compartidos y OpenAPI 3.1                                                          | `createAdaptiveTestDatabase` en suites API; `users-authz-and-privacy.spec.ts`                    |
+| Capturas responsive                | Ranking, rating del perfil y revisión Fair Play en 360/1200 CSS px                                                                                        | 6 PNG inspeccionados en `docs/screenshots/m9b-*.png`; `pnpm --filter @truco/web screenshots:m9b` |
+
+**Verificación local:** `corepack pnpm format:check`, `PATH=/tmp/trucostart-bin:$PATH corepack pnpm lint`, `typecheck` y `test` pasaron. La suite reportó 334 aprobados y 11 omitidos (API 146/8; game-server 41/3; web 42/42; admin 13/13; shared 48/48; engine 36/36; UI 8/8). `corepack pnpm build` pasó; el job lento del motor pasó 7/7, incluida la simulación de 3.000 partidas. También pasaron `admin check:bundle`, el escaneo de bundles y `git diff --check`. El script `screenshots:m9b` construyó web/admin y generó seis capturas revisadas. Las migraciones se ejecutaron con PGlite (PostgreSQL WASM), no con un servicio PostgreSQL externo; los tests que necesitan Redis/BullMQ omitieron 11 casos en total porque `REDIS_URL` no está configurado. Por lo tanto, la cola Redis competitiva, la proyección Redis y la integración con PostgreSQL 16 real todavía requieren evidencia verde de CI. CI remoto de esta rama: pendiente de ejecutar tras el push.
+
+**Fuera de alcance:** M9b no incorpora XP, niveles, logros, misiones, monedas virtuales ni otras funciones de gamificación; esos elementos permanecen pendientes en `docs/BACKLOG.md`.

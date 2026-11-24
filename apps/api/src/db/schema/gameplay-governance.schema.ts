@@ -2,6 +2,7 @@ import type { GameMode, MatchOutcome, RulesetCode } from '@truco/shared';
 import { desc, sql } from 'drizzle-orm';
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -51,6 +52,12 @@ export const tablesTable = pgTable(
     closedReason: varchar('closed_reason', { length: 32 }),
     /** `true` en mesas de práctica contra la máquina (sin bots registrados, sin estadísticas). */
     isPractice: boolean('is_practice').notNull().default(false),
+    /** Solo las salas creadas desde la cola competitiva pueden actualizar rating. */
+    isCompetitive: boolean('is_competitive').notNull().default(false),
+    /** Temporada capturada al iniciar la partida para evitar saltos durante un cierre. */
+    competitiveSeasonId: uuid('competitive_season_id').references(() => ratingSeasonsTable.id, {
+      onDelete: 'set null',
+    }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -90,6 +97,30 @@ export const tableSeatsTable = pgTable(
   ],
 );
 
+export const ratingSeasonsTable = pgTable(
+  'rating_seasons',
+  {
+    id: uuid('id').primaryKey(),
+    seasonNumber: integer('season_number').notNull().unique(),
+    label: varchar('label', { length: 80 }).notNull(),
+    status: varchar('status', { length: 16 })
+      .$type<'ACTIVE' | 'CLOSED'>()
+      .notNull()
+      .default('ACTIVE'),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('rating_seasons_single_active_uniq')
+      .on(t.status)
+      .where(sql`${t.status} = 'ACTIVE'`),
+    index('rating_seasons_status_ends_idx').on(t.status, t.endsAt),
+  ],
+);
+
 export const matchesTable = pgTable('matches', {
   id: uuid('id').primaryKey(),
   tableId: uuid('table_id').references(() => tablesTable.id, { onDelete: 'set null' }),
@@ -100,6 +131,11 @@ export const matchesTable = pgTable('matches', {
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
   result: jsonb('result').$type<Record<string, unknown>>(),
+  /** Si hubo uno o más bots como asiento durante esta partida competitiva. */
+  hasBots: boolean('has_bots').notNull().default(false),
+  /** Solo las partidas que nacen en la cola humana competitiva puntúan. */
+  isCompetitive: boolean('is_competitive').notNull().default(false),
+  seasonId: uuid('season_id').references(() => ratingSeasonsTable.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -116,7 +152,7 @@ export const matchPlayersTable = pgTable(
     team: integer('team').notNull(),
     score: integer('score').notNull().default(0),
     outcome: varchar('outcome', { length: 16 }).$type<MatchOutcome>().notNull(),
-    ratingDelta: integer('rating_delta').notNull().default(0),
+    ratingDelta: doublePrecision('rating_delta').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -241,3 +277,192 @@ export const tutorialProgressTable = pgTable('tutorial_progress', {
   completedLessons: jsonb('completed_lessons').$type<string[]>().notNull().default([]),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Rating Glicko-2 independiente por usuario, modalidad y temporada. */
+export const ratingProfilesTable = pgTable(
+  'rating_profiles',
+  {
+    seasonId: uuid('season_id')
+      .notNull()
+      .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    mode: varchar('mode', { length: 8 }).$type<GameMode>().notNull(),
+    rating: doublePrecision('rating').notNull().default(1500),
+    deviation: doublePrecision('deviation').notNull().default(350),
+    volatility: doublePrecision('volatility').notNull().default(0.06),
+    matchesPlayed: integer('matches_played').notNull().default(0),
+    opponentsCount: integer('opponents_count').notNull().default(0),
+    wins: integer('wins').notNull().default(0),
+    losses: integer('losses').notNull().default(0),
+    abandons: integer('abandons').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.seasonId, t.userId, t.mode] }),
+    index('rating_profiles_mode_rank_idx').on(t.seasonId, t.mode, desc(t.rating)),
+    index('rating_profiles_user_idx').on(t.userId, t.seasonId),
+  ],
+);
+
+/** Duelo entre dos rivales opuestos; limita rematches y alimenta señales de revisión. */
+export const ratingRivalriesTable = pgTable(
+  'rating_rivalries',
+  {
+    seasonId: uuid('season_id')
+      .notNull()
+      .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+    mode: varchar('mode', { length: 8 }).$type<GameMode>().notNull(),
+    playerLow: uuid('player_low')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    playerHigh: uuid('player_high')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    matchesPlayed: integer('matches_played').notNull().default(0),
+    shortMatches: integer('short_matches').notNull().default(0),
+    abandonMatches: integer('abandon_matches').notNull().default(0),
+    playerLowWins: integer('player_low_wins').notNull().default(0),
+    playerHighWins: integer('player_high_wins').notNull().default(0),
+    firstPlayedAt: timestamp('first_played_at', { withTimezone: true }).notNull(),
+    lastPlayedAt: timestamp('last_played_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.seasonId, t.mode, t.playerLow, t.playerHigh] }),
+    index('rating_rivalries_low_count_idx').on(t.seasonId, t.mode, t.playerLow, t.matchesPlayed),
+    index('rating_rivalries_high_count_idx').on(t.seasonId, t.mode, t.playerHigh, t.matchesPlayed),
+  ],
+);
+
+/** Agregados de puntos y rivales únicos para rankings semanales y mensuales. */
+export const ratingPeriodStatsTable = pgTable(
+  'rating_period_stats',
+  {
+    seasonId: uuid('season_id')
+      .notNull()
+      .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    mode: varchar('mode', { length: 8 }).$type<GameMode>().notNull(),
+    periodType: varchar('period_type', { length: 8 }).$type<'WEEK' | 'MONTH'>().notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    ratingPoints: doublePrecision('rating_points').notNull().default(0),
+    matchesPlayed: integer('matches_played').notNull().default(0),
+    opponentIds: jsonb('opponent_ids').$type<string[]>().notNull().default([]),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.seasonId, t.userId, t.mode, t.periodType, t.periodStart] }),
+    index('rating_period_stats_rank_idx').on(
+      t.seasonId,
+      t.mode,
+      t.periodType,
+      t.periodStart,
+      desc(t.ratingPoints),
+    ),
+  ],
+);
+
+/** Durable outbox: DB commit may succeed while Redis is unavailable; retries project absolute scores. */
+export const ratingRedisOutboxTable = pgTable(
+  'rating_redis_outbox',
+  {
+    matchId: uuid('match_id')
+      .primaryKey()
+      .references(() => matchesTable.id, { onDelete: 'cascade' }),
+    seasonId: uuid('season_id')
+      .notNull()
+      .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    projectedAt: timestamp('projected_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('rating_redis_outbox_pending_idx')
+      .on(t.createdAt)
+      .where(sql`${t.projectedAt} IS NULL`),
+  ],
+);
+
+/** Explicit idempotency marker for the post-match rating job (same transaction as deltas). */
+export const ratingJobsTable = pgTable('rating_jobs', {
+  matchId: uuid('match_id')
+    .primaryKey()
+    .references(() => matchesTable.id, { onDelete: 'cascade' }),
+  seasonId: uuid('season_id')
+    .notNull()
+    .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+  processedAt: timestamp('processed_at', { withTimezone: true }).notNull(),
+});
+
+/** Ranking congelado por temporada y modalidad; se conserva aunque los ratings activos se reinicien. */
+export const ratingSeasonSnapshotsTable = pgTable(
+  'rating_season_snapshots',
+  {
+    seasonId: uuid('season_id')
+      .notNull()
+      .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+    mode: varchar('mode', { length: 8 }).$type<GameMode>().notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    rating: doublePrecision('rating').notNull(),
+    deviation: doublePrecision('deviation').notNull(),
+    matchesPlayed: integer('matches_played').notNull(),
+    opponentsCount: integer('opponents_count').notNull(),
+    wins: integer('wins').notNull(),
+    division: varchar('division', { length: 16 }).notNull(),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.seasonId, t.mode, t.userId] }),
+    uniqueIndex('rating_season_snapshots_position_uniq').on(t.seasonId, t.mode, t.position),
+    index('rating_season_snapshots_user_idx').on(t.userId, t.seasonId),
+  ],
+);
+
+/** Auditoría transaccional de cierre; una fila por temporada cerrada. */
+export const ratingSeasonAuditsTable = pgTable('rating_season_audits', {
+  seasonId: uuid('season_id')
+    .primaryKey()
+    .references(() => ratingSeasonsTable.id, { onDelete: 'cascade' }),
+  nextSeasonId: uuid('next_season_id')
+    .notNull()
+    .references(() => ratingSeasonsTable.id, { onDelete: 'restrict' }),
+  snapshotCount: integer('snapshot_count').notNull(),
+  resetStrategy: varchar('reset_strategy', { length: 80 }).notNull(),
+  closedAt: timestamp('closed_at', { withTimezone: true }).notNull(),
+});
+
+/** Casos antiabuso para revisión humana; el sistema no aplica sanciones automáticas. */
+export const competitiveReviewCasesTable = pgTable(
+  'competitive_review_cases',
+  {
+    id: uuid('id').primaryKey(),
+    fingerprint: varchar('fingerprint', { length: 160 }).notNull().unique(),
+    status: varchar('status', { length: 16 })
+      .$type<'OPEN' | 'IN_REVIEW' | 'RESOLVED'>()
+      .notNull()
+      .default('OPEN'),
+    severity: varchar('severity', { length: 8 }).$type<'LOW' | 'MEDIUM' | 'HIGH'>().notNull(),
+    signals: jsonb('signals').$type<string[]>().notNull(),
+    userIds: uuid('user_ids').array().notNull(),
+    matchIds: uuid('match_ids').array().notNull(),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+    claimedBy: uuid('claimed_by').references(() => usersTable.id, { onDelete: 'set null' }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    resolvedBy: uuid('resolved_by').references(() => usersTable.id, { onDelete: 'set null' }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolutionNote: text('resolution_note'),
+    version: integer('version').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('competitive_review_cases_status_created_idx').on(t.status, desc(t.createdAt)),
+    index('competitive_review_cases_claimed_idx').on(t.claimedBy, t.status),
+  ],
+);

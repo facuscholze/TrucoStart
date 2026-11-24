@@ -8,7 +8,8 @@ import {
   saveClientPreferences,
 } from '../lib/preferences.js';
 
-export type NavSection = 'home' | 'lobby' | 'learn' | 'scorer' | 'profile' | 'auth';
+export type NavSection =
+  'home' | 'lobby' | 'ranking' | 'learn' | 'scorer' | 'profile' | 'social' | 'auth';
 
 /**
  * Enlaces legales del pie. El orden coincide con `legalDocumentOrder` para que el
@@ -59,8 +60,12 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
   const navItems: ReadonlyArray<{ id: NavSection; label: string; path: string }> = [
     { id: 'home', label: messagesEsAr.nav.home, path: '/' },
     { id: 'lobby', label: messagesEsAr.nav.lobby, path: '/lobby' },
+    { id: 'ranking', label: messagesEsAr.nav.rankings, path: '/ranking' },
     { id: 'learn', label: messagesEsAr.nav.learn, path: '/aprender' },
     { id: 'scorer', label: messagesEsAr.nav.scorer, path: '/anotador' },
+    ...(currentUser
+      ? [{ id: 'social' as const, label: messagesEsAr.nav.social, path: '/amigos' }]
+      : []),
     currentUser
       ? { id: 'profile', label: messagesEsAr.nav.profile, path: '/perfil' }
       : { id: 'auth', label: messagesEsAr.nav.auth, path: '/acceso' },

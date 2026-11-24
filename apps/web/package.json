@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "screenshots:m5a": "node scripts/capture-m5a-screenshots.mjs",
-    "screenshots:m5b": "node scripts/capture-m5b-screenshots.mjs"
+    "screenshots:m5b": "node scripts/capture-m5b-screenshots.mjs",
+    "screenshots:m9b": "corepack pnpm --filter @truco/web build && VITE_ADMIN_DEMO=1 corepack pnpm --filter @truco/admin build && node scripts/capture-m9b-screenshots.mjs"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.2.0",

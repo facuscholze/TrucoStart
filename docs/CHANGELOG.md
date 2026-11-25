@@ -4,6 +4,32 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [Unreleased] — 2026-11-19 (Auditoría de producto M0–M9c, tandas 1–2)
+
+### Corregido
+
+- La revancha ya puede iniciar una segunda partida en la misma sala: `RoomActor` permite reemplazar el estado terminado y una prueba de ciclo de vida verifica `game.started` y el nuevo reparto para ambos clientes.
+- La pantalla de resultado traduce el motivo real `TARGET_SCORE` y no muestra claves internas desconocidas.
+- Se simplificó copy visible para jugadores: conexión, cantos, baraja verificable, ranking y reconexión, sin términos de infraestructura en esos mensajes.
+- El E2E multi-cliente acota el clic de jugada para tolerar la carrera en que aparece el resultado entre la comprobación y el clic.
+- Ranking responsive: en móvil se muestran tarjetas compactas con todas las estadísticas sin una tabla recortada; desde tablet se conserva la tabla semántica. El puntaje global dejó de repetirse como si fuera una variación.
+- La captura M9b espera controles por rol y el texto vigente, y falla si la página de ranking desborda horizontalmente a 360 px.
+
+### Verificación local
+
+- Suite web: 47/47; suites de monorepo: `pnpm test` terminó con exit 0 (API: 158 aprobados, 8 omitidos por servicios externos no configurados en sandbox).
+- `format:check`, lint, typecheck y build recursivos del monorepo pasaron. El bundle web principal mide 114.29 KB gzip; admin 94.29 KB gzip. Permanecen advertencias no bloqueantes de Rollup por comentarios `@__PURE__` de Zod.
+- `apps/game-server`: `provisioning-and-lifecycle.spec.ts` 1 aprobado / 1 omitido (integración Redis/BullMQ), lint, typecheck y build.
+- Playwright multi-cliente con API y game-server reales del stack E2E: Desktop 1280×800 y Mobile 360×800, ambos pasan e incluyen revancha. El stack local usa PGlite y bus de ciclo de vida en memoria; no equivale a PostgreSQL/Redis reales.
+- `screenshots:m9b` completó 6 capturas de ranking, rating de perfil y Fair Play admin a 360/1200; la captura móvil del ranking verifica además que la página no tenga scroll horizontal. `check:bundle` del admin pasó.
+
+### Sigue pendiente de la auditoría
+
+- Cobertura visual completa de web y admin a 360/1200, auditoría de accesibilidad/contraste, flujo integrado de registro→bot→amistad/invitación→partida→progreso/reporte/ranking, mediciones observadas de rendimiento y hasta 10 propuestas de UX.
+- No iniciar Etapa 3. El cierre general requiere CI remoto verde y el resto del alcance solicitado; la revisión profesional legal sigue pendiente.
+
+---
+
 ## [0.9.0-m9b] — 2026-11-19 (M9b — Rating competitivo, rankings y revisión humana)
 
 ### Agregado

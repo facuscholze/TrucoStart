@@ -399,3 +399,33 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 | UI, contratos y documentación        | `/progreso`, canjes, misiones, logros y notificaciones; panel de configuración admin; schemas compartidos, OpenAPI 3.1, guía API, checklist legal, amenazas y ADR-027.                                                                                 | `apps/web/tests/m9c-progression.spec.tsx` (2), `m8d-legal.spec.tsx` (11), prueba de paridad OpenAPI en `users-authz-and-privacy.spec.ts`; capturas `m9c-progression-{360,1200}.png`.                                                                    |
 
 **Verificación local:** `PATH=/tmp/trucostart-bin:$PATH corepack pnpm test` terminó con exit 0 para los 8 paquetes; el resumen API fue 156 aprobados/8 omitidos. Tras corregir la carrera de UI, `corepack pnpm --filter @truco/web test` pasó 44/44. Las omisiones locales corresponden a integraciones Redis/BullMQ al no existir `REDIS_URL`; no se cuentan como evidencia real. Suites focalizadas: `progression.service.spec.ts` (7/7, PGlite), `ratings.service.spec.ts` (9/9, PGlite), `admin.spec.ts` (11/11), `full-match-e2e.spec.ts` (3/3, API/game-server con PGlite y bus en memoria), `database.spec.ts` (4/4) y `no-gameplay-coupling.spec.ts` (1/1). `format:check`, lint, typecheck y build recursivos pasaron. `drizzle-kit check` informó `Everything's fine`; la comprobación de OpenAPI comparó `GET /v1/openapi.json` con `docs/openapi.v1.json`; el escáner de dinero real revisó 457 archivos. `screenshots:m9c` generó e inspeccionó capturas a 360 y 1200 px. La revisión legal sigue pendiente y los documentos permanecen como borradores.
+
+---
+
+## Auditoría integral M0–M9c — en curso
+
+**Alcance:** revisión de calidad sin funcionalidades nuevas; se trabaja en tandas. No se cierra Etapa 2 ni se inicia Etapa 3 por esta auditoría.
+
+### Tanda 1 — resultado observado
+
+- `apps/web/e2e/m5b-multiclient.spec.ts` falló inicialmente en la revancha. El hallazgo reproducible fue que `startMatchIfAllReady` rechazaba cualquier estado `gameState` presente, incluso uno `FINISHED`; ambos jugadores quedaban en la pantalla de resultado tras pedir revancha.
+- Corregido en `apps/game-server/src/rooms/room-actor.ts`: se permite iniciar una partida nueva si la anterior terminó. `provisioning-and-lifecycle.spec.ts` verifica dos identificadores distintos, nuevo reparto y evento de inicio para ambos clientes.
+- `MatchResultModal` ahora traduce el motivo real `TARGET_SCORE` y reemplaza cualquier motivo desconocido por copy neutral, sin mostrar códigos internos.
+- Se simplificaron mensajes visibles del jugador sobre reconexión, cantos, ranking y verificación de baraja; siguen pendientes el barrido íntegro de textos y la centralización completa.
+- Verificaciones locales del lote: web 45/45 tests + lint/typecheck/build; game-server prueba focalizada 1 aprobada/1 omitida (Redis/BullMQ sin `REDIS_URL`) + lint/typecheck/build; Playwright de dos clientes, Desktop 1280×800 y Mobile 360×800, 2/2. El stack E2E local usa PGlite y `InMemoryMatchLifecycleBus`, aunque API, game-server y navegadores son procesos/clientes reales.
+- `docs/screenshots/m8-reporte-mesa-360.png` fue regenerada por la prueba de mesa existente; la captura 1200 px de ese estado todavía falta.
+
+### Tanda 2 — ranking responsive y capturas
+
+- La captura `m9b-ranking-360.png` mostró que la tabla de 760 px quedaba recortada dentro de un contenedor con scroll horizontal y sin una señal clara. En menos de 768 px ahora se presenta una lista de tarjetas con puesto, jugador, rating, división y estadísticas; la tabla semántica se conserva desde tablet. En período global no se repite el rating como variación; semana/mes mantienen su variación independiente.
+- La tabla de escritorio tiene `caption` accesible. `apps/web/tests/leaderboard-responsive.spec.tsx` prueba lista móvil, estadísticas, ausencia de duplicación global y variación semanal (2/2).
+- `capture-m9b-screenshots.mjs` usa selectores accesibles y el texto actualizado “Puntaje competitivo”; para el ranking a 360 px también falla si detecta overflow horizontal de página. `screenshots:m9b` terminó en verde y regeneró los seis PNG de ranking, rating de perfil y Fair Play admin a 360/1200. Se inspeccionaron visualmente ranking a 360/1200 y perfil/Fair Play a 360.
+- Verificación tras las dos tandas: suite web 47/47; `pnpm test` del monorepo terminó en verde (API 158 aprobados, 8 omitidos localmente por Redis/BullMQ/servicios externos no configurados); `format:check`, lint, typecheck y build recursivos pasaron. `check:bundle` de admin también pasó. Bundles observados en build: web principal 114.29 KB gzip y admin 94.29 KB gzip. Rollup deja advertencias no bloqueantes de comentarios `@__PURE__` en dependencias Zod.
+
+### Pendiente antes del reporte final
+
+- Completar el recorrido visual de todas las pantallas web y admin a 360/1200; por ahora hay capturas para varias rutas/módulos, no cobertura completa ni revisión de cada estado vacío/error.
+- Revisar contraste y accesibilidad de teclado/lector de pantalla en navegador; `axe-core` no está instalado y aún no se ejecutó una auditoría automatizada.
+- Implementar y ejecutar el flujo integrado solicitado con dos clientes reales: invitado→registro→bot→amistad/invitación→partida humana→XP/misión→reporte→ranking.
+- Medir tiempos fríos observados hasta poder jugar y fluidez de animaciones en 360 px; el bundle principal se midió, pero aún falta un inventario reproducible por ruta y mediciones de percepción.
+- Separar hasta 10 oportunidades UX de las correcciones. El cierre general exige commit, push y CI remoto verde; no iniciar Etapa 3. La revisión jurídica de `docs/LEGAL_CHECKLIST.md` continúa pendiente.

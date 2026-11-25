@@ -127,7 +127,7 @@ describe('M9c — pantalla de progreso del jugador', () => {
     render(<ProgressionScreen currentUser={CURRENT_USER} onNavigate={vi.fn()} />);
 
     expect(await screen.findByRole('heading', { name: 'Tu progreso' })).toBeTruthy();
-    expect(screen.getByText('Monedas simbólicas')).toBeTruthy();
+    expect(await screen.findByText('Monedas simbólicas')).toBeTruthy();
     expect(
       screen.getAllByText('Sin valor económico · no transferibles · no se compran con dinero.')
         .length,

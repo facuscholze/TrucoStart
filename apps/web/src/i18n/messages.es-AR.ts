@@ -8,8 +8,7 @@ export const messagesEsAr = {
   ...screenMessagesEsAr,
   brand: {
     stageTag: 'Etapa 1 · Mesa en tiempo real',
-    subtitle:
-      'Truco argentino online con servidor autoritativo, baraja española original y juego limpio verificable.',
+    subtitle: 'Truco argentino en tiempo real, con baraja española y partidas de juego limpio.',
   },
   launcher: {
     heading: 'Entrar al paño',
@@ -24,7 +23,7 @@ export const messagesEsAr = {
     joinCodeAction: 'Unirse con código',
     devBotRouteCta: 'Inspeccionar mesa vs. bots (/dev/mesa)',
     sessionErrorFallback:
-      'No pudimos conectar con la API local. Verificá que pnpm dev:all esté activo.',
+      'No pudimos conectar con el juego. Revisá tu conexión e intentá de nuevo.',
   },
   mesa: {
     liveTableAria: 'Mesa de truco en vivo',
@@ -55,7 +54,7 @@ export const messagesEsAr = {
     copiedJoinCode: '¡Código copiado!',
     waitingRoomTitle: 'Sala lista para barajar',
     waitingRoomHint:
-      'Cuando todos los asientos estén ocupados y marquen "¡Listo!", el servidor reparte con semilla comprometida.',
+      'Cuando todos los asientos estén ocupados y marquen «¡Listo!», se reparten las cartas con una baraja verificable.',
     markReadyCta: '¡Estoy listo!',
     readyConfirmedLabel: 'Listo · esperando al resto',
     openCallTrayCta: (count: number) => (count > 0 ? `Cantos (${count})` : 'Sin cantos'),
@@ -65,15 +64,15 @@ export const messagesEsAr = {
     quickChatDialogLabel: 'Enviar frase rápida a la mesa',
     signalsSectionTitle: 'Señas al compañero',
     sidePanelScoreTitle: 'Anotador de fósforos',
-    sidePanelCallsTitle: 'Cantos habilitados por el servidor',
+    sidePanelCallsTitle: 'Cantos disponibles',
     sidePanelFeedTitle: 'Registro de la mano',
     sidePanelEmptyFeed: 'Todavía no hubo cantos en esta mano.',
-    commitHashPrefix: 'Compromiso SHA-256:',
+    commitHashPrefix: 'Código de verificación:',
   },
   reconnection: {
     ownReconnectingTitle: 'Reconectando con la mesa en vivo…',
     ownReconnectingDetail:
-      'Solicitando un ticket WebSocket nuevo de un solo uso y resincronizando jugadas perdidas.',
+      'Estamos recuperando la conexión y sincronizando las últimas jugadas. Esperá un momento sin salir de la mesa.',
     retryNowCta: 'Reintentar ahora',
     peerDisconnectedBanner: (nickname: string, secondsLeft: number | null) =>
       secondsLeft !== null
@@ -82,7 +81,7 @@ export const messagesEsAr = {
   },
   calls: {
     trayTitle: 'Bandeja de cantos',
-    traySubtitle: 'Solo se muestran las acciones legales informadas por el servidor.',
+    traySubtitle: 'Acá aparecen los cantos que tenés disponibles en esta mano.',
     noLegalCalls: 'En este momento no tenés cantos disponibles.',
     groupPendingResponse: 'Responder canto pendiente',
     groupEnvido: 'Envido (tantos)',
@@ -124,12 +123,14 @@ export const messagesEsAr = {
     finalScoreSummary: (us: number, them: number, target: number) =>
       `Resultado final a ${target}: Nosotros ${us} · Ellos ${them}`,
     reasonLabels: {
-      TARGET_SCORE_REACHED: 'Puntaje objetivo alcanzado en buena ley.',
-      ABANDON: 'Partida definida por abandono de asiento.',
+      TARGET_SCORE: 'Partida definida por alcanzar el puntaje objetivo.',
+      TARGET_SCORE_REACHED: 'Partida definida por alcanzar el puntaje objetivo.',
+      ABANDON: 'Partida definida por abandono.',
     } as Readonly<Record<string, string>>,
-    fairPlayHeading: 'Verificación criptográfica (Commit-Reveal)',
-    seedCommitmentLabel: 'Compromiso inicial',
-    seedRevealLabel: 'Semilla revelada',
+    unknownReason: 'Partida finalizada.',
+    fairPlayHeading: 'Baraja verificable',
+    seedCommitmentLabel: 'Código publicado al iniciar',
+    seedRevealLabel: 'Código revelado al finalizar',
     rematchCta: 'Pedir revancha',
     rematchWaitingCta: 'Revancha pedida · esperando rival…',
     exitToHomeCta: 'Volver al inicio',

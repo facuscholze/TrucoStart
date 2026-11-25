@@ -30,8 +30,8 @@ export const screenMessagesEsAr = {
         body: 'Podés entrar como invitado con un clic y convertir tu cuenta cuando quieras sin perder partidas ni estadísticas.',
       },
       {
-        title: '2. Servidor autoritativo y mazo verificable',
-        body: 'Cada mano se baraja en el servidor con compromiso criptográfico SHA-256 revelable al final de la partida.',
+        title: '2. Juego limpio y mazo verificable',
+        body: 'Al final de cada partida podés revisar la comprobación del mazo y confirmar que se mezcló sin cambios.',
       },
       {
         title: '3. Anotador y guía disponibles sin red',
@@ -66,7 +66,7 @@ export const screenMessagesEsAr = {
     quickPlay2v2Sub: 'Por parejas con señas a 30 puntos',
     competitiveTitle: 'Cola competitiva',
     competitiveBody:
-      'Partidas entre personas, rating Glicko-2 y emparejamiento por nivel. Las prácticas y partidas con bots no puntúan.',
+      'Partidas entre personas, puntaje competitivo y emparejamiento por nivel. Las prácticas y partidas con bots no suman al puntaje.',
     competitive1v1: 'Competitivo 1 vs 1',
     competitive2v2: 'Competitivo 2 vs 2',
     openRankings: 'Ver rankings',
@@ -88,17 +88,22 @@ export const screenMessagesEsAr = {
   },
   rankings: {
     title: 'Rankings competitivos',
-    subtitle:
-      'Rating Glicko-2 por modalidad, con tabla global, semanal y mensual de esta temporada.',
+    subtitle: 'Revisá la tabla global, semanal y mensual de cada modalidad.',
+    defaultSeasonLabel: 'Puntaje competitivo',
+    playerLabel: 'Jugador',
+    minimumQualification: (matches: number, opponents: number) =>
+      `Mínimos para clasificar: ${matches} partidas y ${opponents} rivales distintos.`,
+    mode1v1: '1 vs 1',
+    mode2v2: '2 vs 2',
     periodLabel: 'Período',
     modeLabel: 'Modalidad',
-    global: 'Temporada',
+    global: 'Global',
     weekly: 'Esta semana',
     monthly: 'Este mes',
     seasonEnds: (label: string, date: string) => `${label} · cierra ${date}`,
     resetCountdown: (seconds: number) => `Próximo cierre en ${Math.ceil(seconds / 86400)} días`,
-    score: 'Puntaje',
-    rating: 'Rating',
+    score: 'Variación',
+    rating: 'Puntaje',
     division: 'División',
     played: 'Partidas',
     opponents: 'Rivales',
@@ -174,8 +179,7 @@ export const screenMessagesEsAr = {
   },
   lobby: {
     title: 'Lobby en tiempo real',
-    subtitle:
-      'Las mesas públicas se actualizan al instante por WebSocket. Filtrá por modalidad o armá tu propia mesa.',
+    subtitle: 'Las mesas públicas se actualizan al instante. Filtrá por modalidad o armá la tuya.',
     wsConnectedBadge: 'En vivo',
     wsReconnectingBadge: 'Reconectando canal…',
     wsOfflineBadge: 'Sin canal en vivo',
@@ -244,9 +248,9 @@ export const screenMessagesEsAr = {
     selfTag: 'Vos',
     readyTag: 'Listo',
     notReadyTag: 'Preparándose',
-    readyCheckHeading: 'Confirmación de inicio (Ready-check)',
+    readyCheckHeading: 'Confirmación de inicio',
     readyCheckHint:
-      'Conectado en vivo con el servidor de partida: marcá listo cuando quieras que se repartan las cartas.',
+      'La mesa está conectada. Marcá «¡Estoy listo!» cuando quieras que se repartan las cartas.',
     toggleReadyOnCta: '¡Estoy listo para jugar!',
     toggleReadyOffCta: 'Cancelar listo',
     enterTableCanvasCta: 'Ir al paño en vivo',
@@ -374,9 +378,9 @@ export const screenMessagesEsAr = {
     savingProfileBusy: 'Guardando…',
     profileSavedToast: 'Perfil y preferencias actualizados.',
     statsSectionTitle: 'Estadísticas oficiales',
-    ratingSectionTitle: 'Rating competitivo',
+    ratingSectionTitle: 'Puntaje competitivo',
     ratingSourceNote:
-      'El rating cuenta solo partidas competitivas completas entre personas; práctica y partidas con bots quedan afuera.',
+      'El puntaje se calcula solo con partidas competitivas completas entre personas; la práctica y las partidas con bots no cuentan.',
     ratingSeasonEnd: (date: string) => `Cierra ${date}`,
     ratingRank: (position: number) => `Puesto #${position}`,
     ratingUnranked: 'Sin puesto: faltan partidas o rivales distintos para clasificar.',
@@ -390,8 +394,7 @@ export const screenMessagesEsAr = {
     statLosses: 'Derrotas',
     statAbandons: 'Abandonos',
     statWinRate: 'Efectividad',
-    emptyStatsHint:
-      'Todavía no registraste partidas finalizadas en el servidor. ¡Jugate una mano desde el Lobby!',
+    emptyStatsHint: 'Todavía no registraste partidas finalizadas. ¡Jugate una mano desde el lobby!',
     historySectionTitle: 'Historial reciente de partidas',
     emptyHistoryTitle: 'Sin partidas registradas todavía',
     emptyHistoryBody:

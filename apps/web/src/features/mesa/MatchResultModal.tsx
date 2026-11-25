@@ -40,7 +40,8 @@ export function MatchResultModal({
   if (!summary) return null;
   const didWeWin = summary.winnerTeam === myTeam;
   const title = didWeWin ? messagesEsAr.result.modalTitleWin : messagesEsAr.result.modalTitleLoss;
-  const reasonText = messagesEsAr.result.reasonLabels[summary.reason] ?? summary.reason;
+  const reasonText =
+    messagesEsAr.result.reasonLabels[summary.reason] ?? messagesEsAr.result.unknownReason;
 
   return (
     <Modal

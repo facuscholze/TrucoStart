@@ -209,6 +209,7 @@ describe('M9c — progression persistence (PostgreSQL/PGlite integration)', () =
     });
 
     await progression.processCompletedMatch(matchId);
+    const walletAfterFirstProcessing = await totalWallet(db, player.id);
     const [first] = await db
       .select({ xp: profilesTable.xp, level: profilesTable.level })
       .from(profilesTable)
@@ -221,7 +222,8 @@ describe('M9c — progression persistence (PostgreSQL/PGlite integration)', () =
     expect(second).toEqual(first);
     expect(first!.xp).toBeGreaterThanOrEqual(25);
     expect(await xpForClass(db, player.id, 'HUMAN_MATCH')).toBe(25);
-    expect(await totalWallet(db, player.id)).toBeGreaterThan(0);
+    expect(await totalWallet(db, player.id)).toBe(walletAfterFirstProcessing);
+    expect(walletAfterFirstProcessing).toBeGreaterThan(0);
 
     const unlocked = await db
       .select({ achievementId: userAchievementsTable.achievementId })

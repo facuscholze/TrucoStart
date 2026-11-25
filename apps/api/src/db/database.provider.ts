@@ -180,6 +180,11 @@ export async function createPgliteDatabase(
  */
 export async function createAdaptiveTestDatabase(): Promise<DatabaseConnectionHandle> {
   const dbUrl = process.env['DATABASE_URL'];
+  if (process.env['TRUCO_REQUIRE_REAL_SERVICES'] === '1' && !dbUrl?.trim()) {
+    throw new Error(
+      'TRUCO_REQUIRE_REAL_SERVICES=1 refuses the PGlite fallback: DATABASE_URL must point to PostgreSQL.',
+    );
+  }
   if (dbUrl && dbUrl.trim().length > 0) {
     const isolatedDatabaseName = `truco_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     return createPostgresDatabase({

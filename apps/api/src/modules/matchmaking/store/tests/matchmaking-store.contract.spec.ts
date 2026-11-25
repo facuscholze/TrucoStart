@@ -90,6 +90,69 @@ function defineMatchmakingStoreContractSuite(
       expect((await store.getUserQueue('u2', now + 300)).status).toBe('IDLE');
     });
 
+    it('keeps competitive 1v1 from rematching blocked rivals and selects valid 2v2 teams', async () => {
+      const now = 1_800_000_000_000;
+      const options = {
+        baseRatingWindow: 200,
+        waitGrowthPerTenSeconds: 50,
+        maximumRatingWindow: 800,
+        candidateScanLimit: 24,
+      } as const;
+      const competitiveEntry = (
+        userId: string,
+        mode: '1v1' | '2v2',
+        rating: number,
+        blockedOpponentIds: readonly string[] = [],
+      ) => ({
+        userId,
+        nickname: userId,
+        mode,
+        rulesetCode: 'ar-standard-v1' as const,
+        enqueuedAtMs: now,
+        expiresAtMs: now + 60_000,
+        competitive: true,
+        rating,
+        ratingDeviation: 100,
+        blockedOpponentIds,
+      });
+
+      const blockedPlayer = await store.enqueueAndTryMatch(
+        competitiveEntry('blocked-a', '1v1', 1500, ['blocked-b']),
+        2,
+        now,
+        options,
+      );
+      expect(blockedPlayer.kind).toBe('QUEUED');
+      const sameRival = await store.enqueueAndTryMatch(
+        competitiveEntry('blocked-b', '1v1', 1500),
+        2,
+        now,
+        options,
+      );
+      expect(sameRival.kind).toBe('QUEUED');
+      expect((await store.getUserQueue('blocked-a', now)).status).toBe('QUEUED');
+
+      const quartet = [
+        competitiveEntry('team-a', '2v2', 1500, ['team-d']),
+        competitiveEntry('team-b', '2v2', 1500),
+        competitiveEntry('team-c', '2v2', 1500),
+        competitiveEntry('team-d', '2v2', 1500),
+      ];
+      let result: Awaited<ReturnType<MatchmakingStore['enqueueAndTryMatch']>> | undefined;
+      for (const player of quartet) {
+        result = await store.enqueueAndTryMatch(player, 4, now, options);
+      }
+      expect(result?.kind).toBe('MATCHED');
+      if (result?.kind === 'MATCHED') {
+        const teamA = result.players.find((player) => player.userId === 'team-a')?.team;
+        const teamD = result.players.find((player) => player.userId === 'team-d')?.team;
+        expect(teamA).toBeDefined();
+        expect(teamA).toBe(teamD);
+        expect(result.players.filter((player) => player.team === 0)).toHaveLength(2);
+        expect(result.players.filter((player) => player.team === 1)).toHaveLength(2);
+      }
+    });
+
     it('purges expired waiters on timeout and supports safe cancellation', async () => {
       const now = 1_800_000_000_000;
       await store.enqueueAndTryMatch(

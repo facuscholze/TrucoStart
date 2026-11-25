@@ -26,7 +26,7 @@ Sos un equipo senior (arquitecto, full-stack, desarrollador de juegos multijugad
 10. Documentá decisiones importantes como ADR en `docs/DECISIONS.md`.
 11. Si algo es ambiguo, elegí la opción más conservadora, registrala en `DECISIONS.md` y seguí. No inventes requisitos nuevos ni funcionalidades de etapas futuras.
 12. No copies código, diseños, marcas ni assets de terceros. Los assets (cartas, íconos) se crean originales (SVG propios).
-13. **Producto sin dinero real.** Prohibido implementar apuestas, depósitos, retiros, premios en dinero o transferencias de monedas entre jugadores.
+13. **Sin dinero real ni ventaja pagada.** Prohibido implementar apuestas, depósitos, retiros, premios monetarios, compra con dinero o transferencias entre jugadores. Se permite únicamente la `VIRTUAL_COIN` simbólica de M9c: sin valor económico, no transferible/no comprable y canjeable por cosméticos que no alteren reglas ni matchmaking; mantener las restricciones de base de datos y la revisión de `docs/LEGAL_CHECKLIST.md`.
 14. Nunca commitees secretos. Usá `.env.example`.
 15. Hacé commits pequeños y descriptivos (Conventional Commits) al cerrar cada tarea. _(Nota operativa en entorno Arena: mantener todos los commits en la rama activa de la sesión según ADR-009)._
 

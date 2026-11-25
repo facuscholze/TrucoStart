@@ -47,6 +47,13 @@ El seed de desarrollo (bloqueado automáticamente si `NODE_ENV=production`) crea
 | `martin@truco.local`  | `TrucoDev2026!` | `TinchoMano`  | Jugador 3 (2v2)  |
 | `sofia@truco.local`   | `TrucoDev2026!` | `SofiEnvido`  | Jugador 4 (2v2)  |
 
+### Competitivo, ratings y rankings (M9b)
+
+- Desde **Inicio** se puede buscar una partida competitiva 1v1 o 2v2; la cola casual permanece separada. Sólo las partidas competitivas completas entre humanos actualizan Glicko-2. Las mesas de práctica y cualquier partida con bots quedan fuera.
+- El ranking público está en [`/ranking`](http://localhost:5173/ranking), con filtros global/semanal/mensual y 1v1/2v2. Sólo aparecen cuentas que cumplen los mínimos y tienen `statsVisibility=ALL`; la tarjeta de perfil respeta los mismos controles de privacidad.
+- Las señales de integridad (repetición de rivales, partidas cortas, abandonos coordinados y posible alimentación de cuentas nuevas) crean evidencia para **revisión humana**; no generan sanciones ni bloqueos automáticos. Moderadores autorizados operan la cola en el panel Admin.
+- Los umbrales operativos están documentados en `.env.example`; los ratings y sus trabajos idempotentes se persisten en PostgreSQL y Redis es una proyección reconstruible.
+
 ---
 
 ## Cómo probar la mesa de juego en local

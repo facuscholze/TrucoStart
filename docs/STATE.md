@@ -1,8 +1,8 @@
 # Estado del Proyecto ("Mesa de Truco")
 
-- **Última actualización:** 2026-11-18
-- **Etapa activa:** Etapa 1 — MVP
-- **Módulo actual:** **M8c cerrado** — despliegue a staging (Caddy perimetral en 80/443, firewall en `DOCKER-USER` limitado a Cloudflare, IP real del cliente resuelta en el borde, adaptadores reales con `jose`/`nodemailer`, escáner de secretos con test de señuelos, `docs/DEPLOY.md` con primer despliegue y regiones de São Paulo, ADR-022). **M8d pendiente.** _(M8b se mantiene cerrado: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
+- **Última actualización:** 2026-11-19
+- **Etapa activa:** Etapa 2 — M9c (progresión persistente y economía virtual simbólica), sobre las capacidades sociales M9a y competitivas M9b.
+- **Módulo actual:** M9c implementado en la rama activa y en verificación local; todavía no hay CI remoto para este patchset. La última CI verde de M9b fue `45463088742` (4/4 jobs con PostgreSQL 16 y Redis 7 reales; es evidencia histórica, no de M9c). M8a–M8d siguen cerrados en código con dependencias de infraestructura real pendientes. El detalle de M9a/M9b/M9c se registra al final de este documento. _(M8b: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
 
 ---
 
@@ -69,18 +69,18 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ## M6 — verificación por ítem
 
-| Ítem                                    | Implementación                                                                                                         | Verificación                                                                                             |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| IA de 3 dificultades (BL-010)           | `packages/truco-engine/src/bot/{difficulty,knowledge,index}.ts`                                                        | `tests/bot-m6.spec.ts`, benchmark 2.000 partidas en `docs/PERF.md` (difícil **62,9%**, IC `[60,8–65,0]`) |
-| Bots como asientos + demora humana      | `apps/game-server/src/rooms/{bot-seats,room-actor}.ts`                                                                 | `tests/practice-bots.spec.ts` (5/5), E2E `m6-practice.spec.ts`                                           |
-| Bots solo consumen `PlayerView`         | `bot-seats.resolveBotView` + `chooseBotAction(view)`                                                                   | `practice-bots.spec.ts` › "los bots solo consumen `PlayerView`"                                          |
-| Práctica 1v1 / 2v2 (Home y Lobby)       | `apps/web/src/features/practice/PracticeSetupPanel.tsx`, `apps/api/src/modules/lobby/lobby.service.ts`                 | `m6-practice-and-tutorial.spec.ts` (2/2) + E2E Desktop/Mobile                                            |
-| Entrenamiento (pista) solo en práctica  | `apps/game-server/src/rooms/practice-hint.ts`, `GameTableView.tsx` (`practice-hint-button`/`practice-hint-text`)       | `practice-bots.spec.ts` › "responde pistas… solo en mesas de práctica" + E2E                             |
-| Tutorial interactivo + progreso         | `packages/shared/src/tutorial/tutorial.schema.ts`, `apps/web/src/features/learn/TutorialScreen.tsx`, `/v1/me/tutorial` | `apps/web/tests/tutorial-flow.spec.ts` (3/3), `m6-practice-and-tutorial.spec.ts`                         |
-| Práctica fuera de rankings/estadísticas | `apps/api/src/modules/lobby/match-persistence.service.ts` (`practice === true` → early return)                         | `apps/api/src/modules/lobby/tests/m6-practice-stats.spec.ts` (2/2)                                       |
-| Bots de reemplazo (flag, default off)   | `replaceDisconnectedWithBot` / `botReplacementDifficulty` en `GameServerOptions`                                       | `practice-bots.spec.ts` › "el bot reemplaza al humano que se cae"                                        |
-| Capturas 360 / 1200                     | `docs/screenshots/m6-practica-pista-{360,1200}.png`, `docs/screenshots/m6-tutorial-{360,1200}.png`                     | `pnpm --filter @truco/web screenshots:m5b`                                                               |
-| Log de decisiones del bot difícil       | `packages/truco-engine/scripts/m6-decision-log.mjs` → `docs/BOT_DECISION_LOG.md`                                       | Reproducible con `node packages/truco-engine/scripts/m6-decision-log.mjs`                                |
+| Ítem                                    | Implementación                                                                                                                                                                                                      | Verificación                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| IA de 3 dificultades (BL-010)           | `packages/truco-engine/src/bot/{difficulty,knowledge,index}.ts`                                                                                                                                                     | `tests/bot-m6.spec.ts`, benchmark 2.000 partidas en `docs/PERF.md` (difícil **62,9%**, IC `[60,8–65,0]`) |
+| Bots como asientos + demora humana      | `apps/game-server/src/rooms/{bot-seats,room-actor}.ts`                                                                                                                                                              | `tests/practice-bots.spec.ts` (5/5), E2E `m6-practice.spec.ts`                                           |
+| Bots solo consumen `PlayerView`         | `bot-seats.resolveBotView` + `chooseBotAction(view)`                                                                                                                                                                | `practice-bots.spec.ts` › "los bots solo consumen `PlayerView`"                                          |
+| Práctica 1v1 / 2v2 (Home y Lobby)       | `apps/web/src/features/practice/PracticeSetupPanel.tsx`, `apps/api/src/modules/lobby/lobby.service.ts`                                                                                                              | `m6-practice-and-tutorial.spec.ts` (2/2) + E2E Desktop/Mobile                                            |
+| Entrenamiento (pista) solo en práctica  | `apps/game-server/src/rooms/practice-hint.ts`, `GameTableView.tsx` (`practice-hint-button`/`practice-hint-text`)                                                                                                    | `practice-bots.spec.ts` › "responde pistas… solo en mesas de práctica" + E2E                             |
+| Tutorial interactivo + progreso         | `packages/shared/src/tutorial/tutorial.schema.ts`, `apps/web/src/features/learn/TutorialScreen.tsx`, `/v1/me/tutorial`                                                                                              | `apps/web/tests/tutorial-flow.spec.ts` (3/3), `m6-practice-and-tutorial.spec.ts`                         |
+| Práctica fuera de rankings/estadísticas | M9c persiste el resultado final como `isPractice` para progresión reducida, pero omite rating/actualizaciones competitivas; `users.repository.ts` excluye práctica y bots de estadísticas y práctica del historial. | `m6-practice-stats.spec.ts` (2/2), `progression.service.spec.ts`, `users-authz-and-privacy.spec.ts`      |
+| Bots de reemplazo (flag, default off)   | `replaceDisconnectedWithBot` / `botReplacementDifficulty` en `GameServerOptions`                                                                                                                                    | `practice-bots.spec.ts` › "el bot reemplaza al humano que se cae"                                        |
+| Capturas 360 / 1200                     | `docs/screenshots/m6-practica-pista-{360,1200}.png`, `docs/screenshots/m6-tutorial-{360,1200}.png`                                                                                                                  | `pnpm --filter @truco/web screenshots:m5b`                                                               |
+| Log de decisiones del bot difícil       | `packages/truco-engine/scripts/m6-decision-log.mjs` → `docs/BOT_DECISION_LOG.md`                                                                                                                                    | Reproducible con `node packages/truco-engine/scripts/m6-decision-log.mjs`                                |
 
 ---
 
@@ -106,24 +106,26 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ---
 
-## M7 — matriz de roles y permisos
+## RBAC actual (M7–M9c)
 
-`ADMIN_ROLE_PERMISSIONS` en `packages/shared/src/moderation/moderation.schema.ts` es la **única** fuente de verdad; el servidor la evalúa en cada endpoint con `@RequirePermission` (nunca se confía en la UI).
+`ADMIN_ROLE_PERMISSIONS` en `packages/shared/src/moderation/moderation.schema.ts` es la **única** fuente de verdad; el servidor la evalúa en cada endpoint con `@RequirePermission` (nunca se confía en la UI). La matriz actual contiene 14 permisos, incluidos revisión competitiva (M9b) y `gamification:configure` (M9c).
 
-| Permiso                 | SOPORTE | MODERADOR | ADMIN |
-| ----------------------- | :-----: | :-------: | :---: |
-| `dashboard:read`        |   ✅    |    ✅     |  ✅   |
-| `users:read`            |   ✅    |    ✅     |  ✅   |
-| `reports:read`          |   ✅    |    ✅     |  ✅   |
-| `reports:claim`         |   ✅    |    ✅     |  ✅   |
-| `audit:read`            |   ✅    |    ✅     |  ✅   |
-| `reports:resolve`       |    —    |    ✅     |  ✅   |
-| `sanctions:issue`       |    —    |    ✅     |  ✅   |
-| `nickname:force_change` |    —    |    ✅     |  ✅   |
-| `matches:replay`        |    —    |    ✅     |  ✅   |
-| `users:read_pii`        |    —    |     —     |  ✅   |
-| `sanctions:issue_ban`   |    —    |     —     |  ✅   |
-| `admins:manage`         |    —    |     —     |  ✅   |
+| Permiso                  | SOPORTE | MODERADOR | ADMIN |
+| ------------------------ | :-----: | :-------: | :---: |
+| `dashboard:read`         |   ✅    |    ✅     |  ✅   |
+| `users:read`             |   ✅    |    ✅     |  ✅   |
+| `reports:read`           |   ✅    |    ✅     |  ✅   |
+| `reports:claim`          |   ✅    |    ✅     |  ✅   |
+| `audit:read`             |   ✅    |    ✅     |  ✅   |
+| `reports:resolve`        |    —    |    ✅     |  ✅   |
+| `sanctions:issue`        |    —    |    ✅     |  ✅   |
+| `nickname:force_change`  |    —    |    ✅     |  ✅   |
+| `matches:replay`         |    —    |    ✅     |  ✅   |
+| `competitive:review`     |    —    |    ✅     |  ✅   |
+| `users:read_pii`         |    —    |     —     |  ✅   |
+| `sanctions:issue_ban`    |    —    |     —     |  ✅   |
+| `admins:manage`          |    —    |     —     |  ✅   |
+| `gamification:configure` |    —    |     —     |  ✅   |
 
 ## M7 — endpoints nuevos
 
@@ -196,8 +198,7 @@ Todo elemento provisorio o pendiente de módulos posteriores está registrado aq
 
 ## Próximos pasos inmediatos
 
-1. **M7 cerrado** ⏸ — esperando confirmación del usuario para arrancar **M8** (observabilidad, endurecimiento, carga k6, staging, `PERF.md`/`THREAT_MODEL.md`/`RUNBOOKS.md`).
-2. Antes de M8: revisión legal de datos personales (`STATE-09`) y proveedores reales de email/Google/Captcha (`STATE-10`..`STATE-12`), que hoy son adaptadores simulados.
+Este recordatorio de M7/M9a quedó superado por las entregas documentadas al final. No describe los próximos pasos actuales; consultar allí el estado vigente de M9a, M9b y M9c.
 
 ## M8c — despliegue a staging (cerrado en código; infra real pendiente)
 
@@ -329,8 +330,71 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 | **M8c Despliegue a staging**       | **Cerrado** | Ver sección «M8c — despliegue a staging» para el detalle y las filas marcadas como pendientes de infra real.                                                                                                                                                                          |
 | **M8d Cierre legal y de producto** | **Cerrado** | Ver «M8d — cierre legal y de producto». Queda pendiente de revisión profesional de los textos y de correr el smoke test contra el despliegue real.                                                                                                                                    |
 
-## Próximos pasos inmediatos
+## Pendientes de infraestructura real de M8 (siguen abiertos)
 
 1. **Revisión legal** de los cuatro documentos (`docs/LEGAL_CHECKLIST.md`) y, recién después, quitar la marca de borrador.
-2. **M8c/M8d (infra)**: ejecutar el primer despliegue real (fases 1–7 de `docs/DEPLOY.md`), confirmar `cloudflare-ufw.sh verify <ip>` y correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>`.
-3. Cierre de M8: ejecutar escenarios k6/WS en CI y en infra real para actualizar `docs/PERF.md` con números reales de p95 y capacidad sostenida.
+2. Ejecutar el primer despliegue real (fases 1–7 de `docs/DEPLOY.md`), confirmar `cloudflare-ufw.sh verify <ip>` y correr `node scripts/smoke-staging.mjs --app-url https://app.<dominio>`.
+3. Ejecutar escenarios k6/WS en CI e infraestructura real para actualizar `docs/PERF.md` con p95 y capacidad sostenida reales.
+
+---
+
+## M9a — Social, historial y privacidad (sin rankings ni gamificación)
+
+**Estado:** implementación completa en `arena/5de7b045-trucostart`; formato, lint, typecheck, suite completa, build y capturas responsive verificados. CI remoto run `45207482192`: cuatro jobs en verde (calidad/build, tests lentos del motor, perímetro y backup/restore).
+
+| Criterio                                                       | Implementación                                                                                                                                               | Evidencia / estado                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Solicitudes cruzadas simultáneas y aceptación duplicada        | Canonicalización transaccional del par; aceptación idempotente                                                                                               | Verificado: suite API completa; `social-and-privacy.spec.ts` (5 tests)                                  |
+| Dos clientes reales: amistad, invitación y partida completa    | API + game-server reales y PostgreSQL en el stack distribuido                                                                                                | Verificado: `full-match-e2e.spec.ts`                                                                    |
+| Privacidad configurable de historial, estadísticas y presencia | Settings independientes `historyVisibility`, `statsVisibility`, `presenceVisibility`; default `FRIENDS`; control en `/perfil`; bloqueo prevalece sobre `ALL` | Verificado: suites API/web; `m9a-social-reporting.spec.tsx` (3 tests)                                   |
+| Bloqueos en solicitudes, invitaciones, desafíos y presencia    | Bloqueo quita amistad, cancela pendientes, impide nueva aceptación y excluye presencia visible                                                               | Verificado: `social-and-privacy.spec.ts`, `lobby-rules-and-ws-privacy.spec.ts`                          |
+| Sanciones en búsqueda y envío de solicitudes                   | Filtrado de usuarios sancionados y guard de elegibilidad del solicitante                                                                                     | Verificado: `social-and-privacy.spec.ts`                                                                |
+| Reportar desde amigos e historial                              | `ReportButton` en lista de amigos; detalle de partida adjunta `matchId` al reporte                                                                           | Verificado: `apps/web/tests/m9a-social-reporting.spec.tsx`                                              |
+| Capturas responsive                                            | Amigos, solicitudes, notificaciones, historial y estadísticas a 360/1200 CSS px                                                                              | 10 PNG generados e inspeccionados en `docs/screenshots/m9a-*.png` con `screenshots:m5b`                 |
+| Contratos y riesgos documentados                               | API, eventos sociales WS, privacidad de bloqueos y datos personales actualizados                                                                             | `docs/API.md`, `docs/EVENTS.md`, `docs/THREAT_MODEL.md`, `docs/LEGAL_CHECKLIST.md`, `docs/DECISIONS.md` |
+
+**Verificación local final:** `corepack pnpm format:check`, `corepack pnpm -r lint`, `corepack pnpm -r typecheck`, `PATH=/tmp/trucostart-bin:$PATH corepack pnpm -r --workspace-concurrency=2 test` (28 archivos API: 122 aprobados/6 omitidos; web 42/42; game-server 41 aprobados/3 omitidos; resto de paquetes en verde) y `corepack pnpm -r --workspace-concurrency=2 build` terminaron correctamente. El primer intento de suite recursiva sin wrapper falló porque `apps/admin` invoca `pnpm` como subproceso y el binario no está en PATH; el rerun con Corepack vía wrapper pasó. **CI 45207482192:** 4/4 jobs exitosos — Lint/Typecheck/Fast Tests/Build; Engine slow tests; Perímetro; Respaldo/restauración de PostgreSQL.
+
+**Fuera de alcance:** no se iniciaron rankings, Glicko-2, XP, logros, misiones ni otras funciones de gamificación.
+
+---
+
+## M9b — Ratings competitivos, rankings y revisión humana
+
+**Estado:** implementación comprometida y publicada en `arena/5de7b045-trucostart`. CI remoto `45463088742` terminó exitosamente (4/4 jobs); el job principal corrió las pruebas con PostgreSQL 16 y Redis 7 configurados como servicios reales.
+
+| Criterio                           | Implementación                                                                                                                                            | Evidencia                                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Ratings Glicko-2 por modalidad     | Rating, desviación y volatilidad por `1v1`/`2v2`; cálculo post-partida transaccional, `rating_delta` e idempotencia durable                               | `apps/api/src/modules/ratings/glicko-2.spec.ts`, `ratings.service.spec.ts`                       |
+| Sólo partidas competitivas humanas | Separación de cola casual/competitiva; captura de temporada en `match.started`; práctica y partidas con bots registran el job excluido sin variar ratings | `ratings.matchmaking.integration.spec.ts`, `m6-practice-stats.spec.ts`                           |
+| Ranking público y perfiles         | Global/semanal/mensual por modalidad, cursor, mínimos de partidas/oponentes, filtros de `statsVisibility`, tarjeta `/ranking` y perfiles                  | `ratings.matchmaking.integration.spec.ts`; `apps/web/src/features/ratings/`                      |
+| E2E competitivo completo           | Encola humanos, juega una partida real en `apps/game-server`, persiste resultado y confirma ambos ratings y ranking público                               | `full-match-e2e.spec.ts` (3/3 local; CI 45463088742 verde con PG 16 y Redis 7)                   |
+| Proyección Redis resiliente        | PostgreSQL es fuente de verdad; outbox durable e idempotente, proyecciones reconstruibles y fallback de lectura ante indisponibilidad                     | `ratings.service.ts`, `redis-leaderboard-store.integration.spec.ts` (CI 45463088742)             |
+| Ciclo de temporadas                | Cierre idempotente, diferido ante mesas activas/jobs pendientes, snapshots elegibles, auditoría y reinicio suave                                          | `ratings.service.spec.ts`                                                                        |
+| Señales de integridad para humanos | Rivalidades, partidos cortos, abandonos coordinados y posible feeding; caso versionado, reabrible con evidencia nueva y auditoría                         | `ratings.service.spec.ts`, `admin.spec.ts`                                                       |
+| Sin sanciones automáticas          | Detectores sólo crean evidencia; el permiso `competitive:review` permite claim/resolución humana y no modifica sanciones ni rating por una señal          | `admin.spec.ts`, `ratings.service.spec.ts`                                                       |
+| Migraciones y contratos            | Migraciones Drizzle `0008`/`0009`, tabla/captura de temporada, schemas compartidos y OpenAPI 3.1                                                          | `createAdaptiveTestDatabase` en suites API; `users-authz-and-privacy.spec.ts`                    |
+| Capturas responsive                | Ranking, rating del perfil y revisión Fair Play en 360/1200 CSS px                                                                                        | 6 PNG inspeccionados en `docs/screenshots/m9b-*.png`; `pnpm --filter @truco/web screenshots:m9b` |
+
+**Verificación local:** `corepack pnpm format:check`, lint, typecheck, suite completa, build, `git diff --check`, `admin check:bundle` y el escaneo de bundles pasaron. La suite local reportó 334 aprobados y 11 omitidos (API 146/8; game-server 41/3; web 42/42; admin 13/13; shared 48/48; engine 36/36; UI 8/8); las omisiones dependían de servicios Redis/BullMQ sin `REDIS_URL`. Las migraciones se aplicaron con PGlite, no con PostgreSQL externo. El job lento del motor pasó 7/7, incluida la simulación de 3.000 partidas. `screenshots:m9b` generó seis capturas responsive inspeccionadas.
+
+**CI remota:** run `45463088742`, 4/4 jobs exitosos. El job principal pasó formato, lint, typecheck, tests, build, bundle admin y escaneo de secretos con PostgreSQL 16 y Redis 7 definidos como servicios. `DATABASE_URL` activa las bases aisladas con migraciones Drizzle reales; `REDIS_URL` activa la suite de integración del leaderboard y el E2E competitivo completo. El job de respaldo/restauración con cliente y servicio PostgreSQL 16 también pasó. Así queda verificada la integración real que el sandbox local no podía ejecutar.
+
+**Alcance histórico:** M9b entregó ratings y revisión humana sin gamificación; la progresión y la moneda simbólica se implementan en §M9c.
+
+---
+
+## M9c — Progresión persistente y economía virtual simbólica
+
+**Estado:** implementación completa en la rama activa; suites locales de workspace, lint, typecheck, build y formato aprobados. Aún no hay CI remota para este patchset. Las pruebas de base de datos de esta sesión corrieron con PGlite; no se ejecutaron contra PostgreSQL/Redis externos.
+
+| Criterio                             | Implementación                                                                                                                                                                                                                                   | Evidencia local                                                                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| XP, niveles e idempotencia           | XP server-side por `matchId`, curva configurable, recibos únicos y topes diarios separados para partidas humanas, partidas con bots/práctica y bonos.                                                                                            | `progression.service.spec.ts` (7 tests), incluyendo reintentos, abandono y topes.                                                                                                    |
+| Logros, misiones y notificaciones    | Condiciones calculadas en servidor; asignación determinística; reclamación concurrente protegida; logros integrados con partidas y tutorial persistido.                                                                                          | `progression.service.spec.ts`, `users-authz-and-privacy.spec.ts` (tutorial HTTP) y `no-gameplay-coupling.spec.ts`.                                                                   |
+| Economía estrictamente simbólica     | `VIRTUAL_COIN` carece de valor económico; no se compra con dinero ni se transfiere. Libro mayor append-only, idempotencia, saldo no negativo y topes de emisión/gasto. Los canjes sólo entregan cosméticos que no cambian reglas ni matchmaking. | Pruebas de canje concurrente, topes y triggers inmutables en `progression.service.spec.ts`; regla 13: `node scripts/check-no-real-money.mjs` revisó 457 archivos.                    |
+| Administración auditada              | Configuración restringida a `ADMIN`/`gamification:configure`; motivo obligatorio; reversión compensatoria (sin borrar asientos) con actor, sesión, IP y motivo.                                                                                  | `apps/api/src/modules/admin/tests/admin.spec.ts` (11 tests) y `apps/admin/tests/admin.spec.tsx` (14 tests).                                                                          |
+| Práctica/bots, rating y estadísticas | Práctica y partidas con bots usan `BOT_MATCH` y topes reducidos; nunca alteran rating ni estadísticas públicas. Los encuentros con bots pueden verse en historial; la práctica se excluye del historial.                                         | `m6-practice-stats.spec.ts` (2 tests), `users-authz-and-privacy.spec.ts` y tests de progresión.                                                                                      |
+| UI, contratos y documentación        | `/progreso`, canjes, misiones, logros y notificaciones; panel de configuración admin; schemas compartidos, OpenAPI 3.1, guía API, checklist legal, amenazas y ADR-027.                                                                           | `apps/web/tests/m9c-progression.spec.tsx` (2), `m8d-legal.spec.tsx` (11), prueba de paridad OpenAPI en `users-authz-and-privacy.spec.ts`; capturas `m9c-progression-{360,1200}.png`. |
+
+**Verificación local:** suite de workspace: API 155 aprobados/8 omitidos, web 44/44, admin 14/14, shared 48/48, engine 36/36, UI 8/8 y game-server 41 aprobados/3 omitidos (346 aprobados y 11 omitidos en total; omisiones de integración Redis/BullMQ). `format:check`, lint, typecheck y build recursivos pasaron. `drizzle-kit check` informó `Everything's fine`; las migraciones de API se aplicaron en PGlite, no en PostgreSQL externo. La prueba confirmó paridad exacta de `GET /v1/openapi.json` con `docs/openapi.v1.json`; el escáner de dinero real revisó 457 archivos. `screenshots:m9c` generó e inspeccionó capturas a 360 y 1200 px. La revisión legal sigue pendiente y los documentos permanecen como borradores.

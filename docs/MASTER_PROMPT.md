@@ -18,7 +18,7 @@ Sos un equipo senior (arquitecto, full-stack, desarrollador de juegos multijugad
 10. Documentá decisiones importantes como ADR en `docs/DECISIONS.md`.
 11. Si algo es ambiguo, elegí la opción más conservadora, registrala en `DECISIONS.md` y seguí. No inventes requisitos nuevos ni funcionalidades de etapas futuras.
 12. No copies código, diseños, marcas ni assets de terceros. Los assets (cartas, íconos) se crean originales (SVG propios).
-13. **Producto sin dinero real.** Prohibido implementar apuestas, depósitos, retiros, premios en dinero o transferencias de monedas entre jugadores.
+13. **Sin dinero real ni ventaja pagada.** Prohibido implementar apuestas, depósitos, retiros, premios monetarios, compra con dinero o transferencias entre jugadores. Se permite únicamente la `VIRTUAL_COIN` simbólica de M9c: sin valor económico, no transferible/no comprable y canjeable por cosméticos que no alteren reglas ni matchmaking; mantener las restricciones de base de datos y la revisión de `docs/LEGAL_CHECKLIST.md`.
 14. Nunca commitees secretos. Usá `.env.example`.
 15. Hacé commits pequeños y descriptivos (Conventional Commits) al cerrar cada tarea, en una rama por módulo (`feat/m1-engine`, etc.).
 
@@ -184,7 +184,7 @@ isFlor(cards: Card[]): boolean
 | `reports` | id, reporter_id, target_id, match_id, reason, status | |
 | `sanctions` | id, user_id, type, reason, expires_at, issued_by | |
 | `audit_logs` | id, actor_id, action, entity, before/after jsonb, ip, created_at | solo inserción |
-| Etapa 2+ | `friendships`, `ratings`, `seasons`, `achievements`, `user_achievements`, `quests`, `user_quests`, `wallets`, `wallet_transactions` (libro mayor inmutable, sin saldo negativo) | |
+| Etapa 2+ | `friendships`, `ratings`, `seasons`; M9c: `progression_config`, `achievement_catalog`, `user_achievements`, `quest_templates`, `user_quests`, `progression_xp_entries`, `wallet_accounts`, `wallet_transactions` (libro mayor inmutable, sin saldo negativo), `cosmetic_catalog`, `user_cosmetics`, `progression_notifications` |
 | Etapa 3+ | `tournaments`, `tournament_entries`, `tournament_matches` | |
 | Etapa 4+ | `cosmetics`, `user_cosmetics`, `communities`, `community_members` | |
 
@@ -197,7 +197,7 @@ isFlor(cards: Card[]): boolean
 | Lobby | `GET /tables`, `POST /tables`, `GET /tables/:id`, `POST /tables/join-by-code`, `DELETE /tables/:id`, `POST/DELETE /matchmaking/queue` |
 | Moderación | `POST /reports`; admin: `GET /admin/reports`, `POST /admin/sanctions`, `GET /admin/users`, `GET /admin/matches/:id/replay`, `GET /admin/audit` |
 | Salud | `GET /health`, `GET /ready`, `GET /metrics` |
-| Etapa 2+ | `/friends`, `/invites`, `/challenges`, `/rankings`, `/wallet`, `/quests`, `/shop` |
+| Etapa 2+ | Social y rankings; M9c: `/me/progression`, `/me/progression/missions/:id/claim`, `/me/progression/cosmetics/:id/redeem`, `/me/progression/notifications/:id/read`; admin `/admin/progression/config` y `/admin/progression/wallet-transactions/:id/reverse` |
 
 Cada endpoint: esquema compartido de entrada y salida, autorización explícita, rate limit y tests.
 
@@ -221,7 +221,7 @@ Invitado (cuenta efímera con apodo generado, promovible a cuenta real conservan
 - **Social (E2):** amigos, presencia, invitaciones, desafíos directos, bloqueo, reportes. Chat libre solo con filtros y moderación, no en MVP.
 - **Rankings (E2):** Glicko-2 por modo y temporada; jobs que recalculan semanal, mensual y de temporada; caché en Redis; reinicio visible con cuenta regresiva; mínimo de partidas y de rivales distintos para figurar.
 - **Torneos (E3):** eliminación simple/doble y suizo, inscripción, check-in, llaves con semillas, avance automático, premios solo cosméticos o monedas virtuales.
-- **Gamificación (E2/E4):** XP, niveles, logros, misiones, rachas, pase de temporada; moneda virtual con libro mayor inmutable y topes diarios. **Nada que afecte el resultado del juego se obtiene ni se vende.**
+- **Gamificación (E2/E4):** M9c entrega XP, niveles, logros, misiones, notificaciones persistentes y moneda virtual simbólica con libro mayor inmutable/topes diarios; quedan para etapas futuras las rachas y el pase de temporada. La moneda no tiene valor económico, no se compra ni transfiere y sólo desbloquea cosméticos. **Nada que afecte el resultado del juego se obtiene ni se vende.**
 
 ## 13. Panel administrativo (`apps/admin`)
 

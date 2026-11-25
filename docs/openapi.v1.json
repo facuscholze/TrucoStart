@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Mesa de Truco — HTTP API v1",
-    "version": "0.4.0",
-    "description": "API HTTP v1 para autenticación segura, cuentas/perfiles (/v1/me), lobby de mesas públicas/privadas con invitaciones firmadas, matchmaking (1v1/2v2) y persistencia transaccional de partidas."
+    "version": "0.7.0",
+    "description": "API HTTP v1 para autenticación segura, perfiles con controles de privacidad, historial verificable de partidas, grafo social, progresión persistente con moneda virtual simbólica, matchmaking competitivo con Glicko-2, rankings públicos y revisión humana de integridad."
   },
   "servers": [
     {
@@ -24,6 +24,12 @@
         "in": "cookie",
         "name": "truco_refresh",
         "description": "Cookie HttpOnly; Secure; SameSite=Lax rotativa en /v1/auth (30 días)."
+      },
+      "adminAccessCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "truco_admin_access",
+        "description": "Cookie administrativa HttpOnly; Secure; SameSite=Strict, limitada a /v1/admin y con 2FA obligatorio."
       }
     },
     "schemas": {
@@ -394,7 +400,14 @@
           },
           "settings": {
             "type": "object",
-            "required": ["soundEnabled", "animationsReduced", "confirmCalls"],
+            "required": [
+              "soundEnabled",
+              "animationsReduced",
+              "confirmCalls",
+              "historyVisibility",
+              "statsVisibility",
+              "presenceVisibility"
+            ],
             "properties": {
               "soundEnabled": {
                 "type": "boolean"
@@ -404,6 +417,18 @@
               },
               "confirmCalls": {
                 "type": "boolean"
+              },
+              "historyVisibility": {
+                "type": "string",
+                "enum": ["ALL", "FRIENDS", "NOBODY"]
+              },
+              "statsVisibility": {
+                "type": "string",
+                "enum": ["ALL", "FRIENDS", "NOBODY"]
+              },
+              "presenceVisibility": {
+                "type": "string",
+                "enum": ["ALL", "FRIENDS", "NOBODY"]
               }
             }
           }
@@ -450,6 +475,18 @@
               },
               "confirmCalls": {
                 "type": "boolean"
+              },
+              "historyVisibility": {
+                "type": "string",
+                "enum": ["ALL", "FRIENDS", "NOBODY"]
+              },
+              "statsVisibility": {
+                "type": "string",
+                "enum": ["ALL", "FRIENDS", "NOBODY"]
+              },
+              "presenceVisibility": {
+                "type": "string",
+                "enum": ["ALL", "FRIENDS", "NOBODY"]
               }
             }
           }
@@ -487,9 +524,74 @@
           }
         }
       },
+      "MatchCallStats": {
+        "type": "object",
+        "required": ["resolved", "won", "winRate"],
+        "properties": {
+          "resolved": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "won": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "winRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "UserModeStats": {
+        "type": "object",
+        "required": [
+          "matchesPlayed",
+          "wins",
+          "losses",
+          "abandons",
+          "winRate",
+          "currentStreak",
+          "envido",
+          "truco"
+        ],
+        "properties": {
+          "matchesPlayed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "wins": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "losses": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "abandons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "winRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "currentStreak": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "envido": {
+            "$ref": "#/components/schemas/MatchCallStats"
+          },
+          "truco": {
+            "$ref": "#/components/schemas/MatchCallStats"
+          }
+        }
+      },
       "UserStatsResponse": {
         "type": "object",
-        "required": ["userId", "matchesPlayed", "wins", "losses", "abandons", "winRate"],
+        "required": ["userId", "matchesPlayed", "wins", "losses", "abandons", "winRate", "byMode"],
         "properties": {
           "userId": {
             "type": "string",
@@ -515,6 +617,18 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1
+          },
+          "byMode": {
+            "type": "object",
+            "required": ["1v1", "2v2"],
+            "properties": {
+              "1v1": {
+                "$ref": "#/components/schemas/UserModeStats"
+              },
+              "2v2": {
+                "$ref": "#/components/schemas/UserModeStats"
+              }
+            }
           }
         }
       },
@@ -534,6 +648,7 @@
                 "team",
                 "score",
                 "outcome",
+                "hasBots",
                 "startedAt",
                 "endedAt"
               ],
@@ -561,6 +676,9 @@
                 "outcome": {
                   "type": "string",
                   "enum": ["WIN", "LOSS", "ABANDON"]
+                },
+                "hasBots": {
+                  "type": "boolean"
                 },
                 "startedAt": {
                   "type": "string",
@@ -630,6 +748,626 @@
           "userId": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "UserMatchDetailResponse": {
+        "type": "object",
+        "required": [
+          "matchId",
+          "mode",
+          "rulesetCode",
+          "hasBots",
+          "seedCommitment",
+          "startedAt",
+          "endedAt",
+          "result",
+          "players",
+          "events"
+        ],
+        "properties": {
+          "matchId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "rulesetCode": {
+            "type": "string"
+          },
+          "hasBots": {
+            "type": "boolean"
+          },
+          "seedCommitment": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "result": {
+            "type": "object",
+            "required": ["winnerTeam", "scoresByTeam", "reason"],
+            "properties": {
+              "winnerTeam": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              },
+              "scoresByTeam": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "reason": {
+                "type": ["string", "null"]
+              }
+            }
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["userId", "nickname", "seat", "team", "score", "outcome", "isSelf"],
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "nickname": {
+                  "type": "string"
+                },
+                "seat": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "team": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "score": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": ["WIN", "LOSS", "ABANDON"]
+                },
+                "isSelf": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "events": {
+            "type": "array",
+            "description": "Timeline permitida; no expone cartas jugadas ni payloads de señas.",
+            "items": {
+              "type": "object",
+              "required": ["seq", "type", "at"],
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "game.callMade",
+                    "game.callResolved",
+                    "game.handEnded",
+                    "game.scoreUpdated",
+                    "game.ended"
+                  ]
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PlayerRelationshipStatus": {
+        "type": "string",
+        "enum": ["NONE", "FRIENDS", "PENDING_INCOMING", "PENDING_OUTGOING"]
+      },
+      "SocialPresenceStatus": {
+        "type": "string",
+        "enum": ["ONLINE", "IN_GAME", "OFFLINE"]
+      },
+      "PlayerSearchResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": ["userId", "nickname", "avatarId", "level", "relationship"],
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "nickname": {
+                  "type": "string"
+                },
+                "avatarId": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "relationship": {
+                  "$ref": "#/components/schemas/PlayerRelationshipStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "FriendListResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "friendshipId",
+                "userId",
+                "nickname",
+                "avatarId",
+                "level",
+                "presence",
+                "friendsSince"
+              ],
+              "properties": {
+                "friendshipId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "userId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "nickname": {
+                  "type": "string"
+                },
+                "avatarId": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "presence": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SocialPresenceStatus"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "friendsSince": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "FriendRequestListResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "userId", "nickname", "avatarId", "direction", "createdAt"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "userId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "nickname": {
+                  "type": "string"
+                },
+                "avatarId": {
+                  "type": "string"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": ["INCOMING", "OUTGOING"]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreateFriendRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targetUserId"],
+        "properties": {
+          "targetUserId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "FriendRequestMutationResponse": {
+        "type": "object",
+        "required": ["requestId", "status", "reciprocalRequestAccepted"],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PENDING", "ACCEPTED", "REJECTED", "CANCELLED"]
+          },
+          "reciprocalRequestAccepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BlockListResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["userId", "nickname", "blockedAt"],
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "nickname": {
+                  "type": "string"
+                },
+                "blockedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "BlockMutationResponse": {
+        "type": "object",
+        "required": ["userId", "blocked"],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SocialNotificationType": {
+        "type": "string",
+        "enum": [
+          "FRIEND_REQUEST",
+          "FRIEND_REQUEST_ACCEPTED",
+          "FRIEND_REQUEST_REJECTED",
+          "TABLE_INVITATION",
+          "TABLE_INVITATION_ACCEPTED",
+          "TABLE_INVITATION_DECLINED",
+          "CHALLENGE",
+          "CHALLENGE_ACCEPTED",
+          "CHALLENGE_DECLINED"
+        ]
+      },
+      "SocialNotificationItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "actorUserId",
+          "actorNickname",
+          "referenceId",
+          "tableId",
+          "createdAt",
+          "readAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/SocialNotificationType"
+          },
+          "actorUserId": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "actorNickname": {
+            "type": ["string", "null"]
+          },
+          "referenceId": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "tableId": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "SocialNotificationListResponse": {
+        "type": "object",
+        "required": ["items", "nextCursor", "unreadCount"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialNotificationItem"
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "UnreadNotificationCountResponse": {
+        "type": "object",
+        "required": ["unreadCount"],
+        "properties": {
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ReadNotificationResponse": {
+        "type": "object",
+        "required": ["notification"],
+        "properties": {
+          "notification": {
+            "$ref": "#/components/schemas/SocialNotificationItem"
+          }
+        }
+      },
+      "MarkAllNotificationsReadResponse": {
+        "type": "object",
+        "required": ["updated", "unreadCount"],
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unreadCount": {
+            "type": "integer",
+            "const": 0
+          }
+        }
+      },
+      "SocialPresenceEvent": {
+        "type": "object",
+        "required": ["userId", "status", "visible", "observedAt"],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SocialPresenceStatus"
+          },
+          "visible": {
+            "type": "boolean",
+            "default": true
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SocialInvitationItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "otherUserId",
+          "otherNickname",
+          "tableId",
+          "mode",
+          "rulesetCode",
+          "expiresAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["TABLE", "CHALLENGE"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PENDING", "ACCEPTED", "DECLINED", "CANCELLED", "EXPIRED"]
+          },
+          "otherUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "otherNickname": {
+            "type": "string"
+          },
+          "tableId": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "mode": {
+            "type": ["string", "null"],
+            "enum": ["1v1", null]
+          },
+          "rulesetCode": {
+            "type": ["string", "null"],
+            "enum": [
+              "ar-standard-v1",
+              "ar-sin-flor-v1",
+              "ar-corto-15-v1",
+              "ar-corto-15-flor-v1",
+              null
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SocialInvitationListResponse": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialInvitationItem"
+            }
+          }
+        }
+      },
+      "CreateTableInvitationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recipientUserId", "tableId"],
+        "properties": {
+          "recipientUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tableId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CreateChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recipientUserId", "rulesetCode"],
+        "properties": {
+          "recipientUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1"],
+            "default": "1v1"
+          },
+          "rulesetCode": {
+            "type": "string",
+            "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"]
+          }
+        }
+      },
+      "CreateSocialInvitationResponse": {
+        "type": "object",
+        "required": ["invitationId", "kind", "status", "expiresAt"],
+        "properties": {
+          "invitationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["TABLE", "CHALLENGE"]
+          },
+          "status": {
+            "type": "string",
+            "const": "PENDING"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AcceptSocialInvitationResponse": {
+        "type": "object",
+        "required": ["invitationId", "kind", "table"],
+        "properties": {
+          "invitationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["TABLE", "CHALLENGE"]
+          },
+          "table": {
+            "$ref": "#/components/schemas/TableDetailResponse"
+          }
+        }
+      },
+      "SocialInvitationActionResponse": {
+        "type": "object",
+        "required": ["invitationId", "status"],
+        "properties": {
+          "invitationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DECLINED", "CANCELLED"]
           }
         }
       },
@@ -1003,6 +1741,11 @@
             "type": "string",
             "enum": ["ar-standard-v1", "ar-sin-flor-v1", "ar-corto-15-v1", "ar-corto-15-flor-v1"],
             "default": "ar-standard-v1"
+          },
+          "competitive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Activa matchmaking competitivo humano con rating Glicko-2."
           }
         }
       },
@@ -1020,6 +1763,10 @@
           },
           "rulesetCode": {
             "type": "string"
+          },
+          "competitive": {
+            "type": "boolean",
+            "default": false
           },
           "enqueuedAt": {
             "type": "string",
@@ -1057,6 +1804,839 @@
         "required": ["cancelled"],
         "properties": {
           "cancelled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RankingPeriod": {
+        "type": "string",
+        "enum": ["GLOBAL", "WEEKLY", "MONTHLY"]
+      },
+      "RatingDivision": {
+        "type": "string",
+        "enum": ["Bronce", "Plata", "Oro", "Diamante"]
+      },
+      "LeaderboardEntry": {
+        "type": "object",
+        "required": [
+          "position",
+          "userId",
+          "nickname",
+          "score",
+          "rating",
+          "division",
+          "matchesPlayed",
+          "opponentsCount",
+          "wins"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nickname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "score": {
+            "type": "number"
+          },
+          "rating": {
+            "type": "number",
+            "minimum": 0
+          },
+          "division": {
+            "$ref": "#/components/schemas/RatingDivision"
+          },
+          "matchesPlayed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "opponentsCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "wins": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "LeaderboardResponse": {
+        "type": "object",
+        "required": [
+          "period",
+          "mode",
+          "season",
+          "minimumMatches",
+          "minimumOpponents",
+          "items",
+          "nextCursor",
+          "generatedAt"
+        ],
+        "properties": {
+          "period": {
+            "$ref": "#/components/schemas/RankingPeriod"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "season": {
+            "type": "object",
+            "required": ["id", "label", "startsAt", "endsAt", "secondsUntilReset"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "label": {
+                "type": "string"
+              },
+              "startsAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "endsAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "secondsUntilReset": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "minimumMatches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minimumOpponents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntry"
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PlayerRatingProfile": {
+        "type": "object",
+        "required": [
+          "seasonId",
+          "seasonLabel",
+          "seasonEndsAt",
+          "mode",
+          "rating",
+          "deviation",
+          "division",
+          "position",
+          "matchesPlayed",
+          "opponentsCount",
+          "wins",
+          "losses",
+          "abandons",
+          "qualifies"
+        ],
+        "properties": {
+          "seasonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seasonLabel": {
+            "type": "string"
+          },
+          "seasonEndsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["1v1", "2v2"]
+          },
+          "rating": {
+            "type": "number",
+            "minimum": 0
+          },
+          "deviation": {
+            "type": "number",
+            "minimum": 30,
+            "maximum": 350
+          },
+          "division": {
+            "$ref": "#/components/schemas/RatingDivision"
+          },
+          "position": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "matchesPlayed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "opponentsCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "wins": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "losses": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "abandons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "qualifies": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PlayerRatingResponse": {
+        "type": "object",
+        "required": ["ratings"],
+        "properties": {
+          "ratings": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/PlayerRatingProfile"
+            }
+          }
+        }
+      },
+      "CompetitiveReviewStatus": {
+        "type": "string",
+        "enum": ["OPEN", "IN_REVIEW", "RESOLVED"]
+      },
+      "CompetitiveReviewCase": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "severity",
+          "signals",
+          "users",
+          "matchIds",
+          "evidence",
+          "createdAt",
+          "updatedAt",
+          "claimedByNickname",
+          "resolvedByNickname",
+          "resolutionNote",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CompetitiveReviewStatus"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH"]
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "nickname", "accountCreatedAt"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "nickname": {
+                  "type": "string"
+                },
+                "accountCreatedAt": {
+                  "type": ["string", "null"],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "matchIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "claimedByNickname": {
+            "type": ["string", "null"]
+          },
+          "resolvedByNickname": {
+            "type": ["string", "null"]
+          },
+          "resolutionNote": {
+            "type": ["string", "null"]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CompetitiveReviewListResponse": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompetitiveReviewCase"
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "CompetitiveReviewClaimRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expectedVersion"],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CompetitiveReviewResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expectedVersion", "resolutionNote"],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resolutionNote": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 1000
+          }
+        }
+      },
+      "CompetitiveReviewActionResponse": {
+        "type": "object",
+        "required": ["status", "version"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["IN_REVIEW", "RESOLVED"]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ProgressionConditionKind": {
+        "type": "string",
+        "enum": ["MATCHES_COMPLETED", "WINS", "CLEAN_MATCHES", "CARD_PLAYS", "TUTORIAL_LESSONS"]
+      },
+      "ProgressionCondition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "target"],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ProgressionConditionKind"
+          },
+          "target": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "eventType": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "ProgressionAchievement": {
+        "type": "object",
+        "required": [
+          "id",
+          "titleKey",
+          "descriptionKey",
+          "icon",
+          "condition",
+          "progress",
+          "target",
+          "rewardXp",
+          "rewardCoins",
+          "unlockedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "titleKey": {
+            "type": "string"
+          },
+          "descriptionKey": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/ProgressionCondition"
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "target": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rewardXp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rewardCoins": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unlockedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "ProgressionMissionPeriod": {
+        "type": "string",
+        "enum": ["DAILY", "WEEKLY"]
+      },
+      "ProgressionMission": {
+        "type": "object",
+        "required": [
+          "id",
+          "templateId",
+          "period",
+          "titleKey",
+          "descriptionKey",
+          "progress",
+          "target",
+          "rewardXp",
+          "rewardCoins",
+          "periodEndsAt",
+          "completedAt",
+          "claimedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "templateId": {
+            "type": "string"
+          },
+          "period": {
+            "$ref": "#/components/schemas/ProgressionMissionPeriod"
+          },
+          "titleKey": {
+            "type": "string"
+          },
+          "descriptionKey": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "target": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rewardXp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rewardCoins": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "periodEndsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "claimedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "ProgressionCosmetic": {
+        "type": "object",
+        "required": ["id", "nameKey", "descriptionKey", "category", "priceCoins", "icon", "owned"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nameKey": {
+            "type": "string"
+          },
+          "descriptionKey": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "priceCoins": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "icon": {
+            "type": "string"
+          },
+          "owned": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProgressionNotification": {
+        "type": "object",
+        "required": ["id", "kind", "payload", "createdAt", "readAt"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "ACHIEVEMENT_UNLOCKED"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "ProgressionSummary": {
+        "type": "object",
+        "required": [
+          "level",
+          "xpTotal",
+          "xpInLevel",
+          "xpForNextLevel",
+          "levelProgress",
+          "wallet",
+          "achievements",
+          "missions",
+          "cosmetics",
+          "notifications"
+        ],
+        "properties": {
+          "level": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "xpTotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "xpInLevel": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "xpForNextLevel": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "levelProgress": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "wallet": {
+            "type": "object",
+            "required": [
+              "balance",
+              "currencyType",
+              "hasEconomicValue",
+              "playerTransfersEnabled",
+              "moneyPurchasesEnabled"
+            ],
+            "properties": {
+              "balance": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "currencyType": {
+                "type": "string",
+                "const": "VIRTUAL_COIN"
+              },
+              "hasEconomicValue": {
+                "type": "boolean",
+                "const": false
+              },
+              "playerTransfersEnabled": {
+                "type": "boolean",
+                "const": false
+              },
+              "moneyPurchasesEnabled": {
+                "type": "boolean",
+                "const": false
+              }
+            }
+          },
+          "achievements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressionAchievement"
+            }
+          },
+          "missions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressionMission"
+            }
+          },
+          "cosmetics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressionCosmetic"
+            }
+          },
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressionNotification"
+            }
+          }
+        }
+      },
+      "ProgressionMissionClaimResponse": {
+        "type": "object",
+        "required": ["claimed", "progression"],
+        "properties": {
+          "claimed": {
+            "type": "boolean"
+          },
+          "progression": {
+            "$ref": "#/components/schemas/ProgressionSummary"
+          }
+        }
+      },
+      "ProgressionCosmeticRedeemResponse": {
+        "type": "object",
+        "required": ["acquired", "progression"],
+        "properties": {
+          "acquired": {
+            "type": "boolean"
+          },
+          "progression": {
+            "$ref": "#/components/schemas/ProgressionSummary"
+          }
+        }
+      },
+      "ProgressionNotificationReadResponse": {
+        "type": "object",
+        "required": ["read"],
+        "properties": {
+          "read": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "ProgressionConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "humanMatchXp",
+          "botMatchXp",
+          "dailyXpCap",
+          "botDailyXpCap",
+          "dailyBonusXpCap",
+          "humanMatchCoins",
+          "botMatchCoins",
+          "dailyCoinCap",
+          "botDailyCoinCap",
+          "dailyCoinSpendCap",
+          "baseXpPerLevel",
+          "xpGrowthPerLevel",
+          "missionRewardMultiplierBp",
+          "achievementRewardMultiplierBp"
+        ],
+        "properties": {
+          "humanMatchXp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "botMatchXp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "dailyXpCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "botDailyXpCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "dailyBonusXpCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "humanMatchCoins": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "botMatchCoins": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "dailyCoinCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "botDailyCoinCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "dailyCoinSpendCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "baseXpPerLevel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "xpGrowthPerLevel": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "missionRewardMultiplierBp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50000
+          },
+          "achievementRewardMultiplierBp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50000
+          }
+        }
+      },
+      "ProgressionConfigUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason", "config"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500
+          },
+          "config": {
+            "$ref": "#/components/schemas/ProgressionConfig"
+          }
+        }
+      },
+      "ProgressionConfigUpdateResponse": {
+        "type": "object",
+        "required": ["config", "audited"],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ProgressionConfig"
+          },
+          "audited": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "ProgressionAdminReversalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500
+          }
+        }
+      },
+      "ProgressionAdminReversalResponse": {
+        "type": "object",
+        "required": ["transactionId", "reversed"],
+        "properties": {
+          "transactionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reversed": {
             "type": "boolean"
           }
         }
@@ -1838,7 +3418,12 @@
     "/users/{id}/stats": {
       "get": {
         "tags": ["Users"],
-        "summary": "Obtener estadísticas agregadas públicas de partidas de un jugador",
+        "summary": "Obtener estadísticas agregadas, restringidas por la política independiente de privacidad de estadísticas",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "id",
@@ -1852,11 +3437,31 @@
         ],
         "responses": {
           "200": {
-            "description": "Estadísticas públicas",
+            "description": "Estadísticas visibles por política de privacidad",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserStatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Jugador inexistente o historial privado para quien consulta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -1867,7 +3472,12 @@
     "/users/{id}/matches": {
       "get": {
         "tags": ["Users"],
-        "summary": "Listar historial público de partidas paginado por cursor",
+        "summary": "Listar historial paginado con filtros y controles de visibilidad social",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "id",
@@ -1883,7 +3493,8 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -1896,15 +3507,1881 @@
               "maximum": 50,
               "default": 20
             }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["1v1", "2v2"]
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["WIN", "LOSS", "ABANDON"]
+            }
+          },
+          {
+            "name": "bots",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["ANY", "BOTS", "HUMANS"],
+              "default": "ANY"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Página de partidas",
+            "description": "Página de partidas visible por política de privacidad",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserMatchesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Filtros o cursor inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Jugador inexistente o historial privado para quien consulta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/matches/{matchId}": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Obtener detalle público y filtrado de una partida del historial visible",
+        "description": "Devuelve solo hitos permitidos del timeline; nunca cartas jugadas, señas privadas ni semilla revelada.",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "matchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle verificable de la partida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMatchDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/search": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Buscar jugadores por apodo y conocer el estado de relación",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "nickname",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 32
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultados disponibles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerSearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de búsqueda superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/friends": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Listar amistades y presencia según la privacidad configurada",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Amigos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/friend-requests": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Listar solicitudes entrantes y salientes pendientes",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitudes pendientes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Social"],
+        "summary": "Enviar solicitud de amistad o aceptar una solicitud recíproca",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFriendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Solicitud creada o amistad recíproca aceptada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Identificador inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/friend-requests/{requestId}/accept": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Aceptar solicitud de amistad entrante",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitud aceptada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/friend-requests/{requestId}/decline": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Rechazar solicitud de amistad entrante y notificar al remitente",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitud rechazada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/friend-requests/{requestId}/cancel": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Cancelar solicitud de amistad saliente",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitud cancelada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/friends/{userId}": {
+      "delete": {
+        "tags": ["Social"],
+        "summary": "Eliminar una amistad propia",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Amistad eliminada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["removed"],
+                  "properties": {
+                    "removed": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/blocks": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Listar jugadores bloqueados por la cuenta actual",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bloqueos propios",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/blocks/{userId}": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Bloquear a un jugador y cortar interacciones sociales",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jugador bloqueado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Social"],
+        "summary": "Desbloquear a un jugador",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jugador desbloqueado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/table-invitations": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Invitar a un amigo a una mesa de espera existente",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTableInvitationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invitación creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSocialInvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Mesa por expirar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/challenges": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Desafiar a un amigo a una partida directa 1 vs 1",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Desafío creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSocialInvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Reglas inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/invitations": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Listar invitaciones entrantes o salientes vigentes",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["INCOMING", "OUTGOING"],
+              "default": "INCOMING"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitaciones vigentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialInvitationListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/invitations/{invitationId}/accept": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Aceptar una invitación y crear/abrir la mesa asociada",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitación aceptada y mesa lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptSocialInvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/invitations/{invitationId}/decline": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Rechazar una invitación social",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitación rechazada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialInvitationActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/invitations/{invitationId}/cancel": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Cancelar una invitación social saliente",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitación cancelada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialInvitationActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/notifications": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Listar notificaciones sociales paginadas",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "unreadOnly",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notificaciones y contador no leído",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialNotificationListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cursor o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/notifications/unread-count": {
+      "get": {
+        "tags": ["Social"],
+        "summary": "Obtener el contador de notificaciones sin leer",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contador actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadNotificationCountResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cuenta no elegible por sanción activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/notifications/{notificationId}/read": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Marcar una notificación propia como leída",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notificationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notificación marcada como leída",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadNotificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/social/notifications/read-all": {
+      "post": {
+        "tags": ["Social"],
+        "summary": "Marcar todas las notificaciones propias como leídas",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notificaciones actualizadas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllNotificationsReadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos o filtros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acción no permitida, cuenta sancionada o relación no elegible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado o privacidad restringida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto con el estado actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de acciones sociales superado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -2442,6 +5919,768 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MatchmakingCancelResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rankings": {
+      "get": {
+        "tags": ["Ratings"],
+        "summary": "Consultar ranking público global, semanal o mensual por modo",
+        "description": "Sólo incluye cuentas activas que cumplen los mínimos configurados y permiten mostrar estadísticas públicamente (statsVisibility=ALL). Práctica y partidas con bots no modifican el rating.",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["GLOBAL", "WEEKLY", "MONTHLY"],
+              "default": "GLOBAL"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["1v1", "2v2"],
+              "default": "1v1"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{1,7}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página del ranking y cuenta regresiva de temporada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Filtro o cursor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/ratings": {
+      "get": {
+        "tags": ["Ratings"],
+        "summary": "Consultar perfiles de rating por modo respetando privacidad de estadísticas",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ratings 1v1 y 2v2 de la temporada activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerRatingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión requerida o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Jugador inexistente o estadísticas no visibles para quien consulta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/competitive-reviews": {
+      "get": {
+        "tags": ["Admin", "Competitive review"],
+        "summary": "Listar señales de integridad para revisión humana (permiso competitive:review)",
+        "security": [
+          {
+            "adminAccessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["OPEN", "IN_REVIEW", "RESOLVED"]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Casos y evidencia no concluyente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitiveReviewListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión administrativa requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el permiso competitive:review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/competitive-reviews/{caseId}/claim": {
+      "post": {
+        "tags": ["Admin", "Competitive review"],
+        "summary": "Tomar un caso para revisión humana con control de versión optimista",
+        "security": [
+          {
+            "adminAccessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompetitiveReviewClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Caso asignado al moderador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitiveReviewActionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión administrativa requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el permiso competitive:review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El caso cambió o ya fue tomado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/competitive-reviews/{caseId}/resolve": {
+      "post": {
+        "tags": ["Admin", "Competitive review"],
+        "summary": "Registrar decisión humana sin aplicar sanciones automáticamente",
+        "security": [
+          {
+            "adminAccessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompetitiveReviewResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revisión humana registrada y auditada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitiveReviewActionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión administrativa requerida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el permiso competitive:review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El caso no está tomado por el moderador o cambió",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/progression": {
+      "get": {
+        "tags": ["Progression"],
+        "summary": "Consultar XP, nivel, logros, misiones, moneda virtual y notificaciones propias",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumen de progresión propio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/progression/missions/{id}/claim": {
+      "post": {
+        "tags": ["Progression"],
+        "summary": "Reclamar una misión completada por partidas registradas en servidor",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recompensa reclamada; un reintento no duplica el crédito",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionMissionClaimResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Misión ajena o inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Misión incompleta o recompensa no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/progression/cosmetics/{cosmeticId}/redeem": {
+      "post": {
+        "tags": ["Progression"],
+        "summary": "Canjear monedas simbólicas por un cosmético visual sin efecto en reglas o matchmaking",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cosmeticId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canje registrado en el libro mayor inmutable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionCosmeticRedeemResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cosmético inexistente o no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Saldo insuficiente o límite diario alcanzado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/progression/notifications/{notificationId}/read": {
+      "post": {
+        "tags": ["Progression"],
+        "summary": "Marcar como leída una notificación propia de progresión",
+        "security": [
+          {
+            "accessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notificationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notificación marcada como leída de forma idempotente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionNotificationReadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Notificación ajena o inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/progression/config": {
+      "get": {
+        "tags": ["Admin progression"],
+        "summary": "Consultar parámetros de recompensas y topes",
+        "security": [
+          {
+            "adminAccessCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuración actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionConfig"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión administrativa ausente o inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el permiso gamification:configure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Admin progression"],
+        "summary": "Actualizar configuración con motivo y auditoría de estado anterior/nuevo",
+        "security": [
+          {
+            "adminAccessCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressionConfigUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuración actualizada y auditada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionConfigUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Configuración o motivo inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión administrativa ausente o inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el permiso gamification:configure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/progression/wallet-transactions/{transactionId}/reverse": {
+      "post": {
+        "tags": ["Admin progression"],
+        "summary": "Crear una compensación auditada para un crédito positivo del libro mayor",
+        "security": [
+          {
+            "adminAccessCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transactionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressionAdminReversalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Asiento compensatorio creado; sólo se permite una reversión por crédito",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressionAdminReversalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Identificador o motivo inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión administrativa ausente o inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el permiso gamification:configure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Asiento inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Asiento no positivo, ya revertido o saldo insuficiente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }

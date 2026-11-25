@@ -8,10 +8,15 @@ import {
   type AdminSessionSummary,
   type AdminUserDetail,
   type AdminUserListItem,
+  type CompetitiveReviewListResponse,
+  type CompetitiveReviewStatus,
+  type ProgressionConfig,
 } from '@truco/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { AuditView } from './components/AuditView.js';
 import { DashboardView } from './components/DashboardView.js';
+import { CompetitiveReviewView } from './components/CompetitiveReviewView.js';
+import { ProgressionConfigView } from './components/ProgressionConfigView.js';
 import { LoginView } from './components/LoginView.js';
 import { ReportDetailView } from './components/ReportDetailView.js';
 import { ReportsView } from './components/ReportsView.js';
@@ -25,16 +30,26 @@ type View =
   | { readonly name: 'report'; readonly reportId: string }
   | { readonly name: 'users'; readonly query: string }
   | { readonly name: 'user'; readonly userId: string }
+  | { readonly name: 'competitive-reviews'; readonly status?: CompetitiveReviewStatus }
+  | { readonly name: 'progression' }
   | { readonly name: 'audit' };
 
 const NAV: ReadonlyArray<{
   readonly key: View['name'];
   readonly label: string;
-  readonly permission: 'dashboard:read' | 'reports:read' | 'users:read' | 'audit:read';
+  readonly permission:
+    | 'dashboard:read'
+    | 'reports:read'
+    | 'users:read'
+    | 'audit:read'
+    | 'competitive:review'
+    | 'gamification:configure';
 }> = [
   { key: 'dashboard', label: 'Dashboard', permission: 'dashboard:read' },
   { key: 'reports', label: 'Reportes', permission: 'reports:read' },
   { key: 'users', label: 'Usuarios', permission: 'users:read' },
+  { key: 'competitive-reviews', label: 'Fair play', permission: 'competitive:review' },
+  { key: 'progression', label: 'Gamificación', permission: 'gamification:configure' },
   { key: 'audit', label: 'Auditoría', permission: 'audit:read' },
 ];
 
@@ -77,6 +92,9 @@ export function AdminApp({
   const [users, setUsers] = useState<readonly AdminUserListItem[]>([]);
   const [userDetail, setUserDetail] = useState<AdminUserDetail | null>(null);
   const [auditEntries, setAuditEntries] = useState<readonly AdminAuditEntry[]>([]);
+  const [competitiveReviewList, setCompetitiveReviewList] =
+    useState<CompetitiveReviewListResponse | null>(null);
+  const [progressionConfig, setProgressionConfig] = useState<ProgressionConfig | null>(null);
 
   useEffect(() => {
     if (!demoMode) {
@@ -148,6 +166,14 @@ export function AdminApp({
           );
           if (cancelled) return;
           setUserDetail(detail);
+        } else if (view.name === 'competitive-reviews') {
+          const cases = await activeClient.listCompetitiveReviews({ status: view.status });
+          if (cancelled) return;
+          setCompetitiveReviewList(cases);
+        } else if (view.name === 'progression') {
+          const config = await activeClient.progressionConfig();
+          if (cancelled) return;
+          setProgressionConfig(config);
         } else {
           const audit = await activeClient.listAudit({});
           if (cancelled) return;
@@ -253,7 +279,11 @@ export function AdminApp({
                         ? { name: 'reports', filters: {} }
                         : item.key === 'users'
                           ? { name: 'users', query: '' }
-                          : { name: item.key as 'dashboard' | 'audit' },
+                          : item.key === 'competitive-reviews'
+                            ? { name: 'competitive-reviews', status: 'OPEN' }
+                            : item.key === 'progression'
+                              ? { name: 'progression' }
+                              : { name: item.key as 'dashboard' | 'audit' },
                     )
                   }
                   className={`rounded-lg px-3 py-1.5 text-left text-sm font-semibold transition ${
@@ -283,6 +313,14 @@ export function AdminApp({
               {error}
             </p>
           )}
+          {notice && (
+            <p
+              role="status"
+              className="rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-sm text-success"
+            >
+              {notice}
+            </p>
+          )}
 
           {view.name === 'dashboard' && metrics && reportList && (
             <DashboardView
@@ -299,6 +337,55 @@ export function AdminApp({
               filters={view.filters}
               onFilterChange={(filters) => navigate({ name: 'reports', filters })}
               onOpenReport={(reportId) => navigate({ name: 'report', reportId })}
+            />
+          )}
+
+          {view.name === 'competitive-reviews' && competitiveReviewList && (
+            <CompetitiveReviewView
+              data={competitiveReviewList}
+              status={view.status}
+              currentAdminNickname={session.nickname}
+              busy={busy}
+              onFilterChange={(status) => navigate({ name: 'competitive-reviews', status })}
+              onClaim={(caseId, expectedVersion) =>
+                void withBusy(async () => {
+                  await activeClient.claimCompetitiveReview(caseId, { expectedVersion });
+                  setCompetitiveReviewList(
+                    await activeClient.listCompetitiveReviews({ status: view.status }),
+                  );
+                  setNotice(
+                    'Caso tomado. La decisión final requiere una resolución humana auditada.',
+                  );
+                })
+              }
+              onResolve={(caseId, expectedVersion, resolutionNote) =>
+                void withBusy(async () => {
+                  await activeClient.resolveCompetitiveReview(caseId, {
+                    expectedVersion,
+                    resolutionNote,
+                  });
+                  setCompetitiveReviewList(
+                    await activeClient.listCompetitiveReviews({ status: view.status }),
+                  );
+                  setNotice(
+                    'Revisión marcada como resuelta y registrada en auditoría; no se aplicó ninguna sanción automática.',
+                  );
+                })
+              }
+              onLoadMore={() =>
+                void withBusy(async () => {
+                  const cursor = Number(competitiveReviewList.nextCursor ?? 0);
+                  const next = await activeClient.listCompetitiveReviews({
+                    status: view.status,
+                    cursor,
+                  });
+                  setCompetitiveReviewList((current) =>
+                    current
+                      ? { items: [...current.items, ...next.items], nextCursor: next.nextCursor }
+                      : next,
+                  );
+                })
+              }
             />
           )}
 
@@ -384,6 +471,32 @@ export function AdminApp({
                     'Apodo ofensivo detectado en revisión de perfil',
                   );
                   setNotice('Se forzó el cambio de apodo.');
+                })
+              }
+            />
+          )}
+
+          {view.name === 'progression' && progressionConfig && (
+            <ProgressionConfigView
+              config={progressionConfig}
+              busy={busy}
+              onSave={(config, reason) =>
+                void withBusy(async () => {
+                  const result = await activeClient.updateProgressionConfig({ config, reason });
+                  setProgressionConfig(result.config);
+                  setNotice('Configuración guardada; el cambio quedó en la auditoría inmutable.');
+                })
+              }
+              onReverse={(transactionId, reason) =>
+                void withBusy(async () => {
+                  const result = await activeClient.reverseWalletTransaction(transactionId, {
+                    reason,
+                  });
+                  setNotice(
+                    result.reversed
+                      ? `Se agregó la compensación ${result.transactionId}; ningún asiento se borró.`
+                      : 'El crédito ya tenía una compensación; no se creó otro asiento.',
+                  );
                 })
               }
             />

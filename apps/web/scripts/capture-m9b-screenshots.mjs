@@ -328,7 +328,17 @@ async function captureWebScreenshots(browser) {
 
     await page.goto(`${WEB_URL}/ranking`);
     await page.getByRole('heading', { name: 'Rankings competitivos' }).waitFor();
-    await page.getByText('La Dama de Oro', { exact: true }).waitFor();
+    await page
+      .getByRole('button', { name: 'Abrir perfil de jugador: La Dama de Oro' })
+      .first()
+      .waitFor();
+    if (viewport.isMobile) {
+      const hasHorizontalPageOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      if (hasHorizontalPageOverflow)
+        throw new Error('El ranking desborda horizontalmente en móvil.');
+    }
     await stabilizeMobileFullPage(page, viewport);
     await page.waitForTimeout(300);
     const rankingFile = path.join(OUT_DIR, `m9b-ranking-${viewport.suffix}.png`);
@@ -336,7 +346,7 @@ async function captureWebScreenshots(browser) {
     console.log(`✓ ${path.relative(REPO_ROOT, rankingFile)}`);
 
     await page.goto(`${WEB_URL}/perfil`);
-    const ratingHeading = page.getByText('Rating competitivo', { exact: true });
+    const ratingHeading = page.getByText('Puntaje competitivo', { exact: true });
     await ratingHeading.waitFor({ timeout: 20_000 });
     await page.getByText('1678', { exact: true }).waitFor();
     await stabilizeMobileFullPage(page, viewport);

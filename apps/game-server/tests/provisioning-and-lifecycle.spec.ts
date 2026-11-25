@@ -293,9 +293,35 @@ describe('M4 Room Provisioning Contract & Match Lifecycle Publisher (Memory + Bu
 
       await playProvisionedMatchToCompletion(roomId, [c0, c1]);
       await c0.waitFor((e) => e.type === 'game.ended', 'game.ended final');
+      const firstMatchId = String(started.payload['matchId']);
+
+      // El resultado cierra una partida, no la sala: ambos jugadores pueden pedir revancha.
+      c0.send('table.ready', { roomId, ready: true });
+      c1.send('table.ready', { roomId, ready: true });
+      const rematchStarted0 = await c0.waitFor(
+        (e) => e.type === 'game.started' && e.payload['matchId'] !== firstMatchId,
+        'game.started de revancha para c0',
+      );
+      const rematchId = String(rematchStarted0.payload['matchId']);
+      expect(rematchId).not.toBe(firstMatchId);
+      const rematchStarted1 = await c1.waitFor(
+        (e) => e.type === 'game.started' && e.payload['matchId'] === rematchId,
+        'game.started de revancha para c1',
+      );
+      expect(rematchStarted1.payload['roomId']).toBe(roomId);
+      await c0.waitFor(
+        (e) => e.type === 'game.dealt' && e.payload['handNumber'] === 1,
+        'reparto de revancha c0',
+      );
+      await c1.waitFor(
+        (e) => e.type === 'game.dealt' && e.payload['handNumber'] === 1,
+        'reparto de revancha c1',
+      );
+      expect(c0.latestView?.status).toBe('IN_PROGRESS');
+      expect(c1.latestView?.status).toBe('IN_PROGRESS');
 
       const published = bus.getPublishedEvents();
-      expect(published.some((e) => e.kind === 'match.started')).toBe(true);
+      expect(published.filter((e) => e.kind === 'match.started')).toHaveLength(2);
       const completed = published.find(
         (e): e is MatchCompletedLifecycleEvent => e.kind === 'match.completed',
       );

@@ -6,6 +6,9 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { InMemoryMatchmakingStore } from '../matchmaking/store/in-memory-matchmaking-store.js';
+import { InMemoryUserPresenceStore } from '../social/in-memory-presence-store.js';
+import { USER_PRESENCE_STORE, type UserPresenceStore } from '../social/presence-store.interface.js';
+import { RedisUserPresenceStore } from '../social/redis-presence-store.js';
 import {
   MATCHMAKING_STORE,
   type MatchmakingStore,
@@ -17,6 +20,7 @@ import {
   type LobbyRuntimeConfig,
 } from './lobby.config.js';
 import { LobbyController } from './lobby.controller.js';
+import { ProgressionModule } from '../progression/progression.module.js';
 import { LobbyRepository } from './lobby.repository.js';
 import { LobbyService } from './lobby.service.js';
 import { LobbyRealtimeGateway } from './lobby-realtime.gateway.js';
@@ -39,12 +43,22 @@ export interface LobbyModuleOptions {
   readonly gameRoomProvisioner?: GameRoomProvisioner;
   readonly matchLifecycleConsumer?: MatchLifecycleConsumer;
   readonly matchmakingStore?: MatchmakingStore;
+  readonly presenceStore?: UserPresenceStore;
   readonly redisUrl?: string;
 }
 
 @Injectable()
 class MatchmakingStoreShutdownHook implements OnApplicationShutdown {
   constructor(@Inject(MATCHMAKING_STORE) private readonly store: MatchmakingStore) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.store.close();
+  }
+}
+
+@Injectable()
+class PresenceStoreShutdownHook implements OnApplicationShutdown {
+  constructor(@Inject(USER_PRESENCE_STORE) private readonly store: UserPresenceStore) {}
 
   async onApplicationShutdown(): Promise<void> {
     await this.store.close();
@@ -60,6 +74,7 @@ export class LobbyModule {
     return {
       module: LobbyModule,
       global: true,
+      imports: [ProgressionModule],
       controllers: [LobbyController],
       providers: [
         { provide: LOBBY_RUNTIME_CONFIG, useValue: config },
@@ -97,6 +112,15 @@ export class LobbyModule {
           },
         },
         MatchmakingStoreShutdownHook,
+        {
+          provide: USER_PRESENCE_STORE,
+          useFactory: (): UserPresenceStore => {
+            if (options.presenceStore) return options.presenceStore;
+            if (effectiveRedisUrl) return new RedisUserPresenceStore(effectiveRedisUrl);
+            return new InMemoryUserPresenceStore();
+          },
+        },
+        PresenceStoreShutdownHook,
         LobbyRepository,
         LobbyRealtimeGateway,
         MatchPersistenceService,
@@ -107,6 +131,7 @@ export class LobbyModule {
         GAME_ROOM_PROVISIONER,
         MATCH_LIFECYCLE_CONSUMER,
         MATCHMAKING_STORE,
+        USER_PRESENCE_STORE,
         LobbyRepository,
         LobbyRealtimeGateway,
         MatchPersistenceService,

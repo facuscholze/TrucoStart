@@ -1,5 +1,8 @@
 import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '@truco/shared';
 import { OPENAPI_LOBBY_PATHS } from './openapi-lobby.fragment.js';
+import { OPENAPI_M9A_PATHS } from './openapi-m9a.fragment.js';
+import { OPENAPI_M9B_PATHS } from './openapi-m9b.fragment.js';
+import { OPENAPI_M9C_PATHS } from './openapi-m9c.fragment.js';
 import { OPENAPI_COMPONENTS_SCHEMAS } from './openapi.schemas.js';
 
 export interface OpenApiDocument {
@@ -32,9 +35,9 @@ export function buildOpenApiV1Document(): OpenApiDocument {
     openapi: '3.1.0',
     info: {
       title: 'Mesa de Truco — HTTP API v1',
-      version: '0.4.0',
+      version: '0.7.0',
       description:
-        'API HTTP v1 para autenticación segura, cuentas/perfiles (/v1/me), lobby de mesas públicas/privadas con invitaciones firmadas, matchmaking (1v1/2v2) y persistencia transaccional de partidas.',
+        'API HTTP v1 para autenticación segura, perfiles con controles de privacidad, historial verificable de partidas, grafo social, progresión persistente con moneda virtual simbólica, matchmaking competitivo con Glicko-2, rankings públicos y revisión humana de integridad.',
     },
     servers: [{ url: '/v1', description: 'API v1' }],
     components: {
@@ -50,6 +53,13 @@ export function buildOpenApiV1Document(): OpenApiDocument {
           in: 'cookie',
           name: REFRESH_COOKIE_NAME,
           description: 'Cookie HttpOnly; Secure; SameSite=Lax rotativa en /v1/auth (30 días).',
+        },
+        adminAccessCookie: {
+          type: 'apiKey',
+          in: 'cookie',
+          name: 'truco_admin_access',
+          description:
+            'Cookie administrativa HttpOnly; Secure; SameSite=Strict, limitada a /v1/admin y con 2FA obligatorio.',
         },
       },
       schemas: OPENAPI_COMPONENTS_SCHEMAS,
@@ -295,35 +305,75 @@ export function buildOpenApiV1Document(): OpenApiDocument {
       '/users/{id}/stats': {
         get: {
           tags: ['Users'],
-          summary: 'Obtener estadísticas agregadas públicas de partidas de un jugador',
+          summary:
+            'Obtener estadísticas agregadas, restringidas por la política independiente de privacidad de estadísticas',
+          security: [{ accessCookie: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
           ],
           responses: {
-            200: JSON_RES('Estadísticas públicas', '#/components/schemas/UserStatsResponse'),
+            200: JSON_RES(
+              'Estadísticas visibles por política de privacidad',
+              '#/components/schemas/UserStatsResponse',
+            ),
+            401: ERR_RES('No autenticado'),
+            404: ERR_RES('Jugador inexistente o historial privado para quien consulta'),
           },
         },
       },
       '/users/{id}/matches': {
         get: {
           tags: ['Users'],
-          summary: 'Listar historial público de partidas paginado por cursor',
+          summary: 'Listar historial paginado con filtros y controles de visibilidad social',
+          security: [{ accessCookie: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
-            { name: 'cursor', in: 'query', required: false, schema: { type: 'string' } },
+            {
+              name: 'cursor',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', format: 'uuid' },
+            },
             {
               name: 'limit',
               in: 'query',
               required: false,
               schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
             },
+            {
+              name: 'mode',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['1v1', '2v2'] },
+            },
+            {
+              name: 'outcome',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['WIN', 'LOSS', 'ABANDON'] },
+            },
+            {
+              name: 'bots',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['ANY', 'BOTS', 'HUMANS'], default: 'ANY' },
+            },
           ],
           responses: {
-            200: JSON_RES('Página de partidas', '#/components/schemas/UserMatchesResponse'),
+            200: JSON_RES(
+              'Página de partidas visible por política de privacidad',
+              '#/components/schemas/UserMatchesResponse',
+            ),
+            400: ERR_RES('Filtros o cursor inválidos'),
+            401: ERR_RES('No autenticado'),
+            404: ERR_RES('Jugador inexistente o historial privado para quien consulta'),
           },
         },
       },
+      ...OPENAPI_M9A_PATHS,
       ...OPENAPI_LOBBY_PATHS,
+      ...OPENAPI_M9B_PATHS,
+      ...OPENAPI_M9C_PATHS,
     },
   };
 }

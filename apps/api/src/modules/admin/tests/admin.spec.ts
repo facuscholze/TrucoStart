@@ -442,6 +442,24 @@ describe('M7 — panel administrativo: RBAC, 2FA, sanciones, replay y auditoría
     expect(audit?.adminSessionId).toBeTruthy();
     expect(audit?.reason).toBe('Corrección del crédito de prueba');
     expect(audit?.ip).toBeTruthy();
+    const walletEntries = await dbHandle.db
+      .select({
+        amount: walletTransactionsTable.amount,
+        kind: walletTransactionsTable.kind,
+        reversesTransactionId: walletTransactionsTable.reversesTransactionId,
+      })
+      .from(walletTransactionsTable)
+      .where(eq(walletTransactionsTable.userId, userId));
+    expect(walletEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: 5, kind: 'MATCH_REWARD' }),
+        expect.objectContaining({
+          amount: -5,
+          kind: 'ADMIN_REVERSAL',
+          reversesTransactionId: creditId,
+        }),
+      ]),
+    );
     const [balance] = await dbHandle.db
       .select({ balance: sql<number>`COALESCE(SUM(${walletTransactionsTable.amount}), 0)` })
       .from(walletTransactionsTable)

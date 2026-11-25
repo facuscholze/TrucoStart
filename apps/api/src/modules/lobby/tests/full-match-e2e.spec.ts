@@ -521,6 +521,48 @@ describe('M4 Full Distributed E2E: real apps/api + real apps/game-server + Postg
         matchesPlayed: 1,
         wins: 1,
       });
+
+      // La partida real atravesó match.completed y la progresión server-side: XP, logro y misión.
+      const progressionDeadline = Date.now() + 5_000;
+      let winnerProgression:
+        | {
+            xpTotal: number;
+            achievements: Array<{ id: string; unlockedAt: string | null }>;
+            missions: Array<{ templateId: string; progress: number }>;
+          }
+        | undefined;
+      while (Date.now() < progressionDeadline) {
+        const progressionResponse = await apiApp.inject({
+          method: 'GET',
+          url: '/v1/me/progression',
+          headers: { cookie: winnerCookie },
+        });
+        expect(progressionResponse.statusCode).toBe(200);
+        winnerProgression = progressionResponse.json<{
+          xpTotal: number;
+          achievements: Array<{ id: string; unlockedAt: string | null }>;
+          missions: Array<{ templateId: string; progress: number }>;
+        }>();
+        const firstMatchUnlocked = winnerProgression.achievements.some(
+          (achievement) => achievement.id === 'first_match' && achievement.unlockedAt !== null,
+        );
+        const dailyMatchAdvanced = winnerProgression.missions.some(
+          (mission) => mission.templateId === 'daily_play_match' && mission.progress >= 1,
+        );
+        if (winnerProgression.xpTotal > 0 && firstMatchUnlocked && dailyMatchAdvanced) break;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      expect(winnerProgression?.xpTotal).toBeGreaterThan(0);
+      expect(
+        winnerProgression?.achievements.some(
+          (achievement) => achievement.id === 'first_match' && achievement.unlockedAt !== null,
+        ),
+      ).toBe(true);
+      expect(
+        winnerProgression?.missions.some(
+          (mission) => mission.templateId === 'daily_play_match' && mission.progress >= 1,
+        ),
+      ).toBe(true);
     } finally {
       presenceSpy.mockRestore();
       await presenceStore.disconnect(p2User.id, presenceSocketId, Date.now());

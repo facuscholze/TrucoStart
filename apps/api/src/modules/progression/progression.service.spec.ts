@@ -263,6 +263,35 @@ describe('M9c — progression persistence (PostgreSQL/PGlite integration)', () =
     expect(abandonReceipt).toBeUndefined();
   });
 
+  it('rechaza valor económico, compras con dinero y transferencias en las restricciones de wallet', async () => {
+    const player = await seedUser(db);
+
+    await expect(
+      db
+        .update(walletAccountsTable)
+        .set({ hasEconomicValue: true })
+        .where(eq(walletAccountsTable.userId, player.id)),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .update(walletAccountsTable)
+        .set({ playerTransfersEnabled: true })
+        .where(eq(walletAccountsTable.userId, player.id)),
+    ).rejects.toThrow();
+    await expect(
+      db.update(progressionConfigTable).set({ hasEconomicValue: true }),
+    ).rejects.toThrow();
+    await expect(
+      db.update(progressionConfigTable).set({ playerTransfersEnabled: true }),
+    ).rejects.toThrow();
+    await expect(
+      db.update(progressionConfigTable).set({ moneyPurchasesEnabled: true }),
+    ).rejects.toThrow();
+    await expect(
+      db.execute(sql`UPDATE progression_config SET currency_type = 'FIAT' WHERE id = 1`),
+    ).rejects.toThrow();
+  });
+
   it('aplica topes diarios separados para partidas humanas, bots y bonos; monedas con tope diario', async () => {
     const player = await seedUser(db);
     await db.update(progressionConfigTable).set({

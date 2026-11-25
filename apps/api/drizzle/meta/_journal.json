@@ -50,6 +50,34 @@
       "when": 1795050000000,
       "tag": "0006_legal_acceptance",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795090000000,
+      "tag": "0007_m9a_social_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795200000000,
+      "tag": "0008_m9b_rankings",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795286400000,
+      "tag": "0009_m9b_competitive_season_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795286400001,
+      "tag": "0010_m9c_progression_economy",
+      "breakpoints": true
     }
   ]
 }

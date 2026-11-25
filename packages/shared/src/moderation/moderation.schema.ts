@@ -116,8 +116,10 @@ export const AdminPermissionSchema = z.enum([
   'sanctions:issue_ban',
   'nickname:force_change',
   'matches:replay',
+  'competitive:review',
   'audit:read',
   'admins:manage',
+  'gamification:configure',
 ]);
 export type AdminPermission = z.infer<typeof AdminPermissionSchema>;
 
@@ -143,6 +145,7 @@ export const ADMIN_ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPe
       'sanctions:issue',
       'nickname:force_change',
       'matches:replay',
+      'competitive:review',
       'audit:read',
     ] as const),
     ADMIN: Object.freeze([
@@ -156,8 +159,10 @@ export const ADMIN_ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPe
       'sanctions:issue_ban',
       'nickname:force_change',
       'matches:replay',
+      'competitive:review',
       'audit:read',
       'admins:manage',
+      'gamification:configure',
     ] as const),
   });
 

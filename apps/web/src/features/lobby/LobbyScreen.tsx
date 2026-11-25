@@ -131,7 +131,11 @@ export function LobbyScreen({
     setActionError(null);
     try {
       await ensureUser();
-      const res = await enqueueMatchmakingRequest({ mode, rulesetCode: 'ar-standard-v1' });
+      const res = await enqueueMatchmakingRequest({
+        mode,
+        rulesetCode: 'ar-standard-v1',
+        competitive: false,
+      });
       setQueueState(res);
       if (res.status === 'MATCHED') {
         onNavigate(`/sala/${encodeURIComponent(res.tableId)}`);

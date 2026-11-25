@@ -1,28 +1,38 @@
 import type {
   AuthUserSummary,
   MeResponse,
+  MatchOutcome,
+  PrivacyVisibility,
   SessionDeviceItem,
+  UserMatchDetailResponse,
   UserMatchHistoryItem,
   UserStatsResponse,
+  PlayerRatingResponse,
 } from '@truco/shared';
 import { Avatar, Badge, CallButton, Modal, Toast } from '@truco/ui';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
+import { ReportButton } from '../moderation/ReportButton.js';
+import { RatingProfilesCard } from '../ratings/RatingProfilesCard.js';
 import {
   deleteOwnAccountRequest,
   ensureGuestOrActiveSession,
   exportAccountDataRequest,
   getMeRequest,
+  getPlayerRatingsRequest,
+  getUserMatchDetailRequest,
   getUserMatchesRequest,
   getUserStatsRequest,
   listActiveSessionsRequest,
   logoutSessionRequest,
   patchMeRequest,
   revokeActiveSessionRequest,
+  type UserHistoryFilters,
 } from '../../lib/api-client.js';
 import {
   type ClientPreferences,
   loadClientPreferences,
+  mergeServerSettingsIntoPreferences,
   saveClientPreferences,
 } from '../../lib/preferences.js';
 
@@ -35,9 +45,16 @@ export interface ProfileScreenProps {
 export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: ProfileScreenProps) {
   const [meData, setMeData] = useState<MeResponse | null>(null);
   const [stats, setStats] = useState<UserStatsResponse | null>(null);
+  const [ratingProfiles, setRatingProfiles] = useState<PlayerRatingResponse | null>(null);
   const [matches, setMatches] = useState<UserMatchHistoryItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionDeviceItem[]>([]);
+  const [historyFilters, setHistoryFilters] = useState<UserHistoryFilters>({});
+  const [draftHistoryFilters, setDraftHistoryFilters] = useState<UserHistoryFilters>({});
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [matchDetail, setMatchDetail] = useState<UserMatchDetailResponse | null>(null);
+  const [matchDetailLoading, setMatchDetailLoading] = useState(false);
+  const [matchDetailError, setMatchDetailError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
@@ -63,17 +80,20 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
       const user = currentUser ?? (await ensureGuestOrActiveSession());
       if (!currentUser) onSessionChanged(user);
 
-      const [meRes, statsRes, matchesRes, sessionsRes] = await Promise.all([
+      const [meRes, statsRes, matchesRes, sessionsRes, ratingRes] = await Promise.all([
         getMeRequest(),
         getUserStatsRequest(user.id),
-        getUserMatchesRequest(user.id),
+        getUserMatchesRequest(user.id, undefined, 10, historyFilters),
         listActiveSessionsRequest(),
+        getPlayerRatingsRequest(user.id).catch(() => null),
       ]);
 
       setMeData(meRes);
       setNickname(meRes.user.nickname);
       setBio(meRes.profile.bio);
+      setPrefs(mergeServerSettingsIntoPreferences(meRes.profile.settings));
       setStats(statsRes);
+      setRatingProfiles(ratingRes);
       setMatches(matchesRes.items);
       setNextCursor(matchesRes.nextCursor);
       setSessions(sessionsRes.sessions);
@@ -82,7 +102,7 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
     } finally {
       setLoading(false);
     }
-  }, [currentUser, onSessionChanged]);
+  }, [currentUser, historyFilters, onSessionChanged]);
 
   useEffect(() => {
     void loadAll();
@@ -92,7 +112,7 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
     if (!meData || !nextCursor) return;
     setLoadingMore(true);
     try {
-      const res = await getUserMatchesRequest(meData.user.id, nextCursor);
+      const res = await getUserMatchesRequest(meData.user.id, nextCursor, 10, historyFilters);
       setMatches((prev) => [...prev, ...res.items]);
       setNextCursor(res.nextCursor);
     } catch (err) {
@@ -126,7 +146,9 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
     }
   };
 
-  const handleTogglePref = async (key: keyof ClientPreferences) => {
+  const handleTogglePref = async (
+    key: 'soundEnabled' | 'animationsReduced' | 'confirmCalls' | 'highContrast' | 'largeText',
+  ) => {
     const nextPrefs: ClientPreferences = {
       ...prefs,
       [key]: !prefs[key],
@@ -143,6 +165,51 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
         },
       }).catch(() => undefined);
     }
+  };
+
+  const handlePrivacyChange = async (
+    key: 'historyVisibility' | 'statsVisibility' | 'presenceVisibility',
+    value: PrivacyVisibility,
+  ) => {
+    setBusySave(true);
+    try {
+      const updated = await patchMeRequest({ settings: { [key]: value } });
+      setMeData(updated);
+      const saved = mergeServerSettingsIntoPreferences(updated.profile.settings);
+      setPrefs(saved);
+      setToastInfo({ msg: messagesEsAr.profile.privacySaved, tone: 'success' });
+    } catch (err) {
+      setToastInfo({
+        msg: err instanceof Error ? err.message : messagesEsAr.launcher.sessionErrorFallback,
+        tone: 'danger',
+      });
+    } finally {
+      setBusySave(false);
+    }
+  };
+
+  const handleOpenMatchDetail = async (matchId: string) => {
+    if (!meData) return;
+    setSelectedMatchId(matchId);
+    setMatchDetail(null);
+    setMatchDetailError(null);
+    setMatchDetailLoading(true);
+    try {
+      const detail = await getUserMatchDetailRequest(meData.user.id, matchId);
+      setMatchDetail(detail);
+    } catch (err) {
+      setMatchDetailError(
+        err instanceof Error ? err.message : messagesEsAr.launcher.sessionErrorFallback,
+      );
+    } finally {
+      setMatchDetailLoading(false);
+    }
+  };
+
+  const handleCloseMatchDetail = () => {
+    setSelectedMatchId(null);
+    setMatchDetail(null);
+    setMatchDetailError(null);
   };
 
   const handleRevokeSession = async (sessionId: string) => {
@@ -322,10 +389,61 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
           </div>
         </div>
 
+        <div className="space-y-2.5">
+          <h3 className="text-sm font-bold text-ivory">{messagesEsAr.profile.modeStatsTitle}</h3>
+          <div className="grid grid-cols-1 tablet:grid-cols-2 gap-3">
+            {(['1v1', '2v2'] as const).map((mode) => {
+              const modeStats = stats.byMode[mode];
+              return (
+                <article
+                  key={mode}
+                  className="rounded-xl border border-ivory/15 bg-elevated p-3.5 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-display text-base font-bold text-gold">{mode}</h4>
+                    <Badge variant="neutral">
+                      {messagesEsAr.profile.modeMatchesSummary(
+                        modeStats.matchesPlayed,
+                        Math.round(modeStats.winRate * 100),
+                      )}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <p className="text-muted">
+                      {messagesEsAr.profile.statWins}
+                      <strong className="block text-ivory">{modeStats.wins}</strong>
+                    </p>
+                    <p className="text-muted">
+                      {messagesEsAr.profile.statLosses}
+                      <strong className="block text-ivory">{modeStats.losses}</strong>
+                    </p>
+                    <p className="text-muted">
+                      {messagesEsAr.profile.streakLabel}
+                      <strong className="block text-ivory">{modeStats.currentStreak}</strong>
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-ivory/10 pt-2 text-[11px] text-muted">
+                    <span>
+                      {messagesEsAr.profile.callsEnvidoLabel}: {modeStats.envido.won}/
+                      {modeStats.envido.resolved}
+                    </span>
+                    <span>
+                      {messagesEsAr.profile.callsTrucoLabel}: {modeStats.truco.won}/
+                      {modeStats.truco.resolved}
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
         {stats.matchesPlayed === 0 && (
           <p className="text-xs text-muted">{messagesEsAr.profile.emptyStatsHint}</p>
         )}
       </section>
+
+      <RatingProfilesCard data={ratingProfiles} onNavigate={onNavigate} />
 
       {/* Grilla: Historial + Ajustes y Perfil */}
       <div className="grid grid-cols-1 desktop:grid-cols-12 gap-5 items-start">
@@ -335,18 +453,106 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
             {messagesEsAr.profile.historySectionTitle}
           </h2>
 
-          {matches.length === 0 ? (
-            <div className="rounded-xl bg-elevated/65 border border-ivory/15 p-6 text-center space-y-3">
-              <h3 className="font-display text-base font-bold text-ivory">
-                {messagesEsAr.profile.emptyHistoryTitle}
-              </h3>
-              <p className="text-xs text-muted leading-relaxed">
-                {messagesEsAr.profile.emptyHistoryBody}
-              </p>
-              <CallButton tone="accept" onClick={() => onNavigate('/lobby')}>
-                {messagesEsAr.home.exploreLobbyCta}
+          <fieldset className="rounded-xl border border-ivory/15 bg-elevated/60 p-3 space-y-2.5">
+            <legend className="px-1 text-xs font-bold text-muted">
+              {messagesEsAr.profile.historyFiltersHeading}
+            </legend>
+            <div className="grid grid-cols-1 tablet:grid-cols-3 gap-2">
+              <label className="space-y-1 text-[11px] text-muted">
+                <span className="block">{messagesEsAr.profile.historyFilterMode}</span>
+                <select
+                  value={draftHistoryFilters.mode ?? ''}
+                  onChange={(event) =>
+                    setDraftHistoryFilters((previous) => ({
+                      ...previous,
+                      mode:
+                        event.target.value === ''
+                          ? undefined
+                          : (event.target.value as '1v1' | '2v2'),
+                    }))
+                  }
+                  className="min-h-[40px] w-full rounded-lg border border-ivory/20 bg-surface px-2 text-xs text-ivory"
+                >
+                  <option value="">{messagesEsAr.profile.historyFilterAllModes}</option>
+                  <option value="1v1">1 vs 1</option>
+                  <option value="2v2">2 vs 2</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-[11px] text-muted">
+                <span className="block">{messagesEsAr.profile.historyFilterOutcome}</span>
+                <select
+                  value={draftHistoryFilters.outcome ?? ''}
+                  onChange={(event) =>
+                    setDraftHistoryFilters((previous) => ({
+                      ...previous,
+                      outcome:
+                        event.target.value === ''
+                          ? undefined
+                          : (event.target.value as MatchOutcome),
+                    }))
+                  }
+                  className="min-h-[40px] w-full rounded-lg border border-ivory/20 bg-surface px-2 text-xs text-ivory"
+                >
+                  <option value="">{messagesEsAr.profile.historyFilterAllOutcomes}</option>
+                  <option value="WIN">{messagesEsAr.profile.outcomeLabels.WIN}</option>
+                  <option value="LOSS">{messagesEsAr.profile.outcomeLabels.LOSS}</option>
+                  <option value="ABANDON">{messagesEsAr.profile.outcomeLabels.ABANDON}</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-[11px] text-muted">
+                <span className="block">{messagesEsAr.profile.historyFilterBots}</span>
+                <select
+                  value={draftHistoryFilters.bots ?? 'ANY'}
+                  onChange={(event) =>
+                    setDraftHistoryFilters((previous) => ({
+                      ...previous,
+                      bots: event.target.value as NonNullable<UserHistoryFilters['bots']>,
+                    }))
+                  }
+                  className="min-h-[40px] w-full rounded-lg border border-ivory/20 bg-surface px-2 text-xs text-ivory"
+                >
+                  <option value="ANY">{messagesEsAr.profile.historyFilterAnyBots}</option>
+                  <option value="BOTS">{messagesEsAr.profile.historyFilterOnlyBots}</option>
+                  <option value="HUMANS">{messagesEsAr.profile.historyFilterHumans}</option>
+                </select>
+              </label>
+            </div>
+            <div className="flex justify-end">
+              <CallButton
+                tone="neutral"
+                disabled={loading}
+                onClick={() => {
+                  setMatches([]);
+                  setNextCursor(null);
+                  setHistoryFilters({ ...draftHistoryFilters });
+                }}
+              >
+                {messagesEsAr.profile.historyApplyFilters}
               </CallButton>
             </div>
+          </fieldset>
+
+          {matches.length === 0 ? (
+            loading ? (
+              <p
+                role="status"
+                className="rounded-xl bg-elevated/65 border border-ivory/15 p-6 text-center text-xs text-muted"
+              >
+                {messagesEsAr.profile.historyLoading}
+              </p>
+            ) : (
+              <div className="rounded-xl bg-elevated/65 border border-ivory/15 p-6 text-center space-y-3">
+                <h3 className="font-display text-base font-bold text-ivory">
+                  {messagesEsAr.profile.emptyHistoryTitle}
+                </h3>
+                <p className="text-xs text-muted leading-relaxed">
+                  {messagesEsAr.profile.emptyHistoryBody}
+                </p>
+                <CallButton tone="accept" onClick={() => onNavigate('/lobby')}>
+                  {messagesEsAr.home.exploreLobbyCta}
+                </CallButton>
+              </div>
+            )
           ) : (
             <div className="space-y-2.5">
               <ul className="space-y-2.5">
@@ -371,8 +577,16 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
                         })}
                       </div>
                     </div>
-                    <div className="font-display text-xl font-bold text-ivory tabular-nums">
-                      {`${m.score} pts`}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-display text-xl font-bold text-ivory tabular-nums">
+                        {`${m.score} pts`}
+                      </span>
+                      <CallButton
+                        tone="neutral"
+                        onClick={() => void handleOpenMatchDetail(m.matchId)}
+                      >
+                        {messagesEsAr.profile.matchDetails}
+                      </CallButton>
                     </div>
                   </li>
                 ))}
@@ -487,6 +701,63 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
                 </div>
               );
             })}
+
+            <div className="grid grid-cols-1 tablet:grid-cols-2 gap-3 border-t border-ivory/10 pt-3">
+              <label className="space-y-1.5 text-xs font-semibold text-ivory">
+                <span className="block">{messagesEsAr.profile.historyVisibilityLabel}</span>
+                <select
+                  value={prefs.historyVisibility}
+                  disabled={busySave}
+                  onChange={(event) =>
+                    void handlePrivacyChange(
+                      'historyVisibility',
+                      event.target.value as PrivacyVisibility,
+                    )
+                  }
+                  className="min-h-[44px] w-full rounded-xl border border-ivory/25 bg-elevated px-3 text-sm text-ivory disabled:opacity-50"
+                >
+                  <option value="ALL">{messagesEsAr.profile.visibilityAll}</option>
+                  <option value="FRIENDS">{messagesEsAr.profile.visibilityFriends}</option>
+                  <option value="NOBODY">{messagesEsAr.profile.visibilityNobody}</option>
+                </select>
+              </label>
+              <label className="space-y-1.5 text-xs font-semibold text-ivory">
+                <span className="block">{messagesEsAr.profile.statsVisibilityLabel}</span>
+                <select
+                  value={prefs.statsVisibility}
+                  disabled={busySave}
+                  onChange={(event) =>
+                    void handlePrivacyChange(
+                      'statsVisibility',
+                      event.target.value as PrivacyVisibility,
+                    )
+                  }
+                  className="min-h-[44px] w-full rounded-xl border border-ivory/25 bg-elevated px-3 text-sm text-ivory disabled:opacity-50"
+                >
+                  <option value="ALL">{messagesEsAr.profile.visibilityAll}</option>
+                  <option value="FRIENDS">{messagesEsAr.profile.visibilityFriends}</option>
+                  <option value="NOBODY">{messagesEsAr.profile.visibilityNobody}</option>
+                </select>
+              </label>
+              <label className="space-y-1.5 text-xs font-semibold text-ivory">
+                <span className="block">{messagesEsAr.profile.presenceVisibilityLabel}</span>
+                <select
+                  value={prefs.presenceVisibility}
+                  disabled={busySave}
+                  onChange={(event) =>
+                    void handlePrivacyChange(
+                      'presenceVisibility',
+                      event.target.value as PrivacyVisibility,
+                    )
+                  }
+                  className="min-h-[44px] w-full rounded-xl border border-ivory/25 bg-elevated px-3 text-sm text-ivory disabled:opacity-50"
+                >
+                  <option value="ALL">{messagesEsAr.profile.visibilityAll}</option>
+                  <option value="FRIENDS">{messagesEsAr.profile.visibilityFriends}</option>
+                  <option value="NOBODY">{messagesEsAr.profile.visibilityNobody}</option>
+                </select>
+              </label>
+            </div>
           </section>
 
           {/* Sesiones activas y dispositivos */}
@@ -579,6 +850,121 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
           </section>
         </div>
       </div>
+
+      <Modal
+        open={selectedMatchId !== null}
+        title={messagesEsAr.profile.matchDetailTitle}
+        onClose={handleCloseMatchDetail}
+        closeLabel={messagesEsAr.profile.matchDetailClose}
+      >
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto">
+          {matchDetailLoading && (
+            <p role="status" className="text-sm text-muted">
+              {messagesEsAr.profile.matchDetailLoading}
+            </p>
+          )}
+          {matchDetailError && (
+            <p role="alert" className="text-sm text-danger">
+              {matchDetailError}
+            </p>
+          )}
+          {matchDetail && (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="sky">{matchDetail.mode}</Badge>
+                <Badge variant="neutral">{matchDetail.rulesetCode}</Badge>
+                <Badge variant="gold">
+                  {matchDetail.hasBots
+                    ? messagesEsAr.profile.historyFilterOnlyBots
+                    : messagesEsAr.profile.historyFilterHumans}
+                </Badge>
+              </div>
+              <div className="rounded-xl border border-ivory/15 bg-elevated p-3 space-y-1">
+                <p className="text-xs font-bold text-ivory">
+                  {messagesEsAr.profile.seedCommitmentLabel}
+                </p>
+                <code className="block break-all text-[10px] text-muted">
+                  {matchDetail.seedCommitment}
+                </code>
+                {matchDetail.result.winnerTeam !== null && (
+                  <p className="pt-1 text-xs text-muted">
+                    {messagesEsAr.profile.winnerTeamLabel(matchDetail.result.winnerTeam + 1)}
+                  </p>
+                )}
+              </div>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-bold text-ivory">
+                  {messagesEsAr.profile.matchDetailPlayers}
+                </h3>
+                <ul className="space-y-2">
+                  {matchDetail.players.map((player) => (
+                    <li
+                      key={player.userId}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ivory/15 bg-elevated p-3"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-ivory">
+                          {player.nickname}
+                          {player.isSelf ? ` · ${messagesEsAr.profile.playerSelfTag}` : ''}
+                        </p>
+                        <p className="text-[11px] text-muted">
+                          {messagesEsAr.profile.playerSummary(
+                            player.team + 1,
+                            player.score,
+                            messagesEsAr.profile.outcomeLabels[player.outcome] ?? player.outcome,
+                          )}
+                        </p>
+                      </div>
+                      {!player.isSelf && (
+                        <ReportButton
+                          targets={[{ userId: player.userId, nickname: player.nickname }]}
+                          matchId={matchDetail.matchId}
+                          myUserId={meData.user.id}
+                          label={messagesEsAr.profile.matchReportPlayer}
+                        />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-bold text-ivory">
+                  {messagesEsAr.profile.matchDetailEvents}
+                </h3>
+                {matchDetail.events.length === 0 ? (
+                  <p className="text-xs text-muted">
+                    {messagesEsAr.profile.matchDetailEmptyEvents}
+                  </p>
+                ) : (
+                  <ol className="space-y-1.5">
+                    {matchDetail.events.map((event) => (
+                      <li
+                        key={`${event.seq}-${event.type}`}
+                        className="flex items-center justify-between gap-3 rounded-lg bg-elevated/70 px-3 py-2 text-xs"
+                      >
+                        <span className="text-ivory">
+                          {messagesEsAr.profile.matchEventTypes[event.type] ?? event.type}
+                        </span>
+                        <time className="shrink-0 text-[10px] text-muted">
+                          {new Date(event.at).toLocaleTimeString('es-AR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </time>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
+              <p className="rounded-lg border border-sky/20 bg-sky/5 p-3 text-xs text-muted">
+                {messagesEsAr.profile.matchDetailNoCards}
+              </p>
+            </>
+          )}
+        </div>
+      </Modal>
 
       {/* Modal de confirmación de borrado definitivo */}
       <Modal

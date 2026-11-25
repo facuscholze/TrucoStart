@@ -29,6 +29,7 @@ Sos un equipo senior (arquitecto, full-stack, desarrollador de juegos multijugad
 13. **Sin dinero real ni ventaja pagada.** Prohibido implementar apuestas, depósitos, retiros, premios monetarios, compra con dinero o transferencias entre jugadores. Se permite únicamente la `VIRTUAL_COIN` simbólica de M9c: sin valor económico, no transferible/no comprable y canjeable por cosméticos que no alteren reglas ni matchmaking; mantener las restricciones de base de datos y la revisión de `docs/LEGAL_CHECKLIST.md`.
 14. Nunca commitees secretos. Usá `.env.example`.
 15. Hacé commits pequeños y descriptivos (Conventional Commits) al cerrar cada tarea. _(Nota operativa en entorno Arena: mantener todos los commits en la rama activa de la sesión según ADR-009)._
+16. **Criterio de cierre verificable:** ningún módulo o hito se reporta como cerrado hasta que sus cambios estén commiteados en la rama activa, empujados al remoto y todos los jobs obligatorios del CI remoto para el último commit relevante hayan terminado en verde. Los checks locales no sustituyen el CI remoto; si está pendiente, falló o no corrió, el módulo se reporta como no cerrado.
 
 ---
 

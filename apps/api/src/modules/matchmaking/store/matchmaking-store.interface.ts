@@ -9,6 +9,19 @@ export interface QueuedPlayerEntry {
   readonly rulesetCode: RulesetCode;
   readonly enqueuedAtMs: number;
   readonly expiresAtMs: number;
+  readonly competitive?: boolean;
+  readonly rating?: number;
+  readonly ratingDeviation?: number;
+  readonly blockedOpponentIds?: readonly string[];
+  /** Sólo se fija tras un emparejamiento competitivo 2v2. */
+  readonly team?: 0 | 1;
+}
+
+export interface CompetitiveMatchingOptions {
+  readonly baseRatingWindow: number;
+  readonly waitGrowthPerTenSeconds: number;
+  readonly maximumRatingWindow: number;
+  readonly candidateScanLimit: number;
 }
 
 export type EnqueueAttemptOutcome =
@@ -35,6 +48,7 @@ export interface MatchmakingStore {
     entry: QueuedPlayerEntry,
     quota: number,
     nowMs: number,
+    competitiveOptions?: CompetitiveMatchingOptions,
   ): Promise<EnqueueAttemptOutcome>;
 
   getUserQueue(userId: string, nowMs: number): Promise<UserQueueLookup>;

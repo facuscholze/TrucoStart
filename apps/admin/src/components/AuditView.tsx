@@ -22,7 +22,7 @@ export function AuditView({ entries }: { readonly entries: readonly AdminAuditEn
                     {entry.entityId ? ` · ${entry.entityId.slice(0, 8)}…` : ''}
                   </span>
                 </div>
-                <span className="text-[11px] text-ivory/45">{formatDateTime(entry.createdAt)}</span>
+                <span className="text-[11px] text-muted">{formatDateTime(entry.createdAt)}</span>
               </div>
               <p className="mt-1 text-xs text-ivory/70">
                 Actor: {entry.actorNickname ?? 'sistema'} · Motivo: {entry.reason ?? 'no informado'}

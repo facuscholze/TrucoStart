@@ -84,7 +84,7 @@ export function LoginView({
         {error && (
           <p
             role="alert"
-            className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger"
+            className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger-strong"
           >
             {error}
           </p>
@@ -94,7 +94,7 @@ export function LoginView({
           {pending ? 'Verificando…' : 'Ingresar al panel'}
         </Button>
 
-        <p className="text-[11px] leading-relaxed text-ivory/45">
+        <p className="text-[11px] leading-relaxed text-muted">
           Sin contraseñas por defecto: el primer administrador se crea por CLI (
           <code className="text-ivory/70">pnpm --filter @truco/api admin:create</code>).
         </p>

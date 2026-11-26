@@ -32,7 +32,7 @@ const env = { ...process.env };
 delete env['VITE_ADMIN_DEMO'];
 
 fs.rmSync(OUT_DIR, { recursive: true, force: true });
-execFileSync('pnpm', ['exec', 'vite', 'build', '--outDir', OUT_DIR, '--emptyOutDir'], {
+execFileSync('corepack', ['pnpm', 'exec', 'vite', 'build', '--outDir', OUT_DIR, '--emptyOutDir'], {
   cwd: APP_DIR,
   env: { ...env, VITE_ADMIN_DEMO: '', NODE_ENV: 'production' },
   stdio: 'pipe',

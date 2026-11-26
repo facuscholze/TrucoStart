@@ -9,6 +9,7 @@ import { DashboardView } from '../src/components/DashboardView.js';
 import { LoginView } from '../src/components/LoginView.js';
 import { ReportDetailView } from '../src/components/ReportDetailView.js';
 import { ReportsView } from '../src/components/ReportsView.js';
+import { ProgressionConfigView } from '../src/components/ProgressionConfigView.js';
 import { UserDetailPanel, UsersView } from '../src/components/UsersView.js';
 import { createDemoClient } from '../src/lib/demo.js';
 
@@ -247,6 +248,35 @@ describe('@truco/admin · panel M7', () => {
     );
     expect(withPii).toContain('laviejaescuela@truco.ar');
     expect(withPii).toContain('Bloqueo permanente');
+  });
+
+  it('expone configuración acotada y reversión compensatoria con motivos obligatorios', async () => {
+    const client = createDemoClient();
+    const config = await client.progressionConfig();
+    const html = renderToStaticMarkup(
+      <ProgressionConfigView
+        config={config}
+        busy={false}
+        onSave={() => undefined}
+        onReverse={() => undefined}
+      />,
+    );
+    expect(html).toContain('Configuración de recompensas');
+    expect(html).toContain('XP reducido por partida con bots');
+    expect(html).toContain('Moneda virtual sin valor económico');
+    expect(html).toContain('Motivo auditado');
+    expect(html).toContain('minLength="10"');
+    expect(html).toContain('Compensar un crédito');
+    expect(html).toContain('No se borran asientos');
+
+    const saved = await client.updateProgressionConfig({
+      config,
+      reason: 'Prueba de configuración auditada',
+    });
+    expect(saved).toEqual({ config, audited: true });
+    expect(
+      await client.reverseWalletTransaction('transaction-id', { reason: 'Crédito erróneo' }),
+    ).toEqual({ transactionId: 'transaction-id', reversed: true });
   });
 
   it('la auditoría muestra actor, motivo y fecha de cada acceso', async () => {

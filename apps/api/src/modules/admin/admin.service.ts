@@ -436,9 +436,10 @@ export class AdminService {
     if (!target) {
       throw new DomainApiException(404, 'NOT_FOUND', 'El jugador reportado ya no existe.');
     }
-    const replayAvailable = report.matchId
-      ? (await this.repo.findMatchReplay(report.matchId)) !== null
-      : false;
+    const matchReplay = report.matchId ? await this.repo.findMatchReplay(report.matchId) : null;
+    const replayAvailable = Boolean(
+      matchReplay && matchReplay.match.endedAt !== null && matchReplay.events.length > 0,
+    );
 
     return {
       report: {

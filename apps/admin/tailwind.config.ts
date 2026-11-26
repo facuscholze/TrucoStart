@@ -9,9 +9,11 @@ const config: Config = {
         cloth: designTokens.colors.clothGreen,
         surface: designTokens.colors.surface,
         ivory: designTokens.colors.textPrimary,
+        muted: designTokens.colors.textMuted,
         gold: designTokens.colors.accentGold,
         sky: designTokens.colors.accentSky,
         danger: designTokens.colors.danger,
+        'danger-strong': designTokens.colors.dangerTextOnSurface,
         success: designTokens.colors.success,
       },
       fontFamily: {

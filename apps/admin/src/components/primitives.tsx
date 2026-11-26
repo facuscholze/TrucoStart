@@ -35,7 +35,7 @@ const TONE_CLASSES: Record<string, string> = {
   neutral: 'bg-ivory/10 text-ivory/85 border-ivory/20',
   sky: 'bg-sky/15 text-sky border-sky/35',
   gold: 'bg-gold/15 text-gold border-gold/40',
-  danger: 'bg-danger/15 text-danger border-danger/40',
+  danger: 'bg-danger/15 text-danger-strong border-danger/40',
   success: 'bg-success/15 text-success border-success/40',
 };
 
@@ -104,7 +104,7 @@ export function Field({
     <label className="block space-y-1">
       <span className="text-xs font-semibold uppercase tracking-wide text-ivory/60">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-ivory/50">{hint}</span>}
+      {hint && <span className="block text-[11px] text-muted">{hint}</span>}
     </label>
   );
 }
@@ -135,16 +135,16 @@ export function StatCard({
     neutral: 'text-ivory',
     sky: 'text-sky',
     gold: 'text-gold',
-    danger: 'text-danger',
+    danger: 'text-danger-strong',
     success: 'text-success',
   };
   return (
     <div className="rounded-2xl border border-ivory/15 bg-surface/60 p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-ivory/55">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</p>
       <p className={`mt-2 font-display text-3xl font-bold ${accent[tone] ?? accent['sky']}`}>
         {value}
       </p>
-      {hint && <p className="mt-1 text-[11px] text-ivory/45">{hint}</p>}
+      {hint && <p className="mt-1 text-[11px] text-muted">{hint}</p>}
     </div>
   );
 }

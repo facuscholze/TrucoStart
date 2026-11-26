@@ -1,4 +1,5 @@
 import { type DynamicModule, Module } from '@nestjs/common';
+import { ProgressionModule } from '../progression/progression.module.js';
 import { AdminAuthController } from './admin-auth.controller.js';
 import { AdminAuthService } from './admin-auth.service.js';
 import { AdminController } from './admin.controller.js';
@@ -31,6 +32,7 @@ export class AdminModule {
   static register(options: AdminModuleOptions = {}): DynamicModule {
     return {
       module: AdminModule,
+      imports: [ProgressionModule],
       controllers: [AdminAuthController, AdminController],
       providers: [
         {

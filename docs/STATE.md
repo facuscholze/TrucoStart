@@ -474,23 +474,26 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 
 ### Errores reales encontrados y corregidos
 
-Los tres aparecieron al ejercitar el sistema, no al escribir pruebas unitarias:
+Los cuatro aparecieron al ejercitar el sistema, no al escribir pruebas unitarias:
 
 1. **`withdraw` prohibido por la regla 13.** La ruta de baja se llamaba `POST /:id/withdraw` y `check-no-real-money` la marcó como endpoint de retiro de dinero. CI lo detectó. La ruta pasó a `/:id/unregister`; el guard no se tocó ni se le agregó una excepción.
 2. **El pase libre regalaba una ronda.** Al jugar un torneo de 7 contra el servicio, la ronda 2 se daba por ganada por un solo jugador. La causa era tratar "lado vacío" (bye) y "lado pendiente" (ronda anterior sin jugar) como lo mismo. Ahora sólo se resuelve el pase libre real.
-3. **Los cruces nunca tenían sala.** `GAME_ROOM_PROVISIONER` estaba inyectado y nunca se llamaba: el cruce quedaba `READY` con `roomId: null` y "mi próxima partida" devolvía `null`. Un torneo no se podía jugar. Ahora se aprovisiona la mesa del cruce, fuera de la transacción del torneo (el repositorio del lobby escribe por el pool y usarlo dentro produciría deadlock).
+3. **El resultado de la mesa no cerraba el cruce.** `completeMatchByGame` estaba implementado, probado e **inalcanzable**: nadie lo llamaba. La partida se persistía con sus premios y su rating, pero el cruce seguía `READY` y la final no se armaba nunca; por eso el E2E de 4 jugadores se quedaba mirando una final `SCHEDULED` para siempre. Lo encontró el E2E, no una prueba de servicio: cada pieza pasaba sola. Ahora el lobby avisa cada partida terminada por un puente (`MatchCompletionBridge`) y torneos cierra su cruce, idempotente por `matchId`.
+4. **Los cruces nunca tenían sala.** `GAME_ROOM_PROVISIONER` estaba inyectado y nunca se llamaba: el cruce quedaba `READY` con `roomId: null` y "mi próxima partida" devolvía `null`. Un torneo no se podía jugar. Ahora se aprovisiona la mesa del cruce, fuera de la transacción del torneo (el repositorio del lobby escribe por el pool y usarlo dentro produciría deadlock).
 
 Además, en el panel: el cliente mandaba `content-type: application/json` en POST sin cuerpo (Fastify lo rechazaba y abrir un cuadro fallaba), el formulario de incidencia quedaba abierto sobre un cruce ya resuelto, cancelación e incidencia compartían el campo de motivo, y un torneo cancelado ofrecía "forzar avance de ronda". En el jugador, la tabla de posiciones decía "Cayó en la ronda —" a los cuatro antes de jugar.
 
 ### Verificación
 
-- `tournaments.spec.ts`: **15 pruebas** sobre PGlite, incluyendo torneo completo de 4, 7, 16 y 64 participantes, concurrencia de inscripciones, no-show, sala aprovisionada, tabla sin eliminaciones inventadas y acceso de staff a torneos privados.
+- **E2E de torneo real (Playwright):** un torneo privado de 4 se crea por HTTP, los 4 jugadores se inscriben y hacen check-in, la llave se lee en pantalla, cada semifinal se juega turno a turno con dos navegadores entrando por el botón de la mesa y marcando el asiento listo, y la final se arma sola con el resultado; el test cierra verificando al campeón. `apps/web/e2e/m10a-tournament.spec.ts`, **1/1 en verde en local (4.9 min) y en el job `Tournament E2E (4 jugadores)` de CI** (run `45853997387`, PostgreSQL 16 y Redis 7 de servicio).
+- `tournaments.spec.ts`: **17 pruebas** sobre PGlite, incluyendo torneo completo de 4, 7, 16 y 64 participantes, concurrencia de inscripciones, no-show, sala aprovisionada, cierre del cruce desde el resultado de la mesa (con idempotencia y sala ajena), tabla sin eliminaciones inventadas y acceso de staff a torneos privados.
 - `packages/shared`: 157 pruebas, entre ellas 14 de topología que verifican todos colocados una vez, byes a las mejores siembras, nadie contra sí mismo, N−1 y 2N−2 cruces para cada tamaño de 2 a 64, y campeón que nunca perdió.
 - Web: 72 pruebas; admin: 18.
 - `format:check`, lint, typecheck y `check-no-real-money` en verde. Migraciones desde cero verificadas sobre PGlite.
 - Medición en navegador: `/torneos` a 320, 360 y 1200 px sin desborde del documento.
 - Recorrido real: torneo de 4 creado por HTTP, arrancado por el barrido, cuadro armado con salas, incidencia resuelta desde el panel y torneo cancelado con motivo auditado.
-- **PostgreSQL 16 y Redis 7 reales:** verificados sólo por CI remoto (el sandbox no tiene Docker). El job de calidad y el de Playwright pasaron en verde para cada commit de M10a.
+- **PostgreSQL 16 y Redis 7 reales:** verificados sólo por CI remoto (el sandbox no tiene Docker). El job de calidad, el de Playwright y el de `Tournament E2E` pasaron en verde para cada commit de M10a.
+- El detalle de torneo se refresca cada 5 s mientras el torneo está vivo (sin solapar pedidos y sin borrar lo visible si un refresco falla): sin eso la llave avanzaba en el servidor y no en la pantalla.
 
 ### Lo que queda fuera de alcance (explícito)
 

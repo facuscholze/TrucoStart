@@ -235,11 +235,46 @@ jobs:
         run: pnpm --filter @truco/web exec playwright install --with-deps chromium
 
       # Los specs arrancan API y preview con `webServer` del config de Playwright.
+      # La salida se captura y, si el paso falla, se publica como anotación del
+      # check-run: los logs del job no son legibles desde todas partes, las
+      # anotaciones sí. Sin esto, un fallo sólo dice "exit code 1".
       - name: Accessibility audit (WCAG 2.2 A/AA, 360 and 1200)
-        run: pnpm --filter @truco/web audit:a11y
+        run: |
+          set -o pipefail
+          pnpm --filter @truco/web audit:a11y 2>&1 | tee /tmp/a11y.log
+        # En fallo, publica el final del log como anotación (escapando saltos de línea).
+        continue-on-error: false
+
+      - name: Publish a11y failure details
+        if: failure()
+        run: |
+          message=$(tail -80 /tmp/a11y.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Accessibility audit failed::${message}"
+          exit 1
 
       - name: Responsive overflow audit (breakpoints)
-        run: pnpm --filter @truco/web audit:responsive
+        run: |
+          set -o pipefail
+          pnpm --filter @truco/web audit:responsive 2>&1 | tee /tmp/responsive.log
+
+      - name: Publish responsive failure details
+        if: failure()
+        run: |
+          message=$(tail -80 /tmp/responsive.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Responsive audit failed::${message}"
+          exit 1
+
+      # El stack E2E imprime el motivo real de un arranque fallido; sin esto se
+      # pierde y sólo queda "Process from config.webServer was not able to start".
+      - name: Publish E2E stack logs on failure
+        if: failure()
+        run: |
+          for f in /tmp/a11y.log /tmp/responsive.log; do
+            if [ -f "$f" ]; then
+              echo "===== $f ====="
+              grep -iE 'error|fatal|webserver|exit' "$f" | tail -20 || true
+            fi
+          done
 
       - name: Upload Playwright traces on failure
         if: failure()

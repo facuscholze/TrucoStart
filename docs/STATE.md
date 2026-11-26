@@ -1,6 +1,7 @@
 # Estado del Proyecto ("Mesa de Truco")
 
-- **Última actualización:** 2026-11-19
+- **Última actualización:** 2026-11-26
+- **Tanda de pulido UX (2026-11-26):** sobre la base M0–M9c se implementaron las mejoras 1, 2, 3, 6, 7 y 9 de `docs/UX_AUDIT_M0-M9C.md` (acción principal móvil y práctica diferida por umbral, señal de continuidad en la barra inferior, encabezado de escritorio en una sola fila, notificaciones y metadatos del ranking legibles en 360 px, y revisión de casos admin con contexto fijo e identificadores legibles). Las mejoras 5 y 8 quedaron diferidas con criterio de medición con jugadores reales en `docs/BACKLOG.md`. Cierre medido con `pnpm --filter @truco/web measure:ux` (CLS por ruta y ancho, filas de encabezado, pista de la barra), axe WCAG 2.2 A/AA sin hallazgos y auditoría responsive sin overflow. Detalle en ADR-028 y `docs/CHANGELOG.md`. **Etapa 3 no iniciada.**
 - **Etapa activa:** Etapa 2 — M9c (progresión persistente y economía virtual simbólica), sobre las capacidades sociales M9a y competitivas M9b.
 - **Módulo actual:** M9c implementado en esta rama. Los CI anotados en los apartados M9a/M9b/M9c corresponden a sus tandas históricas y no certifican el conjunto de commits de esta auditoría; para el cierre, consultar en el reporte el CI del SHA final empujado. El gate de tests falla si falta PostgreSQL o Redis y la ruta DB no permite fallback a PGlite. M8a–M8d siguen cerrados en código con dependencias de infraestructura real pendientes. El detalle de M9a/M9b/M9c se registra al final de este documento. _(M8b: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
 

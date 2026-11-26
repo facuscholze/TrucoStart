@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check:bundle": "node scripts/check-prod-bundle.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "audit:a11y": "playwright test e2e/accessibility-audit.spec.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.8",

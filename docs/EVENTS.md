@@ -1,6 +1,6 @@
 # Protocolo de Eventos WebSocket (`Socket.IO`) — `@truco/game-server`
 
-> **Estado:** Implementado y verificado en **M2** (`@truco/shared` + `@truco/game-server`).
+> **Estado:** eventos de juego implementados y verificados en **M2** (`@truco/shared` + `@truco/game-server`); canal social aislado implementado en **M9a** (§8.1); ciclo durable de rating competitivo M9b (§9.1); proyección de progresión persistente M9c (§9.2), sin broadcasts públicos nuevos.
 
 ## 1. Transporte y Autenticación de Handshake
 
@@ -227,11 +227,52 @@ El tráfico en tiempo real del lobby corre en un namespace Socket.IO **estrictam
 
 ---
 
+### 8.1 Canal social aislado de `/lobby` — M9a
+
+La PWA puede solicitar el mismo namespace con el ticket single-use `POST /v1/auth/ws-ticket` y `auth: { token, purpose: 'social' }`. El socket se une únicamente a la sala privada `user:<userId>`: no recibe `lobby.snapshot`, `lobby.tableUpsert` ni `lobby.tableRemoved`. Estos eventos sociales son eventos Socket.IO tipados directamente (no el envelope de juego) y no contienen estado de mesa ni datos de cartas.
+
+| Evento                | Dirección / audiencia                            | Payload y garantía                                                                                                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `social.notification` | API → sockets de `user:<recipientId>` únicamente | `SocialNotificationItem` validado: `id`, `type`, actor opcional, referencia, mesa y fechas de lectura. Tipos: solicitudes, invitaciones a mesa/desafíos y sus resultados. Nunca se emite al namespace público.                                                            |
+| `social.presence`     | API → amigos elegibles o audiencia `ALL`         | `{ userId, status: ONLINE\|IN_GAME\|OFFLINE, visible, observedAt }`. `ALL` excluye al propio usuario y a cualquier usuario bloqueado por cualquiera de las dos partes; `FRIENDS` se limita a amistades aceptadas y `NOBODY` limpia el estado previo con `visible: false`. |
+| `social.ping`         | API → cada socket conectado                      | Señal cada 15 s para sostener la presencia.                                                                                                                                                                                                                               |
+| `social.heartbeat`    | Cliente → API                                    | Renueva el lease del socket autenticado; la presencia expira tras 45 s sin heartbeat.                                                                                                                                                                                     |
+| `social.pong`         | API → socket emisor                              | Confirma conexión/heartbeat con `serverAt`.                                                                                                                                                                                                                               |
+
+Las notificaciones se guardan por usuario y se leen con `/v1/social/notifications`; la emisión WebSocket es sólo una señal de actualización. Cambiar la visibilidad de presencia limpia de inmediato la caché de los destinatarios previos. Los bloqueos prevalecen incluso cuando la persona elige presencia `ALL`.
+
 ## 9. Eventos Asíncronos de Ciclo de Vida (`apps/game-server -> BullMQ -> apps/api`)
 
 `apps/game-server` **nunca escribe en PostgreSQL** (`ADR-017`). Publica eventos validados con `MatchLifecycleEventSchema` en la cola BullMQ `truco-match-lifecycle` consumidos por `MatchPersistenceService` en `apps/api`:
 
-1. `match.started`: marca `tables.status = 'IN_GAME'` y actualiza `/lobby` si la mesa es pública.
+1. `match.started` (mesas normales): marca `tables.status = 'IN_GAME'` y actualiza `/lobby` si la mesa es pública. La práctica no emite este evento y conserva la mesa privada fuera del lobby.
 2. `table.seatVacated`: libera asiento inactivo en `WAITING` (transfiriendo propiedad o cerrando mesa huérfana).
-3. `match.completed`: ejecuta una **única transacción PostgreSQL** idempotente por `matchId` que inserta `matches`, `match_players` y `match_events`, marca `tables.status = 'FINISHED'` y desactiva `table_seats.is_active` para liberar a todos los participantes.
+3. `match.completed`: ejecuta una **única transacción PostgreSQL** idempotente por `matchId` que inserta `matches`, `match_players` y `match_events` y desactiva `table_seats.is_active`. En mesas normales también marca `tables.status = 'FINISHED'`; en práctica conserva el estado privado/efímero para permitir revancha, pero libera el candado de mesa activa.
 4. `room.expired`: el `game-server` destruyó la sala por inactividad (`IDLE_ROOM_TTL_MS`, `10 min` por defecto, barrido cada `IDLE_ROOM_SWEEP_MS`). `apps/api` deja la fila consistente: `WAITING`/`IN_GAME` -> `CLOSED` y `FINISHED` se conserva, ambos con `closedReason = 'IDLE_TIMEOUT'`, desactivando además todos los asientos y removiendo la mesa del `/lobby`. Una sala con al menos un socket conectado nunca se barre.
+
+Una partida de práctica finalizada sí emite `match.completed` con `practice: true` y `hasBots: true` para persistir el resultado y procesar progresión reducida. Como los asientos bot no se incluyen en `players`, el contrato admite un humano en una práctica; si todos los asientos son bots al terminar, no se emite un resultado sin participantes humanos.
+
+### 9.1 Ciclo post-partida de ratings competitivos — M9b
+
+M9b no agrega eventos WebSocket públicos: el cálculo usa el mismo ciclo de vida durable `match.completed` y la API REST documentada en `API.md`.
+
+1. `match.started` fija `tables.competitive_season_id` bajo bloqueo transaccional. Si `match.completed` llega primero, la API captura la temporada activa dentro de la transacción de persistencia; un `match.started` atrasado no reabre una partida ya finalizada.
+2. Después de confirmar `matches` y `match_players`, `MatchPersistenceService` llama `RatingsService.processMatch(matchId)`. El trabajo vuelve a leer la partida desde PostgreSQL y sólo califica encuentros terminados de una mesa competitiva, con composición humana válida y sin bots. Casuales, práctica, partidas con bots o asientos inválidos quedan excluidos.
+3. El trabajo bloquea los perfiles en orden canónico y calcula Glicko-2 por `(seasonId, mode, userId)`. En 2v2 cada jugador compara por separado con los dos rivales; no se divide ni se copia un delta de equipo. Un abandono se registra como derrota.
+4. Una transacción escribe perfiles, deltas por jugador, agregados semanales/mensuales, contadores de rivales, evidencia antiabuso, `rating_jobs(match_id)` y `rating_redis_outbox(match_id)` juntos. La clave primaria de `rating_jobs` hace idempotente el procesamiento por partida.
+5. El outbox proyecta puntuaciones absolutas a los sorted sets Redis global/semanal/mensual. Si Redis no está disponible, el outbox queda pendiente; el mantenimiento de la API vuelve a intentar proyectarlo cada 30 segundos. PostgreSQL conserva la fuente de verdad y el ranking puede reconstruirse; las lecturas también tienen fallback a PostgreSQL.
+
+Los reintentos del consumidor de `match.completed` son seguros: primero se confirma la partida; un fallo posterior no duplica la actualización de rating y la proyección pendiente se reintenta desde el outbox durable.
+
+### 9.2 Progresión y economía simbólica — M9c
+
+M9c no agrega tipos de envelope ni broadcasts WebSocket públicos. La progresión se proyecta del lado de `apps/api` a partir de datos durables:
+
+1. `match.completed` persiste primero `matches`, `match_players` y `match_events`; `MatchPersistenceService` llama después a `ProgressionService.processCompletedMatch(matchId)`. El servicio vuelve a leer la partida y los participantes desde PostgreSQL, por lo que ignora progreso enviado por clientes.
+2. Un recibo único `(user_id, idempotency_key)` en `progression_xp_entries`, junto con las claves únicas del libro mayor, logros, misiones y notificaciones, hace seguros los reintentos at-least-once. XP, perfil y recompensas se aplican en transacción.
+3. `game.cardPlayed` ya persistido alimenta los contadores de cartas. El guardado de `tutorial_progress` sincroniza los logros tutoriales a partir de IDs de lecciones permitidos por el esquema compartido.
+4. Los topes diarios separan partidas humanas, bots/práctica y bonos; las asignaciones de misión son deterministas por usuario y período UTC. Las misiones se reclaman por REST y sólo se conceden una vez.
+5. Notificaciones y saldos se leen por `GET /v1/me/progression`; leer una notificación usa `POST /v1/me/progression/notifications/:id/read`. La conexión social existente no envía XP, saldo ni payload de progresión a salas públicas.
+6. Práctica y partidas con bots pueden dar recompensas reducidas mediante `botMatchXp`, `botDailyXpCap`, `botMatchCoins` y `botDailyCoinCap`. `matches.is_practice` excluye la práctica del historial/estadísticas públicas, y ni la práctica ni los bots califican en Glicko-2.
+
+`VIRTUAL_COIN` sólo desbloquea cosméticos visuales; las restricciones de PostgreSQL fuerzan `has_economic_value=false`, `player_transfers_enabled=false` y `money_purchases_enabled=false`. El saldo es la suma del libro mayor inmutable: correcciones administrativas agregan un asiento compensatorio con motivo, actor, sesión, IP y auditoría, nunca editan/eliminan el original. Los cosméticos tampoco afectan reglas ni matchmaking.

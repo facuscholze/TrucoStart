@@ -60,11 +60,23 @@ export const screenMessagesEsAr = {
     machineCta: 'Jugar contra la máquina',
     machineCtaBusy: 'Preparando la mesa…',
     machineBotNote: 'Los rivales son bots y están identificados como tales en la mesa.',
+    playNowTitle: 'Jugar ahora',
+    playNowCta: 'Jugar ahora · buscar rival 1 vs 1',
+    playNowSearchingCta: 'Buscando rival humano…',
+    playNowLead: 'Emparejamiento automático con personas a 30 puntos.',
+    playNowWaitingHint: (secondsLeft: number) =>
+      secondsLeft > 0
+        ? `Seguimos buscando. En ${secondsLeft} s te ofrecemos practicar contra la máquina.`
+        : 'Podés practicar contra la máquina mientras seguimos buscando.',
+    playNowSecondaryHint: (seconds: number) =>
+      `Sin rival a la vista, a los ${seconds} segundos te ofrecemos practicar contra la máquina.`,
+    moreOptionsTitle: 'Más formas de jugar',
     quickPlaySectionTitle: 'Partida rápida',
     quickPlay1v1Title: 'Buscar rival 1 vs 1',
     quickPlay1v1Sub: 'Emparejamiento automático a 30 puntos',
     quickPlay2v2Title: 'Buscar mesa 2 vs 2',
     quickPlay2v2Sub: 'Por parejas con señas a 30 puntos',
+    practiceSecondaryBadge: 'Práctica · no suma puntaje',
     competitiveTitle: 'Cola competitiva',
     competitiveBody:
       'Partidas entre personas, puntaje competitivo y emparejamiento por nivel. Las prácticas y partidas con bots no suman al puntaje.',
@@ -180,6 +192,16 @@ export const screenMessagesEsAr = {
   },
   lobby: {
     title: 'Lobby en tiempo real',
+    loopLeadTitle: 'Para jugar con personas',
+    loopLeadBody:
+      'Partida rápida o mesas abiertas con humanos. La práctica contra la máquina está al final.',
+    tablesHeading: 'Mesas con personas',
+    tablesCount: (count: number) => `${count} mesa(s) abierta(s) con humanos`,
+    tablesEmptyHint:
+      'Mientras tanto podés sumarte a la cola rápida de arriba o armar tu propia mesa con el formulario de abajo.',
+    practiceBlockTitle: 'Practicar contra la máquina',
+    practiceBlockBody:
+      'Modo aparte: arranca al toque y no cuenta para estadísticas ni rankings. Los rivales son bots identificados en la mesa.',
     subtitle: 'Las mesas públicas se actualizan al instante. Filtrá por modalidad o armá la tuya.',
     wsConnectedBadge: 'En vivo',
     wsReconnectingBadge: 'Reconectando canal…',
@@ -257,6 +279,12 @@ export const screenMessagesEsAr = {
     enterTableCanvasCta: 'Ir al paño en vivo',
     leaveTableCta: 'Abandonar mesa',
     closeTableOwnerCta: 'Cerrar mesa para todos',
+  },
+  practiceOffer: {
+    title: '¿Seguimos esperando o practicamos?',
+    body: 'Ya pasó un rato buscando rival humano. Podés practicar contra la máquina ahora mismo; tu búsqueda sigue activa y la podés cancelar cuando quieras.',
+    cta: 'Practicar contra la máquina mientras espero',
+    ctaBusy: 'Preparando la mesa…',
   },
   social: {
     title: 'Amigos y notificaciones',

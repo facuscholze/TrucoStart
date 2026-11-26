@@ -6,7 +6,9 @@ import type {
 import { Badge, CallButton, Toast } from '@truco/ui';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
+import { PracticeOfferNotice } from '../practice/PracticeOfferNotice.js';
 import { PracticeSetupPanel } from '../practice/PracticeSetupPanel.js';
+import { isHumanSearchActive } from '../practice/search-fallback.js';
 import {
   cancelMatchmakingRequest,
   createTableRequest,
@@ -34,6 +36,15 @@ export function LobbyScreen({
 }: LobbyScreenProps) {
   const [filters, setFilters] = useState<PublicLobbyFilters>({});
   const [queueState, setQueueState] = useState<MatchmakingQueueStatusResponse>({ status: 'IDLE' });
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const isSearching = isHumanSearchActive(queueState);
+
+  useEffect(() => {
+    if (!isSearching) return;
+    setNowMs(Date.now());
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [isSearching]);
 
   // Formulario de creación de mesa
   const [createMode, setCreateMode] = useState<'1v1' | '2v2'>('1v1');
@@ -259,23 +270,24 @@ export function LobbyScreen({
         <Toast message={actionError} tone="danger" onDismiss={() => setActionError(null)} />
       )}
 
-      <div className="grid grid-cols-1 desktop:grid-cols-12 gap-5 items-start">
-        {/* Columna izquierda: Partida Rápida + Contra la máquina + Crear Mesa + Unirse por código */}
-        <div className="desktop:col-span-5 space-y-5">
-          <PracticeSetupPanel
-            currentUserId={currentUser?.id ?? null}
-            onSessionChanged={(userId) => {
-              if (currentUser) onSessionChanged({ ...currentUser, id: userId });
-            }}
-            onNavigate={onNavigate}
-          />
-          {/* Matchmaking */}
-          <section className="rounded-2xl bg-surface border border-gold/35 p-4 tablet:p-5 space-y-3 shadow-lg">
-            <h2 className="font-display text-lg font-bold text-gold">
-              {messagesEsAr.lobby.quickMatchTitle}
-            </h2>
+      {/* P2 del UX audit: primero lo que lleva a jugar con personas. */}
+      <section aria-labelledby="lobby-humans-heading" className="space-y-3">
+        <div className="space-y-1">
+          <h2
+            id="lobby-humans-heading"
+            className="font-display text-xl tablet:text-2xl font-bold text-ivory"
+          >
+            {messagesEsAr.lobby.loopLeadTitle}
+          </h2>
+        </div>
+        {/* Matchmaking */}
+        <section className="rounded-2xl bg-surface border border-gold/35 p-4 tablet:p-5 space-y-3 shadow-lg">
+          <h2 className="font-display text-lg font-bold text-gold">
+            {messagesEsAr.lobby.quickMatchTitle}
+          </h2>
 
-            {queueState.status === 'QUEUED' ? (
+          {queueState.status === 'QUEUED' ? (
+            <div className="space-y-2.5">
               <div
                 role="status"
                 aria-live="polite"
@@ -292,26 +304,227 @@ export function LobbyScreen({
                   {messagesEsAr.lobby.cancelQueueCta}
                 </CallButton>
               </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2.5">
-                <CallButton
-                  tone="truco"
-                  disabled={busyAction}
-                  onClick={() => void handleEnqueue('1v1')}
-                >
-                  {messagesEsAr.lobby.queue1v1Cta}
-                </CallButton>
-                <CallButton
-                  tone="envido"
-                  disabled={busyAction}
-                  onClick={() => void handleEnqueue('2v2')}
-                >
-                  {messagesEsAr.lobby.queue2v2Cta}
-                </CallButton>
-              </div>
-            )}
-          </section>
 
+              <PracticeOfferNotice
+                queue={queueState}
+                nowMs={nowMs}
+                practiceBusy={busyAction}
+                onStartPractice={() =>
+                  document.getElementById('machine-heading')?.scrollIntoView?.()
+                }
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2.5">
+              <CallButton
+                tone="truco"
+                disabled={busyAction}
+                onClick={() => void handleEnqueue('1v1')}
+              >
+                {messagesEsAr.lobby.queue1v1Cta}
+              </CallButton>
+              <CallButton
+                tone="envido"
+                disabled={busyAction}
+                onClick={() => void handleEnqueue('2v2')}
+              >
+                {messagesEsAr.lobby.queue2v2Cta}
+              </CallButton>
+            </div>
+          )}
+        </section>
+      </section>
+
+      <div className="grid grid-cols-1 desktop:grid-cols-12 gap-5 items-start">
+        {/* Mesas con personas: el contenido principal del lobby. */}
+        <section
+          aria-labelledby="lobby-tables-heading"
+          className="desktop:col-span-7 rounded-2xl bg-surface border border-ivory/20 p-4 tablet:p-5 space-y-4 shadow-lg"
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 id="lobby-tables-heading" className="font-display text-lg font-bold text-ivory">
+              {messagesEsAr.lobby.tablesHeading}
+            </h2>
+            <button
+              type="button"
+              onClick={() => void reloadHttpTables()}
+              className="min-h-[44px] px-3 rounded-xl bg-elevated border border-ivory/20 text-xs font-semibold text-ivory"
+            >
+              {messagesEsAr.lobby.refreshListCta}
+            </button>
+          </div>
+
+          {/* Barra de filtros */}
+          <div className="grid grid-cols-2 tablet:grid-cols-4 gap-2">
+            <select
+              aria-label={messagesEsAr.lobby.modeLabel}
+              value={filters.mode ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilters((prev) => {
+                  const next = { ...prev };
+                  if (v === '1v1' || v === '2v2') next.mode = v;
+                  else delete next.mode;
+                  return next;
+                });
+              }}
+              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
+            >
+              <option value="">{messagesEsAr.lobby.filterAllModes}</option>
+              <option value="1v1">1 vs 1</option>
+              <option value="2v2">2 vs 2</option>
+            </select>
+
+            <select
+              aria-label={messagesEsAr.lobby.pointsLabel}
+              value={filters.targetScore ? String(filters.targetScore) : ''}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setFilters((prev) => {
+                  const next = { ...prev };
+                  if (v === 15 || v === 30) next.targetScore = v;
+                  else delete next.targetScore;
+                  return next;
+                });
+              }}
+              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
+            >
+              <option value="">{messagesEsAr.lobby.filterAllScores}</option>
+              <option value="15">A 15</option>
+              <option value="30">A 30</option>
+            </select>
+
+            <select
+              aria-label={messagesEsAr.lobby.florLabel}
+              value={filters.flor === undefined ? '' : String(filters.flor)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilters((prev) => {
+                  const next = { ...prev };
+                  if (v === 'true') next.flor = true;
+                  else if (v === 'false') next.flor = false;
+                  else delete next.flor;
+                  return next;
+                });
+              }}
+              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
+            >
+              <option value="">{messagesEsAr.lobby.filterAllFlor}</option>
+              <option value="true">{messagesEsAr.lobby.withFlor}</option>
+              <option value="false">{messagesEsAr.lobby.withoutFlor}</option>
+            </select>
+
+            <select
+              aria-label="Estado de la mesa"
+              value={filters.status ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilters((prev) => {
+                  const next = { ...prev };
+                  if (v === 'WAITING' || v === 'IN_GAME') next.status = v;
+                  else delete next.status;
+                  return next;
+                });
+              }}
+              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
+            >
+              <option value="">{messagesEsAr.lobby.filterAllStatuses}</option>
+              <option value="WAITING">{messagesEsAr.lobby.filterWaitingOnly}</option>
+              <option value="IN_GAME">{messagesEsAr.lobby.filterInGameOnly}</option>
+            </select>
+          </div>
+
+          {/* Estados de carga, error y vacío */}
+          {!loading && !error && tables.length > 0 && (
+            <p className="text-xs text-muted" role="status">
+              {messagesEsAr.lobby.tablesCount(tables.length)}
+            </p>
+          )}
+
+          {loading ? (
+            <div
+              role="status"
+              className="min-h-[12rem] rounded-xl bg-elevated/70 border border-ivory/15 p-8 text-center text-sm text-muted"
+            >
+              {messagesEsAr.lobby.loadingTables}
+            </div>
+          ) : error ? (
+            <div
+              role="alert"
+              className="rounded-xl bg-elevated border border-danger p-5 text-center space-y-3"
+            >
+              <p className="text-sm font-semibold text-ivory">{error}</p>
+              <CallButton tone="truco" onClick={() => void reloadHttpTables()}>
+                {messagesEsAr.lobby.refreshListCta}
+              </CallButton>
+            </div>
+          ) : tables.length === 0 ? (
+            <div className="rounded-xl bg-elevated/65 border border-ivory/15 p-7 text-center space-y-3">
+              <h3 className="font-display text-lg font-bold text-ivory">
+                {messagesEsAr.lobby.emptyTablesTitle}
+              </h3>
+              <p className="text-xs text-muted max-w-md mx-auto leading-relaxed">
+                {messagesEsAr.lobby.emptyTablesBody}
+              </p>
+              <p className="text-xs text-ivory/85 max-w-md mx-auto leading-relaxed">
+                {messagesEsAr.lobby.tablesEmptyHint}
+              </p>
+              {hasActiveFilters && (
+                <div className="pt-1">
+                  <CallButton tone="neutral" onClick={() => setFilters({})}>
+                    {messagesEsAr.lobby.clearFiltersCta}
+                  </CallButton>
+                </div>
+              )}
+            </div>
+          ) : (
+            <ul className="space-y-3 min-h-[12rem]">
+              {tables.map((t) => {
+                const isJoinable = t.status === 'WAITING' && t.occupiedSeats < t.maxSeats;
+                return (
+                  <li
+                    key={t.id}
+                    className="rounded-xl bg-elevated border border-ivory/20 p-4 flex items-center justify-between gap-3 flex-wrap"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="gold">{t.mode}</Badge>
+                        <Badge variant="sky">{`A ${t.targetScore}`}</Badge>
+                        <Badge variant={t.flor ? 'success' : 'neutral'}>
+                          {t.flor ? messagesEsAr.lobby.withFlor : messagesEsAr.lobby.withoutFlor}
+                        </Badge>
+                        <Badge variant={t.status === 'WAITING' ? 'success' : 'neutral'}>
+                          {t.status === 'WAITING'
+                            ? messagesEsAr.lobby.statusWaiting
+                            : messagesEsAr.lobby.statusInGame}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted">
+                        {messagesEsAr.lobby.tableOwnerPrefix}{' '}
+                        <strong className="text-ivory">{t.ownerNickname}</strong> ·{' '}
+                        <span className="tabular-nums">
+                          {messagesEsAr.lobby.seatsCountLabel(t.occupiedSeats, t.maxSeats)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <CallButton
+                      tone={isJoinable ? 'accept' : 'neutral'}
+                      disabled={busyAction || !isJoinable}
+                      onClick={() => void handleJoinPublic(t.id)}
+                    >
+                      {isJoinable
+                        ? messagesEsAr.lobby.joinPublicTableCta
+                        : messagesEsAr.lobby.tableFullLabel}
+                    </CallButton>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+        {/* Ingreso por código y creación de mesa: acciones secundarias del lobby. */}
+        <div className="desktop:col-span-5 space-y-5">
           {/* Unirse con código o enlace */}
           <section className="rounded-2xl bg-surface border border-ivory/20 p-4 tablet:p-5 space-y-3">
             <h2 className="font-display text-base font-bold text-ivory">
@@ -434,183 +647,25 @@ export function LobbyScreen({
             </button>
           </form>
         </div>
-
-        {/* Columna derecha: Filtros y Mesas públicas en tiempo real */}
-        <section className="desktop:col-span-7 rounded-2xl bg-surface border border-ivory/20 p-4 tablet:p-5 space-y-4 shadow-lg">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h2 className="font-display text-lg font-bold text-ivory">
-              {messagesEsAr.lobby.filtersTitle}
-            </h2>
-            <button
-              type="button"
-              onClick={() => void reloadHttpTables()}
-              className="min-h-[44px] px-3 rounded-xl bg-elevated border border-ivory/20 text-xs font-semibold text-ivory"
-            >
-              {messagesEsAr.lobby.refreshListCta}
-            </button>
-          </div>
-
-          {/* Barra de filtros */}
-          <div className="grid grid-cols-2 tablet:grid-cols-4 gap-2">
-            <select
-              aria-label={messagesEsAr.lobby.modeLabel}
-              value={filters.mode ?? ''}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFilters((prev) => {
-                  const next = { ...prev };
-                  if (v === '1v1' || v === '2v2') next.mode = v;
-                  else delete next.mode;
-                  return next;
-                });
-              }}
-              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
-            >
-              <option value="">{messagesEsAr.lobby.filterAllModes}</option>
-              <option value="1v1">1 vs 1</option>
-              <option value="2v2">2 vs 2</option>
-            </select>
-
-            <select
-              aria-label={messagesEsAr.lobby.pointsLabel}
-              value={filters.targetScore ? String(filters.targetScore) : ''}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setFilters((prev) => {
-                  const next = { ...prev };
-                  if (v === 15 || v === 30) next.targetScore = v;
-                  else delete next.targetScore;
-                  return next;
-                });
-              }}
-              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
-            >
-              <option value="">{messagesEsAr.lobby.filterAllScores}</option>
-              <option value="15">A 15</option>
-              <option value="30">A 30</option>
-            </select>
-
-            <select
-              aria-label={messagesEsAr.lobby.florLabel}
-              value={filters.flor === undefined ? '' : String(filters.flor)}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFilters((prev) => {
-                  const next = { ...prev };
-                  if (v === 'true') next.flor = true;
-                  else if (v === 'false') next.flor = false;
-                  else delete next.flor;
-                  return next;
-                });
-              }}
-              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
-            >
-              <option value="">{messagesEsAr.lobby.filterAllFlor}</option>
-              <option value="true">{messagesEsAr.lobby.withFlor}</option>
-              <option value="false">{messagesEsAr.lobby.withoutFlor}</option>
-            </select>
-
-            <select
-              aria-label="Estado de la mesa"
-              value={filters.status ?? ''}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFilters((prev) => {
-                  const next = { ...prev };
-                  if (v === 'WAITING' || v === 'IN_GAME') next.status = v;
-                  else delete next.status;
-                  return next;
-                });
-              }}
-              className="min-h-[44px] rounded-xl bg-elevated border border-ivory/20 px-2.5 text-xs font-semibold text-ivory"
-            >
-              <option value="">{messagesEsAr.lobby.filterAllStatuses}</option>
-              <option value="WAITING">{messagesEsAr.lobby.filterWaitingOnly}</option>
-              <option value="IN_GAME">{messagesEsAr.lobby.filterInGameOnly}</option>
-            </select>
-          </div>
-
-          {/* Estados de carga, error y vacío */}
-          {loading ? (
-            <div
-              role="status"
-              className="rounded-xl bg-elevated/70 border border-ivory/15 p-8 text-center text-sm text-muted"
-            >
-              {messagesEsAr.lobby.loadingTables}
-            </div>
-          ) : error ? (
-            <div
-              role="alert"
-              className="rounded-xl bg-elevated border border-danger p-5 text-center space-y-3"
-            >
-              <p className="text-sm font-semibold text-ivory">{error}</p>
-              <CallButton tone="truco" onClick={() => void reloadHttpTables()}>
-                {messagesEsAr.lobby.refreshListCta}
-              </CallButton>
-            </div>
-          ) : tables.length === 0 ? (
-            <div className="rounded-xl bg-elevated/65 border border-ivory/15 p-7 text-center space-y-3">
-              <h3 className="font-display text-lg font-bold text-ivory">
-                {messagesEsAr.lobby.emptyTablesTitle}
-              </h3>
-              <p className="text-xs text-muted max-w-md mx-auto leading-relaxed">
-                {messagesEsAr.lobby.emptyTablesBody}
-              </p>
-              {hasActiveFilters && (
-                <div className="pt-1">
-                  <CallButton tone="neutral" onClick={() => setFilters({})}>
-                    {messagesEsAr.lobby.clearFiltersCta}
-                  </CallButton>
-                </div>
-              )}
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {tables.map((t) => {
-                const isJoinable = t.status === 'WAITING' && t.occupiedSeats < t.maxSeats;
-                return (
-                  <li
-                    key={t.id}
-                    className="rounded-xl bg-elevated border border-ivory/20 p-4 flex items-center justify-between gap-3 flex-wrap"
-                  >
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="gold">{t.mode}</Badge>
-                        <Badge variant="sky">{`A ${t.targetScore}`}</Badge>
-                        <Badge variant={t.flor ? 'success' : 'neutral'}>
-                          {t.flor ? messagesEsAr.lobby.withFlor : messagesEsAr.lobby.withoutFlor}
-                        </Badge>
-                        <Badge variant={t.status === 'WAITING' ? 'success' : 'neutral'}>
-                          {t.status === 'WAITING'
-                            ? messagesEsAr.lobby.statusWaiting
-                            : messagesEsAr.lobby.statusInGame}
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted">
-                        {messagesEsAr.lobby.tableOwnerPrefix}{' '}
-                        <strong className="text-ivory">{t.ownerNickname}</strong> ·{' '}
-                        <span className="tabular-nums">
-                          {messagesEsAr.lobby.seatsCountLabel(t.occupiedSeats, t.maxSeats)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <CallButton
-                      tone={isJoinable ? 'accept' : 'neutral'}
-                      disabled={busyAction || !isJoinable}
-                      onClick={() => void handleJoinPublic(t.id)}
-                    >
-                      {isJoinable
-                        ? messagesEsAr.lobby.joinPublicTableCta
-                        : messagesEsAr.lobby.tableFullLabel}
-                    </CallButton>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
       </div>
+
+      {/* Práctica: bloque aparte y secundario, después de las mesas con personas. */}
+      <section aria-labelledby="lobby-practice-heading" className="space-y-2">
+        <h2
+          id="lobby-practice-heading"
+          className="font-display text-lg tablet:text-xl font-bold text-ivory"
+        >
+          {messagesEsAr.lobby.practiceBlockTitle}
+        </h2>
+        <p className="text-xs leading-relaxed text-muted">{messagesEsAr.lobby.practiceBlockBody}</p>
+        <PracticeSetupPanel
+          currentUserId={currentUser?.id ?? null}
+          onSessionChanged={(userId) => {
+            if (currentUser) onSessionChanged({ ...currentUser, id: userId });
+          }}
+          onNavigate={onNavigate}
+        />
+      </section>
     </div>
   );
 }

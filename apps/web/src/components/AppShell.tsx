@@ -77,11 +77,11 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
   return (
     <div className="min-h-screen bg-cloth text-ivory flex flex-col">
       <header className="sticky top-0 z-30 bg-surface/95 backdrop-blur border-b border-gold/30 px-3 tablet:px-6 py-2">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap">
+        <div className="max-w-6xl mx-auto flex flex-wrap tablet:flex-nowrap items-center justify-between gap-3 tablet:gap-2">
           <button
             type="button"
             onClick={() => onNavigate('/')}
-            className="min-h-[44px] inline-flex items-center gap-2.5 text-left rounded-xl px-2 hover:bg-elevated/70 transition-colors"
+            className="min-h-[44px] min-w-0 inline-flex items-center gap-2.5 text-left rounded-xl px-2 hover:bg-elevated/70 transition-colors"
           >
             <span
               aria-hidden="true"
@@ -89,14 +89,14 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
             >
               1E
             </span>
-            <span className="font-display text-lg tablet:text-xl font-bold text-ivory">
+            <span className="font-display text-lg tablet:text-xl font-bold text-ivory truncate">
               {appName}
             </span>
           </button>
 
           <nav
             aria-label={messagesEsAr.nav.mainAria}
-            className="hidden tablet:flex items-center gap-1.5"
+            className="hidden tablet:flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"
           >
             {navItems.map((item) => {
               const active = activeSection === item.id;
@@ -106,7 +106,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
                   type="button"
                   aria-current={active ? 'page' : undefined}
                   onClick={() => onNavigate(item.path)}
-                  className={`min-h-[44px] px-3.5 rounded-xl text-sm font-semibold transition-colors ${
+                  className={`min-h-[44px] shrink-0 whitespace-nowrap px-3 rounded-xl text-sm font-semibold transition-colors ${
                     active
                       ? 'bg-elevated text-gold border border-gold/50'
                       : 'text-ivory/85 hover:bg-elevated/60 hover:text-ivory border border-transparent'
@@ -118,7 +118,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
             })}
           </nav>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {isOffline && <Badge variant="danger">{messagesEsAr.nav.offlineBadge}</Badge>}
 
             <button
@@ -161,11 +161,6 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
                   />
                 </svg>
               )}
-              <span className="hidden desktop:inline">
-                {prefs.soundEnabled
-                  ? messagesEsAr.nav.soundOnLabel
-                  : messagesEsAr.nav.soundOffLabel}
-              </span>
             </button>
 
             <button
@@ -176,7 +171,9 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
               {currentUser ? (
                 <>
                   <Avatar nickname={currentUser.nickname} sizePx={26} connected team={0} />
-                  <span className="max-w-[110px] truncate">{currentUser.nickname}</span>
+                  <span className="max-w-[72px] desktop:max-w-[110px] truncate">
+                    {currentUser.nickname}
+                  </span>
                   {currentUser.isGuest && (
                     <span className="hidden tablet:inline text-[10px] px-1.5 py-0.5 rounded bg-surface text-gold border border-gold/40">
                       {messagesEsAr.nav.guestTag}

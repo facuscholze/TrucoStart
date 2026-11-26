@@ -17,13 +17,14 @@ import {
 } from '@nestjs/common';
 import {
   type AccountExportResponse,
-  CursorPaginationQuerySchema,
   type DeleteAccountResponse,
   type MeResponse,
   PatchMeRequestSchema,
   type PublicUserProfile,
   type TutorialProgressResponse,
   TutorialProgressUpdateRequestSchema,
+  type UserMatchDetailResponse,
+  UserMatchHistoryQuerySchema,
   type UserMatchesResponse,
   type UserStatsResponse,
 } from '@truco/shared';
@@ -41,6 +42,7 @@ import { clearAuthCookiesOnReply } from '../auth/security/token-crypto.js';
 import { UsersService } from './users.service.js';
 
 const UserIdParamSchema = z.object({ id: z.string().uuid() });
+const UserMatchParamsSchema = z.object({ id: z.string().uuid(), matchId: z.string().uuid() });
 const DeleteAccountBodySchema = z
   .object({
     password: z.string().min(1).max(128).optional(),
@@ -125,18 +127,34 @@ export class UsersController {
   }
 
   @Get('users/:id/stats')
-  async getUserStats(@Param() rawParams: unknown): Promise<UserStatsResponse> {
+  @UseGuards(SessionAuthGuard)
+  async getUserStats(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Param() rawParams: unknown,
+  ): Promise<UserStatsResponse> {
     const { id } = parseWithZod(UserIdParamSchema, rawParams);
-    return this.usersService.getPublicUserStats(id);
+    return this.usersService.getPublicUserStats(principal, id);
   }
 
   @Get('users/:id/matches')
+  @UseGuards(SessionAuthGuard)
   async getUserMatches(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Param() rawParams: unknown,
     @Query() rawQuery: unknown,
   ): Promise<UserMatchesResponse> {
     const { id } = parseWithZod(UserIdParamSchema, rawParams);
-    const query = parseWithZod(CursorPaginationQuerySchema, rawQuery ?? {});
-    return this.usersService.getUserMatches(id, query);
+    const query = parseWithZod(UserMatchHistoryQuerySchema, rawQuery ?? {});
+    return this.usersService.getUserMatches(principal, id, query);
+  }
+
+  @Get('users/:id/matches/:matchId')
+  @UseGuards(SessionAuthGuard)
+  async getUserMatchDetail(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Param() rawParams: unknown,
+  ): Promise<UserMatchDetailResponse> {
+    const { id, matchId } = parseWithZod(UserMatchParamsSchema, rawParams);
+    return this.usersService.getUserMatchDetail(principal, id, matchId);
   }
 }

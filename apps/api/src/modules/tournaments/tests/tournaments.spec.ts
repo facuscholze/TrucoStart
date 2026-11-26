@@ -1025,6 +1025,96 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(ready[0]!.status).toBe('READY');
   }, 120_000);
 
+  it('2v2: el equipo al que le falta un compañero en el check-in queda desinscripto entero y no gana por walkover', async () => {
+    // El reloj del archivo es monotónico: se ancla al inicio para que las ventanas del
+    // torneo (inscripción 30 min + check-in 10) cierren recién a los 40.
+    at(0);
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(8, (index) => 1900 - index * 30);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4, rules: { ...createInput.rules, mode: '2v2' } },
+      { ip: '10.0.0.34' },
+    );
+    for (let team = 0; team < 4; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+
+    // Se presentan siete de los ocho: al equipo 3 le falta su compañero (players[7]).
+    for (const player of players.slice(0, 7))
+      await service.checkIn(player.principal, tournament.id);
+
+    // Vencida la ventana, el barrido arranca el torneo: no puede quedarse esperando al
+    // que nunca llegó (docs/RULES.md § Torneos: el equipo entra completo o no entra).
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    const [row] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, tournament.id));
+    expect(row!.status).toBe('IN_PROGRESS');
+
+    // El equipo incompleto es el 4 (se presentó players[6], faltó players[7]). Queda fuera
+    // entero: sus DOS integrantes como ausentes, incluido el capitán que sí se presentó.
+    const participants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    const teamThree = await db
+      .select()
+      .from(tournamentTeamsTable)
+      .where(
+        and(
+          eq(tournamentTeamsTable.tournamentId, tournament.id),
+          eq(tournamentTeamsTable.name, 'Equipo 4'),
+        ),
+      );
+    const excluded = participants.filter((p) => p.teamId === teamThree[0]!.id);
+    expect(excluded).toHaveLength(2);
+    expect(excluded.map((p) => p.status)).toEqual(['NO_SHOW', 'NO_SHOW']);
+
+    // No ocupa ningún lado del cuadro: no hay cruce que le regale nada al rival.
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    for (const match of matches) {
+      expect(match.homeTeamId).not.toBe(teamThree[0]!.id);
+      expect(match.awayTeamId).not.toBe(teamThree[0]!.id);
+      // Y ningún cruce quedó ya ganado sin jugarse por esa ausencia.
+      expect(match.status).not.toBe('FORFEITED');
+    }
+
+    // Con tres equipos completos la llave se arma entre ellos, sin lados vacíos.
+    const teamsInBracket = new Set(
+      matches.flatMap((match) =>
+        [match.homeTeamId, match.awayTeamId].filter((id): id is string => id !== null),
+      ),
+    );
+    expect(teamsInBracket).toEqual(
+      new Set(
+        (
+          await db
+            .select()
+            .from(tournamentTeamsTable)
+            .where(eq(tournamentTeamsTable.tournamentId, tournament.id))
+        )
+          .filter((team) => team.id !== teamThree[0]!.id)
+          .map((team) => team.id),
+      ),
+    );
+
+    // La tabla no inventa al ausente: aparece sin victorias, no como clasificado.
+    const detail = await service.detail(organizer.id, tournament.id);
+    const standings = detail.standings.map((standing) => standing.nickname);
+    expect(standings).not.toContain('Equipo 4');
+    expect(standings).toContain('Equipo 1');
+  }, 120_000);
+
   it('el cupo de un torneo 2v2 cuenta equipos: nunca muestra más inscriptos que cupo', async () => {
     const organizer = (await seedUsers(1))[0]!;
     const players = await seedUsers(8);

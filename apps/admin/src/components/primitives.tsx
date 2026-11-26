@@ -31,6 +31,32 @@ export function Card({
   );
 }
 
+/**
+ * Identificador operativo: muestra un asa corta y legible para reconocer el registro de
+ * un vistazo y conserva el UUID completo (seleccionable) al lado. No reemplaza el
+ * identificador en la evidencia ni en la auditoría: sólo facilita la lectura.
+ */
+export function EntityHandle({
+  prefix,
+  id,
+  label,
+}: {
+  readonly prefix: string;
+  readonly id: string;
+  readonly label?: string;
+}) {
+  const shortId = id.slice(0, 8).toUpperCase();
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className="rounded border border-sky/35 bg-sky/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide text-sky">
+        {prefix}-{shortId}
+      </span>
+      <code className="break-all font-mono text-[10px] text-ivory/45">{id}</code>
+      {label && <span className="text-[11px] text-ivory/60">{label}</span>}
+    </span>
+  );
+}
+
 const TONE_CLASSES: Record<string, string> = {
   neutral: 'bg-ivory/10 text-ivory/85 border-ivory/20',
   sky: 'bg-sky/15 text-sky border-sky/35',

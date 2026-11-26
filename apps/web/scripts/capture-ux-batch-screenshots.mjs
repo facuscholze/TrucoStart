@@ -513,8 +513,13 @@ async function captureAdminScreenshots(browser) {
     await page.getByRole('button', { name: 'Abrir caso' }).first().click();
     await page.getByRole('heading', { name: /reportó a/ }).waitFor();
     await page.waitForTimeout(300);
+    // La cabecera del caso es sticky: en una captura fullPage quedaría dibujada en el
+    // medio de la página. Se desactiva sólo para la captura, sin cambiar el producto.
+    await page.addStyleTag({ content: '[data-case-context]{position:static !important}' });
     await capture(page, `ux-admin-reporte-${viewport.suffix}`);
 
+    await page.reload();
+    await page.getByRole('heading', { name: 'Panel administrativo' }).waitFor();
     await page.getByRole('button', { name: 'Fair play' }).click();
     await page.getByRole('heading', { name: 'Integridad competitiva' }).waitFor();
     await page.getByText('TanoBaston', { exact: true }).waitFor();

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildTournamentTopology, simulateTournament } from '@truco/shared';
 import {
@@ -13,10 +13,12 @@ import {
   profilesTable,
   ratingProfilesTable,
   ratingSeasonsTable,
+  tableSeatsTable,
   tablesTable,
   tournamentAwardsTable,
   tournamentMatchesTable,
   tournamentParticipantsTable,
+  tournamentTeamsTable,
   tournamentsTable,
   usersTable,
   walletAccountsTable,
@@ -781,6 +783,226 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
         )
     )[0]!;
     expect(final.homeUserId ?? final.awayUserId).toBe(semi.homeUserId);
+  }, 120_000);
+
+  /**
+   * M10a — torneo 2v2 de punta a punta contra PostgreSQL (PGlite local, PostgreSQL real
+   * en CI): equipos, check-in por integrante, cuadro, mesas de cuatro asientos, cierre
+   * por equipo y premios por integrante.
+   */
+  it('un torneo 2v2 se juega con equipos: mesa de 4 asientos, campeón y premios por integrante', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    // 4 equipos de 2 = 8 personas.
+    const players = await seedUsers(8, (index) => 1900 - index * 40);
+    const tournament = await service.create(
+      organizer.principal,
+      {
+        ...createInput,
+        capacity: 4,
+        rules: { ...createInput.rules, mode: '2v2' },
+      },
+      { ip: '10.0.0.31' },
+    );
+    expect(tournament.mode).toBe('2v2');
+
+    for (let team = 0; team < 4; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+
+    // Un equipo de 2v2 no puede inscribirse con un solo integrante ni con alguien que ya
+    // está en otro equipo.
+    await expect(
+      service.registerTeam(players[0]!.principal, tournament.id, {
+        name: 'Incompleto',
+        teammateUserIds: [],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Check-in: todos los integrantes, uno por uno.
+    for (const player of players) await service.checkIn(player.principal, tournament.id);
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    // El cuadro tiene 4 lados (equipos), no 8.
+    const firstRound = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    expect(firstRound).toHaveLength(3);
+    for (const match of firstRound) {
+      expect(match.homeUserId).toBeNull();
+      expect(match.awayUserId).toBeNull();
+      if (match.status === 'READY') {
+        expect(match.homeTeamId).not.toBeNull();
+        expect(match.awayTeamId).not.toBeNull();
+      }
+    }
+
+    // Cada cruce listo tiene su mesa con 4 asientos intercalados por equipo.
+    const ready = firstRound.filter((match) => match.roomId !== null);
+    expect(ready.length).toBeGreaterThan(0);
+    for (const match of ready) {
+      const seats = await db
+        .select()
+        .from(tableSeatsTable)
+        .where(eq(tableSeatsTable.tableId, match.roomId!));
+      expect(seats).toHaveLength(4);
+      const teamA = seats.filter((seat) => seat.team === 0).map((seat) => seat.userId);
+      const teamB = seats.filter((seat) => seat.team === 1).map((seat) => seat.userId);
+      expect(teamA).toHaveLength(2);
+      expect(teamB).toHaveLength(2);
+      // Cada equipo es el de su lado del cuadro, y nadie se repite.
+      expect(new Set([...teamA, ...teamB]).size).toBe(4);
+      // Los asientos respetan la intercalación que espera el motor (`seat % 2 === team`).
+      for (const seat of seats) expect(seat.seat % 2).toBe(seat.team);
+    }
+
+    // Se juegan todos los cruces con el resultado de la mesa (equipo 0 o 1).
+    const teams = await db
+      .select()
+      .from(tournamentTeamsTable)
+      .where(eq(tournamentTeamsTable.tournamentId, tournament.id));
+    expect(teams).toHaveLength(4);
+    for (let guard = 0; guard < 8; guard++) {
+      const pending = await db
+        .select()
+        .from(tournamentMatchesTable)
+        .where(
+          and(
+            eq(tournamentMatchesTable.tournamentId, tournament.id),
+            inArray(tournamentMatchesTable.status, ['READY', 'SCHEDULED']),
+          ),
+        );
+      const playable = pending.filter((match) => match.homeTeamId && match.awayTeamId);
+      if (playable.length === 0) break;
+      for (const match of playable) {
+        const winningTeamId = match.homeTeamId!;
+        const gameMatchId = await seedGameMatch(tournament.id, match.id);
+        await service.completeTeamMatch({
+          tournamentMatchId: match.id,
+          matchId: gameMatchId,
+          winnerTeamId: winningTeamId,
+          now: new Date(clockMs),
+        });
+      }
+      at(42 + guard);
+    }
+
+    const [finished] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, tournament.id));
+    expect(finished!.status).toBe('FINISHED');
+
+    // La tabla es por equipo y el campeón es un equipo con sus dos integrantes.
+    const standings = await service.standingsFor(finished!);
+    expect(standings).toHaveLength(4);
+    expect(standings[0]!.nickname).toBe('Equipo 1');
+    expect(standings[0]!.tiebreakNote).toContain('Campeón');
+
+    // Premios: cada integrante del campeón cobra las 100 monedas y los subcampeones 40.
+    const awards = await db
+      .select()
+      .from(tournamentAwardsTable)
+      .where(eq(tournamentAwardsTable.tournamentId, tournament.id));
+    expect(awards).toHaveLength(4);
+    expect(awards.filter((award) => award.position === 1)).toHaveLength(2);
+    expect(awards.filter((award) => award.position === 2)).toHaveLength(2);
+    expect(awards.every((award) => award.teamId !== null)).toBe(true);
+    const credits = await db
+      .select()
+      .from(walletTransactionsTable)
+      .where(eq(walletTransactionsTable.referenceId, tournament.id));
+    expect(credits).toHaveLength(4);
+
+    // Reintentar el pago no duplica nada, ni por equipo ni por persona.
+    expect(await service.payout(tournament.id, new Date(clockMs))).toBe(0);
+
+    // Idempotencia del cierre por equipo: el mismo resultado no se aplica dos veces.
+    const closed = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(
+        and(
+          eq(tournamentMatchesTable.tournamentId, tournament.id),
+          eq(tournamentMatchesTable.status, 'COMPLETED'),
+        ),
+      );
+    const finalMatch = closed.find((match) => match.round === 2)!;
+    expect(
+      await service.completeTeamMatch({
+        tournamentMatchId: finalMatch.id,
+        matchId: finalMatch.resolvedFromMatchId!,
+        winnerTeamId: finalMatch.winnerTeamId!,
+        now: new Date(clockMs),
+      }),
+    ).toBe(false);
+  }, 120_000);
+
+  it('en 2v2 un equipo al que le falta un integrante no entra al cuadro ni gana por walkover', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(6, (index) => 1900 - index * 40);
+    const tournament = await service.create(
+      organizer.principal,
+      {
+        ...createInput,
+        capacity: 4,
+        rules: { ...createInput.rules, mode: '2v2' },
+      },
+      { ip: '10.0.0.32' },
+    );
+
+    // Equipo 1 completo, equipo 2 con un solo integrante presente, equipo 3 completo.
+    for (let team = 0; team < 3; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+    await service.checkIn(players[0]!.principal, tournament.id);
+    await service.checkIn(players[1]!.principal, tournament.id);
+    // Del equipo 2 sólo se presenta el capitán.
+    await service.checkIn(players[2]!.principal, tournament.id);
+    await service.checkIn(players[4]!.principal, tournament.id);
+    await service.checkIn(players[5]!.principal, tournament.id);
+
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    // El equipo incompleto queda fuera entero: no hay lado suyo en ningún cruce.
+    const teamTwo = await db
+      .select()
+      .from(tournamentTeamsTable)
+      .where(
+        and(
+          eq(tournamentTeamsTable.tournamentId, tournament.id),
+          eq(tournamentTeamsTable.name, 'Equipo 2'),
+        ),
+      );
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    expect(
+      matches.some(
+        (match) => match.homeTeamId === teamTwo[0]!.id || match.awayTeamId === teamTwo[0]!.id,
+      ),
+    ).toBe(false);
+
+    // Y sus integrantes quedan como ausentes, sin sanción de partida.
+    const absent = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    expect(absent.filter((row) => row.status === 'NO_SHOW')).toHaveLength(2);
+
+    // Con dos equipos completos la final se arma entre ellos.
+    const ready = matches.filter((match) => match.homeTeamId && match.awayTeamId);
+    expect(ready).toHaveLength(1);
+    expect(ready[0]!.status).toBe('READY');
   }, 120_000);
 
   it('quien no hace check-in queda fuera sin arrancar una llave de una sola persona', async () => {

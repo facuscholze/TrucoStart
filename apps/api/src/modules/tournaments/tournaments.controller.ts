@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import {
   CreateTournamentRequestSchema,
+  RegisterTeamRequestSchema,
   TournamentDetailResponseSchema,
   TournamentJoinByCodeRequestSchema,
   TournamentListResponseSchema,
@@ -129,6 +130,19 @@ export class TournamentsController {
   // La ruta nombra la acción del torneo ("darse de baja"). No se usa `withdraw` porque
   // ese verbo está reservado por `check-no-real-money` para retiros de dinero, y el
   // guard no debe aflojarse para acomodar un nombre.
+  /** Inscripción de un equipo en un torneo 2v2: el capitán anota a los dos juntos. */
+  @Post(':id/teams')
+  @HttpCode(HttpStatus.CREATED)
+  async registerTeam(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Param() rawParams: unknown,
+    @Body() rawBody: unknown,
+  ) {
+    const { id } = parseWithZod(IdParamSchema, rawParams);
+    const body = parseWithZod(RegisterTeamRequestSchema, rawBody);
+    return this.tournaments.registerTeam(principal, id, body);
+  }
+
   @Post(':id/unregister')
   @HttpCode(HttpStatus.OK)
   async unregister(

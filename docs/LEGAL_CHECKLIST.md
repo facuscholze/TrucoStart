@@ -7,7 +7,7 @@
 > marcado como **PENDIENTE** (requiere decisión legal) o **RESUELTO EN CÓDIGO**
 > (el sistema ya implementa el mecanismo; falta la validación profesional).
 >
-> Última actualización: M8d (2026-11-19). Si el esquema de base de datos cambia,
+> Última actualización: M9c (2026-11-19). Si el esquema de base de datos cambia,
 > la sección 2 queda desactualizada: es la parte que hay que revisar primero.
 
 ---
@@ -37,8 +37,11 @@
 ## 2. Datos personales que el sistema guarda HOY
 
 Esta sección **no es una plantilla**: se generó leyendo el esquema real en
-`apps/api/src/db/schema/*.ts` y las migraciones `apps/api/drizzle/0000`–`0006`.
-Son 16 tablas.
+`apps/api/src/db/schema/*.ts` y las migraciones `apps/api/drizzle/0000`–`0010`.
+Son 40 tablas; M9a agregó cuatro tablas sociales, M9b agregó nueve tablas de
+ratings/temporadas/revisión competitiva y M9c agregó once tablas de progresión,
+logros, misiones y economía simbólica. M9b/M9c también añadieron columnas a
+`matches` y `tables`.
 
 ### 2.1 Identidad y cuenta — `users` (24 columnas)
 
@@ -57,11 +60,13 @@ Son 16 tablas.
 | Fechas                      | `created_at`, `updated_at`, `deleted_at`                                 | `deleted_at` sostiene el borrado lógico.                                                     |
 | **Aceptación legal**        | `terms_version`, `privacy_version`, `legal_accepted_at`, `legal_min_age` | **Nuevo en M8d.** Constancia de qué versión se aceptó, cuándo y con qué edad mínima vigente. |
 
-### 2.2 Perfil — `profiles` (9 columnas)
+### 2.2 Perfil — `profiles` (8 columnas)
 
 `user_id`, `avatar_id`, `level`, `xp`, `bio` (hasta 280 caracteres, texto libre),
-`settings` (JSON: sonido, animaciones, confirmaciones), `created_at`,
-`updated_at`.
+`settings` (JSON: preferencias y visibilidad independiente de historial,
+estadísticas y presencia), `created_at`, `updated_at`. Las tres visibilidades
+admiten `ALL`, `FRIENDS` o `NOBODY` y tienen default técnico `FRIENDS`; el
+bloqueo prevalece sobre una visibilidad pública.
 
 > `bio` es el único campo de **texto libre público** escrito por el usuario. Es
 > el candidato más probable a contener datos personales no previstos: conviene
@@ -85,23 +90,71 @@ Son 16 tablas.
 - **No** se guarda la fecha de nacimiento ni la edad declarada: `legal.age` se usa
   en el alta para el control de edad mínima y se descarta (test explícito).
 - **No** se guardan datos sensibles del art. 7 de la Ley 25.326.
-- **No** se guardan datos de tarjetas, CBU, CVU, alias bancario, billetera virtual
-  ni saldo: el esquema no tiene ninguna columna monetaria. Verificado por
-  `scripts/check-no-real-money.mjs`.
+- **No** se guardan datos de tarjetas, CBU, CVU, alias bancario, cuentas de pago
+  ni saldo monetario. Sí existe un saldo de `VIRTUAL_COIN` estrictamente simbólico
+  y no transferible para desbloquear cosméticos; no se conecta con dinero ni con
+  servicios financieros. Verificado por `scripts/check-no-real-money.mjs`.
 - **No** se guarda la semilla de barajado antes de revelarla: sólo se persiste el
   compromiso (`seed_commitment`) hasta el final de la partida.
 
 ### 2.5 Actividad de juego — `tables`, `table_seats`, `matches`, `match_players`, `match_events`, `rulesets`
 
-- `tables` (16): `owner_id`, modalidad, reglas, código de invitación, estado, vencimiento.
+- `tables` (18): `owner_id`, modalidad, reglas, código de invitación, estado, vencimiento, flags de práctica/competitividad y temporada.
 - `table_seats` (7): `user_id`, `nickname`, asiento, equipo.
-- `matches` (10): `seed_commitment`, `result` (JSON), fechas.
+- `matches` (14): `seed_commitment`, `result` (JSON), `has_bots`, `is_practice`, `is_competitive`, `season_id`, fechas.
 - `match_players` (8): `user_id`, asiento, equipo, puntaje, resultado, `rating_delta`.
 - `match_events` (5): `payload` (JSON con los eventos de la partida).
 - `rulesets` (6): configuración de reglas; sin datos personales.
 
-> El historial de partidas permite reconstruir con quién jugó cada persona y
-> cuándo. **PENDIENTE** de decidir si eso se publica, y con qué visibilidad.
+> El historial permite inferir con quién jugó cada persona y cuándo; las
+> estadísticas agregadas permiten inferir resultados. En M9a existe control
+> técnico separado (`historyVisibility` / `statsVisibility`, default `FRIENDS`),
+> con acceso propio y bloqueo prevalente. **PENDIENTE** de validar legalmente la
+> finalidad, base de tratamiento, alcance de publicación y plazos de retención.
+
+### 2.5.1 Grafo social M9a — `friendships`, `user_blocks`, `social_invitations`, `social_notifications`
+
+- `friendships` (7): identificadores de ambas cuentas, quién inició la solicitud,
+  estado y fechas; revela relaciones/contactos y actividad de solicitudes.
+- `user_blocks` (3): ambas cuentas y fecha; información de preferencias de
+  interacción y seguridad.
+- `social_invitations` (12): emisor, destinatario, tipo/estado, mesa/reglas,
+  expiración, aceptación y fechas; revela actividad social y de juego.
+- `social_notifications` (9): destinatario, actor, tipo, referencias a solicitud
+  o mesa, payload, fecha y lectura; entrega de forma privada por usuario.
+- La presencia no se conserva como historial relacional: se calcula desde leases
+  efímeros de Redis (TTL 45 s, heartbeat 15 s) y se filtra por preferencia y
+  bloqueos. **PENDIENTE** de validar aviso, finalidad y retención de datos sociales;
+  el default técnico no sustituye una base legal ni una política publicada.
+
+### 2.5.2 Ratings y temporadas M9b
+
+- `rating_seasons`: identificadores, número/etiqueta y fechas de cada temporada;
+  no contiene perfil de jugador por sí sola.
+- `rating_profiles`: relación cuenta, modo (`1v1`/`2v2`) y temporada, rating,
+  desviación, volatilidad y agregados de resultados. Es un perfil de rendimiento
+  derivado de partidas.
+- `rating_rivalries`: identificadores de pares de rivales, modalidad/temporada,
+  frecuencia, resultados y fechas; permite inferir relaciones y actividad de juego.
+- `rating_period_stats`: puntos de rating y conteos por semana/mes; conserva una
+  lista de identificadores de rivales distintos (`opponent_ids`).
+- `rating_season_snapshots`: posiciones congeladas, rating, división y actividad
+  elegible por usuario al cerrar una temporada.
+- `rating_jobs` y `rating_redis_outbox`: marcas por partida/temporada y cargas de
+  proyección que pueden contener identificadores, puntajes y elegibilidad. Redis
+  es una caché reconstruible; PostgreSQL conserva el registro durable.
+- `rating_season_audits`: relación entre temporadas cerradas/siguientes y conteos
+  de snapshots; es un registro operativo de cierre.
+- `competitive_review_cases`: cuentas y partidas relacionadas, señales, duración,
+  conteos de rivalidad y evidencia para revisión humana; puede registrar quién
+  tomó/resolvió el caso y su nota. No aplica sanciones automáticamente.
+
+> El rating y la clasificación son datos de rendimiento vinculables a una cuenta.
+> El ranking público sólo incluye cuentas activas que cumplen mínimos y configuran
+> `statsVisibility=ALL`; el perfil privado aplica las reglas de visibilidad y
+> bloqueos. La finalidad, la base legal, la publicación y los plazos de retención
+> de ratings, rivalidades, snapshots y evidencia **siguen PENDIENTES** de revisión
+> profesional. El control técnico no sustituye una política informada.
 
 ### 2.6 Moderación y auditoría — `reports`, `sanctions`, `audit_logs`
 
@@ -119,23 +172,57 @@ Son 16 tablas.
 
 ### 2.7 Tutorial — `tutorial_progress` (3)
 
-`user_id`, `completed_lessons`, `updated_at`.
+`user_id`, `completed_lessons`, `updated_at`. Las lecciones terminadas pueden
+sincronizar un logro de progresión; no se confía en un progreso enviado por
+fuera del catálogo de IDs validado.
+
+### 2.8 Progresión y economía simbólica — M9c
+
+- `progression_config` guarda recompensas/topes configurables y el actor que
+  modificó la última versión; la moneda está fijada por constraints como
+  `VIRTUAL_COIN`, sin valor económico, compras ni transferencias.
+- `achievement_catalog` y `quest_templates` contienen reglas, claves de texto y
+  recompensas. `user_achievements` y `user_quests` relacionan progreso,
+  desbloqueos, períodos UTC, reclamaciones y partidas fuente con una cuenta.
+- `progression_xp_entries` conserva cada recibo de XP, clase de tope, origen,
+  idempotency key y fecha; el perfil conserva el XP total y nivel derivado.
+- `wallet_accounts` fija flags de moneda virtual; `wallet_transactions` conserva
+  cantidad simbólica firmada, tipo, referencia, metadata, fechas y, si aplica,
+  la relación al asiento original compensado. El saldo se deriva de la suma del
+  libro mayor, no de un contador editable.
+- `cosmetic_catalog` describe sólo elementos visuales (`affects_rules=false`,
+  `affects_matchmaking=false`); `user_cosmetics` conserva la adquisición y el
+  asiento que la pagó. `progression_notifications` conserva contenido y lectura
+  por usuario (logros desbloqueados).
+- Cambios admin de configuración y reversión guardan actor, sesión, IP, motivo
+  y estados anterior/nuevo en `audit_logs`. No se guardan instrumentos de pago,
+  datos bancarios ni equivalentes de moneda real.
+
+> El XP, las misiones, logros y saldo virtual describen actividad vinculada a una
+> cuenta. Aunque la moneda no tiene valor económico y sólo sirve para cosméticos,
+> su finalidad, aviso, eventual retención/supresión y tratamiento como dato de
+> perfil deben ser revisados profesionalmente. La implementación no resuelve la
+> calificación jurídica ni constituye asesoramiento.
 
 ---
 
 ## 3. Mecanismos técnicos ya implementados
 
-| Requisito                               | Implementación                                                                                                   | Estado                                         |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Consentimiento **expreso** para el alta | `legal.accepted` debe ser literalmente `true`; sin eso la API responde 400 y **no crea la cuenta**               | **RESUELTO** + test                            |
-| Constancia de la versión aceptada       | `terms_version`, `privacy_version`, `legal_accepted_at`, `legal_min_age` + evento de auditoría `AUTH_REGISTERED` | **RESUELTO** + test                            |
-| Rechazo de términos obsoletos           | Si el cliente aceptó otra versión: 409 y se le pide releer                                                       | **RESUELTO** + test                            |
-| Borrado de cuenta                       | Borrado lógico (`deleted_at`) y anonimización de PII                                                             | Parcial: **falta plazo legal de conservación** |
-| Exportación de datos del titular        | Endpoint de exportación de cuenta                                                                                | Parcial: **falta procedimiento publicado**     |
-| Contraseñas                             | Argon2id, sin texto plano                                                                                        | **RESUELTO**                                   |
-| Cookies de sesión                       | HttpOnly + SameSite + Secure en producción                                                                       | **RESUELTO**                                   |
-| Sin dinero real (regla 13)              | `scripts/check-no-real-money.mjs` en CI                                                                          | **RESUELTO**                                   |
-| Registro de bases de datos              | —                                                                                                                | **PENDIENTE** (trámite ante AAIP)              |
+| Requisito                               | Implementación                                                                                                                      | Estado                                                                           |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Consentimiento **expreso** para el alta | `legal.accepted` debe ser literalmente `true`; sin eso la API responde 400 y **no crea la cuenta**                                  | **RESUELTO** + test                                                              |
+| Constancia de la versión aceptada       | `terms_version`, `privacy_version`, `legal_accepted_at`, `legal_min_age` + evento de auditoría `AUTH_REGISTERED`                    | **RESUELTO** + test                                                              |
+| Rechazo de términos obsoletos           | Si el cliente aceptó otra versión: 409 y se le pide releer                                                                          | **RESUELTO** + test                                                              |
+| Borrado de cuenta                       | Borrado lógico (`deleted_at`) y anonimización de PII                                                                                | Parcial: **falta plazo legal de conservación**                                   |
+| Exportación de datos del titular        | Endpoint de exportación de cuenta                                                                                                   | Parcial: **falta procedimiento publicado**                                       |
+| Contraseñas                             | Argon2id, sin texto plano                                                                                                           | **RESUELTO**                                                                     |
+| Cookies de sesión                       | HttpOnly + SameSite + Secure en producción                                                                                          | **RESUELTO**                                                                     |
+| Privacidad M9a                          | `historyVisibility`, `statsVisibility` y `presenceVisibility` independientes; `ALL`/`FRIENDS`/`NOBODY`; bloqueos prevalecen         | RESUELTO EN CÓDIGO; aviso, finalidad y alcance **PENDIENTES** legalmente         |
+| Rating competitivo M9b                  | Datos por cuenta/modo/temporada; ranking público exige mínimos y `statsVisibility=ALL`; señales sólo crean casos de revisión humana | RESUELTO EN CÓDIGO; finalidad, publicación y retención **PENDIENTES** legalmente |
+| Progresión M9c                          | XP, logros y misiones calculados desde partidas/tutorial; notificaciones y progreso ligados a cuenta                                | RESUELTO EN CÓDIGO; aviso, finalidad y retención **PENDIENTES** legalmente       |
+| Moneda virtual simbólica M9c            | `VIRTUAL_COIN` sin valor económico, sin compras/transferencias; libro mayor inmutable; cosméticos sin efecto competitivo            | RESUELTO EN CÓDIGO; calificación jurídica y aviso **PENDIENTES**                 |
+| Sin dinero real (regla 13)              | `scripts/check-no-real-money.mjs` en CI; no hay pagos, retiros ni datos financieros                                                 | **RESUELTO**                                                                     |
+| Registro de bases de datos              | —                                                                                                                                   | **PENDIENTE** (trámite ante AAIP)                                                |
 
 ---
 
@@ -167,34 +254,56 @@ muestra en el alta y el servidor rechaza con 403 el alta por debajo del mínimo.
 
 **Hechos verificables del sistema:**
 
-- No existe ninguna pasarela de pago integrada.
-- No existe ninguna columna de saldo, billetera o libro contable.
-- No existe ningún endpoint de depósito, retiro o cobro.
-- No existe transferencia de puntos entre jugadores: `rating_delta` y `xp` son
-  personales y sólo se modifican por resultado de partida.
-- Los únicos "puntos" son el marcador de la partida (truco) y el progreso del
-  perfil.
+- No existe ninguna pasarela de pago integrada ni endpoint de depósito, retiro o
+  cobro. No se recaban datos de tarjetas, CBU/CVU ni cuentas de pago.
+- Sí existe una unidad `VIRTUAL_COIN` ganada mediante partidas, logros y misiones.
+  Sólo sirve para canjear cosméticos visuales; no tiene valor económico, no se
+  transfiere entre jugadores y no se compra con dinero. Estas propiedades se
+  fuerzan además con restricciones de base de datos.
+- El saldo virtual se deriva del libro mayor `wallet_transactions`; el esquema
+  impide saldo negativo y edición/borrado de asientos. Los canjes agregan un
+  débito; las correcciones admin agregan una compensación auditable, no una
+  modificación del asiento original.
+- `xp`, `level`, rating y `rating_delta` son datos individuales: XP/rating no se
+  transfieren ni se canjean. La moneda virtual sólo se canjea por los cosméticos
+  del catálogo, que no cambian reglas, matchmaking ni rating.
+- No se ofrecen apuestas, premios monetarios, compra de monedas ni conversión a
+  dinero; tampoco hay retiros, depósitos ni transferencias entre cuentas.
 
 **Preguntas para el abogado — PENDIENTES:**
 
-1. ¿El sistema de `xp`/`level` requiere algún disclaimer de "sin valor monetario"?
-2. ¿Hace falta una cláusula explícita de que los puntos no son canjeables?
-3. Si en el futuro se agregara una moneda cosmética, ¿qué régimen aplica?
-   (Hoy **no existe** y la regla 13 lo prohíbe.)
+1. ¿Qué aviso y cláusulas deben describir que la moneda virtual no tiene valor
+   económico, no se compra y sólo permite cosméticos?
+2. ¿Cómo debe calificarse jurídicamente una unidad no transferible que sí se
+   canjea por bienes digitales puramente cosméticos? ¿Hay obligaciones de
+   información, consumo o reversión aunque no exista pago?
+3. ¿Qué política de retención/supresión aplica al historial de XP, saldo,
+   canjes y auditoría administrativa?
+4. ¿Cómo debe describirse que el proveedor puede ajustar parámetros de
+   recompensas, y qué derechos del usuario aplican a los cosméticos ya canjeados?
 
 ---
 
 ## 6. Retención y borrado
 
-| Dato                                 | Plazo propuesto                         | Estado                |
-| ------------------------------------ | --------------------------------------- | --------------------- |
-| Cuenta y perfil                      | Mientras la cuenta exista + plazo legal | **PENDIENTE**         |
-| Sesiones                             | Hasta vencimiento/revocación            | Definido técnicamente |
-| `auth_tokens`                        | Hasta vencimiento o consumo             | Definido técnicamente |
-| Historial de partidas                | Indefinido hoy                          | **PENDIENTE**         |
-| `reports` y `sanctions`              | Indefinido hoy                          | **PENDIENTE**         |
-| `audit_logs`                         | Indefinido hoy                          | **PENDIENTE**         |
-| `ip_address` en sesiones y auditoría | Indefinido hoy                          | **PENDIENTE**         |
+| Dato                                 | Plazo propuesto                                            | Estado                              |
+| ------------------------------------ | ---------------------------------------------------------- | ----------------------------------- |
+| Cuenta y perfil                      | Mientras la cuenta exista + plazo legal                    | **PENDIENTE**                       |
+| Sesiones                             | Hasta vencimiento/revocación                               | Definido técnicamente               |
+| `auth_tokens`                        | Hasta vencimiento o consumo                                | Definido técnicamente               |
+| Historial de partidas y eventos      | Indefinido hoy                                             | **PENDIENTE**                       |
+| Estadísticas derivadas               | Se calculan desde partidas/eventos                         | **PENDIENTE** (retención de fuente) |
+| Ratings, rivalidades y periodos      | Por cuenta, modalidad y temporada                          | **PENDIENTE** (retención de fuente) |
+| Snapshots y auditoría de temporadas  | Se conservan tras el cierre                                | **PENDIENTE**                       |
+| Evidencia de revisión competitiva    | Cuentas/partidas, señales y notas humanas                  | **PENDIENTE**                       |
+| Progresión y misiones                | XP, condiciones, fechas, logros y reclamaciones por cuenta | **PENDIENTE**                       |
+| Libro mayor y cosméticos virtuales   | Asientos simbólicos y adquisiciones visuales               | **PENDIENTE**                       |
+| Amistades, bloqueos e invitaciones   | Sin purga automática hoy                                   | **PENDIENTE**                       |
+| Notificaciones sociales              | Sin purga automática hoy                                   | **PENDIENTE**                       |
+| Presencia en Redis                   | Lease de 45 s con heartbeat de 15 s                        | Definido técnicamente               |
+| `reports` y `sanctions`              | Indefinido hoy                                             | **PENDIENTE**                       |
+| `audit_logs`                         | Indefinido hoy                                             | **PENDIENTE**                       |
+| `ip_address` en sesiones y auditoría | Indefinido hoy                                             | **PENDIENTE**                       |
 
 > Ningún plazo de conservación está implementado como borrado automático. Esto es
 > deuda real, no un detalle: la Ley 25.326 exige que los datos no se conserven más
@@ -231,7 +340,7 @@ Versión vigente de cada documento: `LEGAL_DOCUMENT_VERSIONS` en
    automático.
 6. **Publicar el procedimiento** para ejercer los derechos de acceso,
    rectificación y supresión, con plazos.
-7. **Confirmar** que no hay tratamiento de datos sensibles ni monetarios.
+7. **Confirmar** que no se tratan datos sensibles ni datos financieros; describir correctamente los datos de progresión y la moneda virtual simbólica no transferible.
 
 > Hasta que 1 a 6 no estén cerrados, los textos deben seguir marcados como
 > borrador. El código ya impide crear cuentas sin consentimiento; lo que falta es

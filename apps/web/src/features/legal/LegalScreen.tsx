@@ -23,7 +23,9 @@ function DraftBanner() {
       aria-label={LEGAL_DRAFT_BANNER}
       className="rounded-2xl border-2 border-danger/70 bg-danger/10 px-4 py-3"
     >
-      <p className="text-xs font-bold uppercase tracking-wide text-danger">{LEGAL_DRAFT_BANNER}</p>
+      <p className="text-xs font-bold uppercase tracking-wide text-danger-strong">
+        {LEGAL_DRAFT_BANNER}
+      </p>
       <p className="mt-1 text-xs text-ivory/85">
         Este texto es un borrador de trabajo: no constituye asesoramiento legal, puede contener
         errores y no debe tomarse como la versión definitiva del documento.

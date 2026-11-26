@@ -146,6 +146,7 @@ export function PlayerSeat({
 
             {!isSelf && remainingCards > 0 && !folded && (
               <span
+                role="img"
                 aria-label={`${remainingCards} cartas en mano`}
                 style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}
               >

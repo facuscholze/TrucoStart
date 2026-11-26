@@ -12,6 +12,9 @@ export const DEFAULT_CLIENT_PREFERENCES: ClientPreferences = {
   soundEnabled: true,
   animationsReduced: false,
   confirmCalls: false,
+  historyVisibility: 'FRIENDS',
+  statsVisibility: 'FRIENDS',
+  presenceVisibility: 'FRIENDS',
   highContrast: false,
   largeText: false,
 };
@@ -35,6 +38,24 @@ export function loadClientPreferences(): ClientPreferences {
         typeof parsed.confirmCalls === 'boolean'
           ? parsed.confirmCalls
           : DEFAULT_CLIENT_PREFERENCES.confirmCalls,
+      historyVisibility:
+        parsed.historyVisibility === 'ALL' ||
+        parsed.historyVisibility === 'FRIENDS' ||
+        parsed.historyVisibility === 'NOBODY'
+          ? parsed.historyVisibility
+          : DEFAULT_CLIENT_PREFERENCES.historyVisibility,
+      statsVisibility:
+        parsed.statsVisibility === 'ALL' ||
+        parsed.statsVisibility === 'FRIENDS' ||
+        parsed.statsVisibility === 'NOBODY'
+          ? parsed.statsVisibility
+          : DEFAULT_CLIENT_PREFERENCES.statsVisibility,
+      presenceVisibility:
+        parsed.presenceVisibility === 'ALL' ||
+        parsed.presenceVisibility === 'FRIENDS' ||
+        parsed.presenceVisibility === 'NOBODY'
+          ? parsed.presenceVisibility
+          : DEFAULT_CLIENT_PREFERENCES.presenceVisibility,
       highContrast:
         typeof parsed.highContrast === 'boolean'
           ? parsed.highContrast
@@ -78,6 +99,9 @@ export function mergeServerSettingsIntoPreferences(
     soundEnabled: serverSettings.soundEnabled,
     animationsReduced: serverSettings.animationsReduced,
     confirmCalls: serverSettings.confirmCalls,
+    historyVisibility: serverSettings.historyVisibility,
+    statsVisibility: serverSettings.statsVisibility,
+    presenceVisibility: serverSettings.presenceVisibility,
   });
 }
 

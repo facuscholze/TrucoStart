@@ -13,6 +13,7 @@ import {
   profilesTable,
   ratingProfilesTable,
   ratingSeasonsTable,
+  tablesTable,
   tournamentMatchesTable,
   tournamentParticipantsTable,
   tournamentsTable,
@@ -48,6 +49,7 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
   let clockMs = START.getTime();
   let seasonId: string;
   let realtimeEvents: Array<{ userId: string; type: string }> = [];
+  let provisioner: InMemoryGameRoomProvisioner;
 
   beforeAll(async () => {
     dbHandle = await createAdaptiveTestDatabase();
@@ -59,6 +61,7 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
       cleanupIntervalMs: 0,
     });
     const rateLimit = new InMemoryRateLimitStore(() => clockMs);
+    provisioner = new InMemoryGameRoomProvisioner();
     service = new TournamentsService(
       repository,
       buildTournamentsRuntimeConfig({
@@ -71,7 +74,7 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
       }),
       lobbyConfig,
       new LobbyRepository(db),
-      new InMemoryGameRoomProvisioner(),
+      provisioner,
       rateLimit,
       new AuditRepository(db),
       {
@@ -617,6 +620,53 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
       .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
     expect(finalParticipants.filter((row) => row.status === 'WINNER')).toHaveLength(1);
   }, 240_000);
+
+  it('cada cruce listo tiene sala aprovisionada y "mi próxima partida" apunta a ella', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(4, (index) => 1800 - index * 50);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4, registrationMinutes: 5, checkInMinutes: 5 },
+      { ip: '10.0.0.21' },
+    );
+    for (const player of players) {
+      await service.register(player.principal, tournament.id);
+      await service.checkIn(player.principal, tournament.id);
+    }
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    const ready = matches.filter((match) => match.status === 'READY');
+    expect(ready).toHaveLength(2);
+    // Todo cruce jugable tiene sala: sin eso el botón "entrar a la mesa" no lleva a nada.
+    for (const match of ready) {
+      expect(match.roomId).not.toBeNull();
+      const room = provisioner.getProvisionedRoom(match.roomId!);
+      expect(room, `sala del cruce ${match.slot}`).toBeDefined();
+      // La sala usa las reglas del torneo y nunca es de práctica ni con bots.
+      expect(room!.targetScore).toBe(createInput.rules.targetScore);
+      expect(room!.florEnabled).toBe(createInput.rules.florEnabled);
+      expect(room!.practice ?? null).toBeNull();
+      expect(room!.visibility).toBe('PRIVATE');
+    }
+    // La mesa queda como no competitiva: los cruces no mueven el ranking (ADR-030).
+    const [table] = await db
+      .select({ isCompetitive: tablesTable.isCompetitive })
+      .from(tablesTable)
+      .where(eq(tablesTable.id, ready[0]!.roomId!));
+    expect(table?.isCompetitive).toBe(false);
+
+    // "Mi próxima partida" devuelve el cruce del jugador con su sala, para poder entrar.
+    const firstPlayer = players.find((player) => player.id === ready[0]!.homeUserId)!;
+    const next = await service.myNextMatch(firstPlayer.id);
+    expect(next.match?.roomId).toBe(ready[0]!.roomId);
+    expect(next.tournament?.id).toBe(tournament.id);
+    expect(next.match?.deadlineAt).not.toBeNull();
+  }, 120_000);
 
   it('quien no hace check-in queda fuera sin arrancar una llave de una sola persona', async () => {
     const organizer = (await seedUsers(1))[0]!;

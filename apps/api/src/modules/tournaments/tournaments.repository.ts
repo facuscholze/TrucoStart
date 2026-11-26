@@ -416,6 +416,14 @@ export class TournamentsRepository {
       .where(eq(tournamentMatchesTable.id, id));
   }
 
+  /** Asocia la sala aprovisionada a un cruce ya escrito, sin abrir transacción propia. */
+  async setMatchRoom(matchId: string, roomId: string): Promise<void> {
+    await this.db
+      .update(tournamentMatchesTable)
+      .set({ roomId, updatedAt: new Date() })
+      .where(eq(tournamentMatchesTable.id, matchId));
+  }
+
   async findMatchById(id: string): Promise<TournamentMatchRow | null> {
     const [row] = await this.db
       .select()

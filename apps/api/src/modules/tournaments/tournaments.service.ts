@@ -44,6 +44,7 @@ import {
   resolveRuleSetSelection,
   type LobbyRuntimeConfig,
 } from '../lobby/lobby.config.js';
+import { resolveRuleSetByCode } from '../lobby/lobby.config.js';
 import { LobbyRepository } from '../lobby/lobby.repository.js';
 import { LobbyRealtimeGateway } from '../lobby/lobby-realtime.gateway.js';
 import {
@@ -835,6 +836,10 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     if (!outcome?.started) return false;
     // Los byes se resolvieron al escribir; ahora se propaga lo que quedó listo sin jugar.
     await this.advanceBracket(tournamentId, now);
+    // La primera ronda no pasa por el avance: sus cruces ya nacieron `READY`, así que
+    // las salas se aprovisionan acá.
+    const started = await this.requireTournament(tournamentId);
+    await this.provisionPendingRooms(started, now);
     await this.notify(
       outcome.userIds,
       {
@@ -936,15 +941,118 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
    * ese cruce junta sus dos lados, lo deja `READY` con su plazo. Se detiene sola porque
    * sólo escribe diferenciales.
    */
+  /**
+   * Aprovisiona las salas de los cruces que quedaron `READY` sin sala y las asocia.
+   *
+   * Se llama **fuera** de toda transacción del torneo: el repositorio del lobby escribe
+   * por el pool y usarlo dentro de una transacción abierta produciría deadlock. Si el
+   * aprovisionamiento falla, el cruce queda listo sin sala y el barrido lo reintenta.
+   */
+  private async provisionPendingRooms(tournament: TournamentRow, now: Date): Promise<void> {
+    const pending = (await this.repository.listMatches(tournament.id)).filter(
+      (match) =>
+        match.status === 'READY' &&
+        match.roomId === null &&
+        match.homeUserId !== null &&
+        match.awayUserId !== null,
+    );
+    for (const match of pending) {
+      const room = await this.provisionMatchRoom({
+        tournament,
+        match,
+        homeUserId: match.homeUserId!,
+        awayUserId: match.awayUserId!,
+        now,
+      }).catch(() => null);
+      if (!room) continue;
+      await this.repository.setMatchRoom(match.id, room.roomId);
+    }
+  }
+
+  /**
+   * Aprovisiona la sala de un cruce listo, con el `RuleSet` que el torneo definió.
+   *
+   * Sin esto el cruce queda `READY` sin `roomId` y nadie puede jugarlo: la pantalla
+   * muestra "mi próxima partida" pero no hay a dónde entrar. Se reutiliza la mesa y el
+   * aprovisionamiento existentes (M4/M5a) en vez de abrir un camino paralelo de salas.
+   *
+   * - `isCompetitive = false` siempre (ADR-030).
+   * - Sin `practice`: un torneo nunca usa bots.
+   * - La sala se borra si la escritura del cruce no llega a confirmarse, para no dejar
+   *   mesas huérfanas por un fallo intermedio.
+   */
+  private async provisionMatchRoom(input: {
+    readonly tournament: TournamentRow;
+    readonly match: TournamentMatchRow;
+    readonly homeUserId: string;
+    readonly awayUserId: string;
+    readonly now: Date;
+  }): Promise<{ roomId: string }> {
+    const ruleset = resolveRuleSetByCode(input.tournament.rulesetCode);
+    const rulesetRow = await this.lobbyRepository.ensureRulesetRow(ruleset);
+    const [nicknames] = await Promise.all([
+      this.repository.nicknamesFor([input.homeUserId, input.awayUserId]),
+    ]);
+    const roomId = generateUuidV7(input.now.getTime());
+
+    await this.lobbyRepository.createTableWithSeatsTx({
+      tableId: roomId,
+      ownerId: input.homeUserId,
+      mode: input.tournament.mode,
+      visibility: 'PRIVATE',
+      rulesetId: rulesetRow.id,
+      rulesetCode: input.tournament.rulesetCode,
+      targetScore: input.tournament.targetScore === 15 ? 15 : 30,
+      florEnabled: input.tournament.florEnabled,
+      turnTimeoutMs: input.tournament.turnTimeoutMs,
+      now: input.now,
+      expiresAt: new Date(input.now.getTime() + this.lobbyConfig.tableTtlMs),
+      participants: [
+        {
+          userId: input.homeUserId,
+          nickname: nicknames.get(input.homeUserId) ?? 'Jugador',
+          seat: 0,
+          team: 0,
+        },
+        {
+          userId: input.awayUserId,
+          nickname: nicknames.get(input.awayUserId) ?? 'Jugador',
+          seat: 1,
+          team: 1,
+        },
+      ],
+      isCompetitive: false,
+    });
+
+    try {
+      await this.provisioner.provisionRoom({
+        roomId,
+        mode: input.tournament.mode,
+        visibility: 'PRIVATE',
+        rulesetCode: input.tournament.rulesetCode,
+        ruleset: ruleset as unknown as Record<string, unknown>,
+        targetScore: input.tournament.targetScore === 15 ? 15 : 30,
+        florEnabled: input.tournament.florEnabled,
+        turnTimeoutMs: input.tournament.turnTimeoutMs,
+      });
+    } catch (error) {
+      await this.lobbyRepository.rollbackCreatedTable(roomId).catch(() => undefined);
+      throw error;
+    }
+    return { roomId };
+  }
+
   private async advanceBracket(tournamentId: string, now: Date): Promise<void> {
     const ready: Array<{
       match: TournamentMatchRow;
       homeUserId: string | null;
       awayUserId: string | null;
     }> = [];
+    let lockedTournament: TournamentRow | null = null;
     await this.repository.transaction(async (tx) => {
       const tournament = await this.repository.lockById(tx, tournamentId);
       if (!tournament) return;
+      lockedTournament = tournament;
       const matches = await this.repository.lockMatches(tx, tournamentId);
       const entrantCount = countEntrants(tournament, matches);
       if (entrantCount < 2) return;
@@ -994,6 +1102,9 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
           const nextHome = side === 'home' ? move.userId : targetRow.homeUserId;
           const nextAway = side === 'away' ? move.userId : targetRow.awayUserId;
           if (nextHome !== null && nextAway !== null) {
+            // La sala se aprovisiona DESPUÉS de confirmar la transacción: el
+            // repositorio del lobby escribe por el pool y hacerlo acá dentro
+            // bloquearía la conexión (el mismo deadlock que ya sufrió este servicio).
             patch.status = 'READY';
             patch.deadlineAt =
               tournament.noShowMinutes > 0
@@ -1012,6 +1123,10 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
         }
       }
     });
+
+    // Se aprovisionan las salas recién después de confirmar y antes de avisar: un aviso
+    // de "partida lista" que lleva a una sala inexistente no sirve.
+    if (lockedTournament) await this.provisionPendingRooms(lockedTournament, now);
 
     for (const readyMatch of ready) {
       await this.notify(

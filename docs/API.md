@@ -572,6 +572,7 @@ Todas requieren `truco_access`.
 | `POST` | `/v1/tournaments/:id/register`   | `201`     | Inscribe al jugador mientras la inscripción esté abierta y haya cupo.         |
 | `POST` | `/v1/tournaments/:id/unregister` | `200`     | Da de baja al jugador antes del cierre de inscripción.                        |
 | `POST` | `/v1/tournaments/:id/check-in`   | `200`     | Confirma presencia dentro de la ventana de check-in.                          |
+| `POST` | `/v1/tournaments/:id/teams`      | `201`     | **Sólo 2v2**: inscribe un equipo completo (capitán + compañero).              |
 
 `GET /v1/tournaments` admite `status` (uno o varios), `limit` (1–50, default 20) y `cursor`. El cursor es opaco. Un torneo privado sólo aparece en el listado del organizador, de sus participantes y del staff; para cualquier otro jugador responde `404 NOT_FOUND` con `details.reason = "TOURNAMENT_NOT_VISIBLE"`, igual que si no existiera.
 
@@ -580,6 +581,22 @@ Todas requieren `truco_access`.
 ### Ciclo de vida
 
 `DRAFT` → `REGISTRATION` → `CHECK_IN` → `IN_PROGRESS` → `FINISHED`, con `CANCELLED` alcanzable desde cualquier estado no terminado. Las ventanas se fijan al crear (`registrationMinutes`, `checkInMinutes`) y se guardan como instantes absolutos: el cliente no puede moverlas después. Un barrido del servidor avanza los estados vencidos, arma el cuadro con quienes hicieron check-in y elimina por incomparecencia a quien no se presentó.
+
+### Torneos por equipos (2v2)
+
+En un torneo `mode: "2v2"` el inscripto es el **equipo**: el cupo cuenta equipos y cada lado del
+cuadro es un equipo (`homeTeamId` / `awayTeamId`; los `*UserId` del cruce quedan `null`).
+
+`POST /v1/tournaments/:id/teams` con `{ "name": "Los Pibes", "teammateUserIds": ["<uuid>"] }`
+inscribe a las dos personas juntas y responde `201 { "teamId": "...", "participants": 2 }`.
+Un equipo de 2v2 necesita exactamente dos integrantes (`400 TEAM_SIZE_MISMATCH`), nadie puede
+estar en dos equipos del mismo torneo (`409`), y el cuerpo no admite más de un compañero.
+
+`GET /v1/tournaments/:id` agrega `teams: TournamentTeamView[]` (vacío en 1v1), con el nombre,
+la siembra, el capitán y los integrantes con su estado de check-in. La tabla de posiciones y los
+premios siguen la misma unidad: una fila por equipo y un premio por integrante. El check-in se
+hace **por persona**, pero el equipo entra al cuadro sólo si se presentaron los dos
+(`docs/RULES.md` § 12).
 
 Inscribirse dos veces responde `409 CONFLICT`. Superar el cupo también: el control es transaccional, así que dos inserciones simultáneas no sobrepasan el máximo. La baja sólo se acepta mientras el torneo siga en `REGISTRATION` y el plazo no haya vencido; una vez que empieza el check-in ya no se puede abandonar por la API (quien no va a jugar simplemente no se presenta). Volver a inscribirse después de una baja reactiva la misma fila, así que el par `(torneo, jugador)` sigue siendo único.
 

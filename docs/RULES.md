@@ -193,3 +193,61 @@ Emitidas exclusivamente por el servidor autoritativo (`apps/game-server`), nunca
 | **Señas en equipos (`signals.enabled`)**              |  **Sí** (máx. 3/mano/jug.)   | **Sí** (máx. 3/mano/jug.) | **Sí** (máx. 3/mano/jug.) |
 | **Timeout en turno (`timeoutOnTurn`)**                |         `FOLD_HAND`          |        `FOLD_HAND`        |        `FOLD_HAND`        |
 | **Máx. timeouts seguidos (`maxConsecutiveTimeouts`)** |            **3**             |           **3**           |           **3**           |
+
+---
+
+## 12. Torneos con Equipos (2v2)
+
+Reglas del torneo por equipos. Son las que aplica `apps/api/src/modules/tournaments/tournament-teams.ts`
+(reglas puras) y las que verifica `apps/api/src/modules/tournaments/tests/`.
+
+### 12.1 Un equipo, un lado del cuadro
+
+- La unidad que ocupa un lado del cuadro es el **equipo**, no la persona: son los campos
+  `home_team_id` / `away_team_id` del cruce, y `home_user_id` / `away_user_id` quedan nulos
+  en un torneo 2v2. Un torneo de cuatro equipos tiene **tres cruces** (dos semifinales y la
+  final), no siete.
+- El **cupo del torneo cuenta equipos**. Cuatro equipos de dos personas sobre un cupo de 4
+  muestran `4/4`, nunca `8/4`, y el torneo se cierra cuando se inscribieron los cuatro.
+- Inscripción: `POST /v1/tournaments/:id/teams` con `{ name, teammateUserIds: [una persona] }`.
+  El capitán anota a los dos juntos: o queda el equipo completo o no queda nadie. Un jugador
+  no puede estar en dos equipos del mismo torneo (`409`).
+- **Sembrado**: por equipo, con el **rating medio** de sus integrantes.
+- Mesa del cruce: **cuatro asientos intercalados** (`team 0 → asientos 0 y 2`,
+  `team 1 → asientos 1 y 3`), que es el mismo reparto que usa el motor (`seat % 2 === team`).
+  Es una sala privada, sin bots y sin impacto en el ranking (`is_competitive = false`).
+
+### 12.2 Ausencias en el check-in
+
+- Un equipo entra al cuadro **sólo si se presentaron sus dos integrantes**. El capitán solo
+  no completa una mesa de cuatro asientos.
+- El equipo incompleto queda **fuera entero**: sus dos integrantes pasan a `NO_SHOW` —también
+  el que sí se presentó—, el equipo no ocupa ningún lado del cuadro y **no gana por
+  walkover**. Regalar el cruce sería premiar a quien no completó su equipo.
+- Si ningún lado de un cruce se presenta, el cruce se cierra por incomparecencia **sin
+  ganador** (`FORFEITED` / `NO_SHOW`) y el torneo termina sin pagar premio de campeón.
+
+### 12.3 Abandono durante la partida
+
+Dos casos distintos, y la diferencia importa:
+
+- **Irse al mazo (`FOLD_HAND`) es por mano**: el asiento sale de la mano en curso, su
+  compañero sigue jugando solo si está activo y el equipo puede ganar la partida igual
+  (§ 8).
+- **Abandonar la partida** (`SYSTEM_ABANDON`: salir de la mesa en juego o agotar la ventana
+  de reconexión) es de la **partida entera**: el equipo rival gana `targetScore - score`
+  puntos hasta el objetivo y el cruce se cierra a su favor, aunque el compañero del que se
+  fue siga sentado en la mesa (§ 10).
+- Consecuencia en el torneo: el cruce se cierra para el **equipo** rival, el equipo que
+  abandonó queda `ELIMINATED`, sus integrantes no avanzan y la tabla lo marca
+  `Cayó en la ronda N`. La llave avanza sin esperar al compañero que quedó.
+
+### 12.4 Tabla y premios
+
+- La tabla de un torneo por equipos tiene **una fila por equipo**: `nickname` es el nombre
+  del equipo y la nota de desempate dice quienes lo jugaron (`Campeón — A y B`).
+- El campeón son **todas las personas del equipo**: cada integrante queda `WINNER` y cobra
+  su premio por el libro mayor (una fila de `tournament_awards` por persona, con
+  `team_id`), con el único `(torneo, posición, persona)` que hace idempotente el reintento.
+
+---

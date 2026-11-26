@@ -470,25 +470,65 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 | Web: listado, detalle, cuadro, mi partida | `/torneos` y `/torneos/:id` con filtros, entrada por código, acciones según `canRegister`/`canCheckIn`, cuadro legible a 320 px y "Mi próxima partida" hacia `/mesa/:roomId`.                                      | `apps/web/tests/m10a-tournaments.spec.tsx`; capturas a 360 y 1200 px; medición de ancho a 320/360/1200 |
 | Notificaciones de ronda y partida lista   | `TOURNAMENT_ROUND_STARTED` y `TOURNAMENT_MATCH_READY` por el libro de M9a, con deduplicación por torneo/ronda/cruce.                                                                                               | Prueba de eventos de ronda para los cuatro jugadores                                                   |
 | Panel administrativo                      | Sección Torneos con filtros, creación de oficiales con motivo, cancelación con motivo obligatorio, avance manual y resolución de incidentes cruce por cruce, todo auditado.                                        | `apps/admin/tests/admin.spec.tsx` (18 pruebas) + recorrido en navegador contra la API real             |
-| Documentación                             | `API.md` §10, `EVENTS.md` §9.3, `THREAT_MODEL.md` (11 amenazas), `LEGAL_CHECKLIST.md` §2.8.1, ADR-029 y ADR-030, este apartado.                                                                                    | —                                                                                                      |
+| Documentación                             | `API.md` §10, `EVENTS.md` §9.3, `THREAT_MODEL.md` (11 amenazas), `LEGAL_CHECKLIST.md` §2.8.1, `RULES.md` §12 (equipos), ADR-029, ADR-030 y ADR-032, este apartado.                                                 | —                                                                                                      |
+
+### Torneos con equipos (2v2), hueco 1
+
+| Criterio pedido               | Implementación                                                                                                                                                                              | Evidencia                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Inscripción de equipos        | `POST /v1/tournaments/:id/teams` `{name, teammateUserIds:[1]}`; el capitán anota a los dos juntos, `TEAM_SIZE = 2`, nadie en dos equipos (409) y el cupo cuenta equipos.                    | `tournament-teams.spec.ts` (13), `tournaments.spec.ts` (cupo 4/4 y quinto equipo 409), E2E 2v2. |
+| El equipo ocupa el lado       | `home_team_id`/`away_team_id` en el cruce, `home_user_id`/`away_user_id` nulos; sembrado por rating medio; mesa de 4 asientos intercalados (`seatForTeamMember`).                           | `tournament-teams-bracket.spec.ts` (3), prueba de 2v2 con 4 equipos y 3 cruces.                 |
+| Compañero ausente en check-in | El equipo entra sólo completo; el incompleto queda fuera **entero** (los dos `NO_SHOW`, también el que se presentó) y **no gana por walkover**.                                             | `tournaments.spec.ts` con reloj controlado; E2E 2v2 con siete de ocho presentados.              |
+| Abandono de un integrante     | Irse al mazo es por mano y el compañero sigue; **abandonar la partida** es de la partida entera: gana el rival, el cruce se cierra y la llave avanza.                                       | E2E `m10a-tournament-2v2.spec.ts` (caso "abandono", navegador + WebSocket + motor real).        |
+| Campeón y premios por equipo  | `finalWinnerTeam` + `finishIfDecided` marca `WINNER` a los dos integrantes; premio por persona con `team_id` y único `(torneo, posición, persona)`; tabla por equipo con "Campeón — A y B". | Prueba de 2v2 (estado `WINNER` de los dos, 4 premios: 2 del primero y 2 del segundo), E2E.      |
+| Web para equipos              | Formulario "Inscribir mi equipo" (nombre + compañero buscado por apodo), sección de equipos con sus integrantes y cuadro con el nombre del equipo en cada lado.                             | `apps/web/tests/m10a-tournaments.spec.tsx` (2 casos nuevos, 74 en total).                       |
+
+**E2E 2v2 y la decisión de los clientes.** El torneo real de 8 personas en 4 equipos se
+juega de punta a punta: inscripción por equipo, check-in de los ocho, llave de 3 cruces,
+tres partidas y campeón. Los cuatro asientos de cada cruce juegan por **WebSocket** contra
+el game-server real y el navegador (390 px) queda para la inscripción, la llave y el
+resultado, más el caso de abandono que hace falta ver en la mesa. Se midió primero con
+cuatro navegadores por cruce: **15 minutos sin terminar la primera semifinal**, con el DOM
+de cuatro pestañas como cuello de botella y no el producto; con clientes WebSocket el mismo
+torneo tarda **2.7 min**. La partida va a 15 puntos, sin flor y con `ar-corto-15-v1`, el
+RuleSet más corto.
+
+**Check-in vencido y no-show.** `tournament-noshow.spec.ts` recorre con reloj inyectado
+(`nowFn`) el barrido real que corre el planificador: ventana vencida, ausentes fuera,
+cruce cerrado por incomparecencia y llave que no queda trabada; más idempotencia del
+barrido y cancelación sin llave. No espera tiempo real en ningún paso y corre sobre
+PostgreSQL 16 en CI.
 
 ### Errores reales encontrados y corregidos
 
-Los cuatro aparecieron al ejercitar el sistema, no al escribir pruebas unitarias:
+Los nueve aparecieron al ejercitar el sistema, no al escribir pruebas unitarias:
 
 1. **`withdraw` prohibido por la regla 13.** La ruta de baja se llamaba `POST /:id/withdraw` y `check-no-real-money` la marcó como endpoint de retiro de dinero. CI lo detectó. La ruta pasó a `/:id/unregister`; el guard no se tocó ni se le agregó una excepción.
 2. **El pase libre regalaba una ronda.** Al jugar un torneo de 7 contra el servicio, la ronda 2 se daba por ganada por un solo jugador. La causa era tratar "lado vacío" (bye) y "lado pendiente" (ronda anterior sin jugar) como lo mismo. Ahora sólo se resuelve el pase libre real.
 3. **El resultado de la mesa no cerraba el cruce.** `completeMatchByGame` estaba implementado, probado e **inalcanzable**: nadie lo llamaba. La partida se persistía con sus premios y su rating, pero el cruce seguía `READY` y la final no se armaba nunca; por eso el E2E de 4 jugadores se quedaba mirando una final `SCHEDULED` para siempre. Lo encontró el E2E, no una prueba de servicio: cada pieza pasaba sola. Ahora el lobby avisa cada partida terminada por un puente (`MatchCompletionBridge`) y torneos cierra su cruce, idempotente por `matchId`.
 4. **Los cruces nunca tenían sala.** `GAME_ROOM_PROVISIONER` estaba inyectado y nunca se llamaba: el cruce quedaba `READY` con `roomId: null` y "mi próxima partida" devolvía `null`. Un torneo no se podía jugar. Ahora se aprovisiona la mesa del cruce, fuera de la transacción del torneo (el repositorio del lobby escribe por el pool y usarlo dentro produciría deadlock).
+5. **Un torneo sin campeón pagaba premios.** En un cuadro que se cerraba sin ganador (doble incomparecencia) el reparto recorría la tabla y acreditaba el premio del puesto 1 igual. Ahora se paga sólo si hay campeón real; el caso está en `tournaments.spec.ts` y en `tournament-noshow.spec.ts` (sin premios tras una final sin ganador).
+6. **El reintento de un premio chocaba con el índice equivocado.** `insertAward` usa `onConflictDoNothing` y apuntaba al índice de dos columnas, mientras el único real pasó a ser `(torneo, posición, persona)`: el reintento no era idempotente y fallaba con `Failed query`. Corregido el `target` del `onConflict`, con la prueba de pago único.
+
+Con el modelo 2v2 (M10a, hueco 1) el E2E encontró tres bugs más, todos de producto:
+
+7. **El cupo contaba personas.** Un torneo de cuatro equipos de dos mostraba `8/4 inscriptos` y el resumen decía "completo" con la mitad de los equipos anotados. Ahora el cupo, el contador y la razón de cierre cuentan **equipos** en un torneo por equipos.
+8. **La tabla de un torneo 2v2 se armaba con la versión 1v1.** Un torneo terminado mostraba a los cuatro equipos como "Sigue en carrera" y sin campeón, porque el detalle usaba `buildStandings` (por persona) en vez de `standingsFor` (por equipo). La prueba de servicio no lo veía porque llamaba a `standingsFor` directamente; ahora también verifica el detalle.
+9. **"Mi próxima partida" no encontraba el cruce en 2v2.** Buscaba al jugador en los lados del cruce, y en equipos el lado es un equipo: la pantalla no ofrecía entrar a la mesa y el torneo por equipos era injugable desde la web. Ahora busca también los cruces del equipo del jugador.
+
+Además, en el panel: el cliente mandaba `content-type: application/json` en POST sin cuerpo (Fastify lo rechazaba y abrir un cuadro fallaba), el formulario de incidencia quedaba abierto sobre un cruce ya resuelto, cancelación e incidencia compartían el campo de motivo, y un torneo cancelado ofrecía "forzar avance de ronda". En el jugador, la tabla de posiciones decía "Cayó en la ronda —" a los cuatro antes de jugar.
 
 Además, en el panel: el cliente mandaba `content-type: application/json` en POST sin cuerpo (Fastify lo rechazaba y abrir un cuadro fallaba), el formulario de incidencia quedaba abierto sobre un cruce ya resuelto, cancelación e incidencia compartían el campo de motivo, y un torneo cancelado ofrecía "forzar avance de ronda". En el jugador, la tabla de posiciones decía "Cayó en la ronda —" a los cuatro antes de jugar.
 
 ### Verificación
 
-- **E2E de torneo real (Playwright):** un torneo privado de 4 se crea por HTTP, los 4 jugadores se inscriben y hacen check-in, la llave se lee en pantalla, cada semifinal se juega turno a turno con dos navegadores entrando por el botón de la mesa y marcando el asiento listo, y la final se arma sola con el resultado; el test cierra verificando al campeón. `apps/web/e2e/m10a-tournament.spec.ts`, **1/1 en verde en local (4.9 min) y en el job `Tournament E2E (4 jugadores)` de CI** (run `45853997387`, PostgreSQL 16 y Redis 7 de servicio).
-- `tournaments.spec.ts`: **17 pruebas** sobre PGlite, incluyendo torneo completo de 4, 7, 16 y 64 participantes, concurrencia de inscripciones, no-show, sala aprovisionada, cierre del cruce desde el resultado de la mesa (con idempotencia y sala ajena), tabla sin eliminaciones inventadas y acceso de staff a torneos privados.
+- **E2E de torneo real 1v1 (Playwright):** un torneo privado de 4 se crea por HTTP, los 4 jugadores se inscriben y hacen check-in, la llave se lee en pantalla, cada semifinal se juega turno a turno con dos navegadores entrando por el botón de la mesa y marcando el asiento listo, y la final se arma sola con el resultado; el test cierra verificando al campeón. `apps/web/e2e/m10a-tournament.spec.ts`, **verde en local (5.3 min)**.
+- **E2E de torneo real 2v2 (Playwright + WebSocket):** 8 personas, 4 equipos, inscripción por equipo, check-in de los ocho, llave de 3 cruces, tres partidas en mesas de cuatro asientos y campeón con sus dos integrantes premiados; más el caso de abandono de un integrante. `apps/web/e2e/m10a-tournament-2v2.spec.ts`, **2/2 en verde en local (5.0 min)**; los dos specs juntos, como los corre el job, **3/3 en 10.3 min**.
+- `tournament-noshow.spec.ts`: **3 pruebas** con reloj inyectado sobre el barrido real (check-in vencido, ausentes, incomparecencia, idempotencia y cancelación sin llave), sobre PostgreSQL 16 en CI.
+- `tournament-teams.spec.ts` (13) y `tournament-teams-bracket.spec.ts` (3): reglas puras de equipos, presencia, walkover, asientos intercalados y mesa de 2v2.
+- `tournaments.spec.ts`: **21 pruebas** (PGlite en el sandbox, PostgreSQL 16 en CI), incluyendo torneo completo de 4, 7, 16 y 64 participantes, concurrencia de inscripciones, no-show, sala aprovisionada, cierre del cruce desde el resultado de la mesa (con idempotencia y sala ajena), tabla sin eliminaciones inventadas, acceso de staff a torneos privados y los tres casos 2v2 (ciclo completo con equipos, ausente en el check-in y cupo por equipos).
 - `packages/shared`: 157 pruebas, entre ellas 14 de topología que verifican todos colocados una vez, byes a las mejores siembras, nadie contra sí mismo, N−1 y 2N−2 cruces para cada tamaño de 2 a 64, y campeón que nunca perdió.
-- Web: 72 pruebas; admin: 18.
+- Web: **74 pruebas**; admin: 18.
 - `format:check`, lint, typecheck y `check-no-real-money` en verde. Migraciones desde cero verificadas sobre PGlite.
 - Medición en navegador: `/torneos` a 320, 360 y 1200 px sin desborde del documento.
 - Recorrido real: torneo de 4 creado por HTTP, arrancado por el barrido, cuadro armado con salas, incidencia resuelta desde el panel y torneo cancelado con motivo auditado.

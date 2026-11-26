@@ -1355,6 +1355,10 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
   }, 60_000);
 
   it('el panel ve los torneos privados, pero el jugador ajeno no', async () => {
+    // El listado ordena por fecha de creación (más reciente primero) y tiene tope. El caso
+    // lo crea en un instante posterior al resto del archivo para que esté primero: así
+    // prueba la visibilidad del privado, no cuántos torneos crearon los otros casos.
+    at(120);
     const organizer = (await seedUsers(1))[0]!;
     const stranger = (await seedUsers(1))[0]!;
     const tournament = await service.create(organizer.principal, createInput, { ip: '10.0.0.3' });

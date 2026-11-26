@@ -859,23 +859,45 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     tournament: TournamentRow,
     now: Date,
   ): BracketRow[] {
-    const seedByKey = new Map<string, { winner: number | null; loser: number | null }>();
+    // Un lado "pendiente" es distinto de un lado vacío. Un pase libre (BYE) es vacío en
+    // la topología: el cruce no se juega y el rival avanza sin jugar. Un lado pendiente
+    // depende de un cruce que todavía no se jugó: ese cruce NO se puede dar por ganado,
+    // porque le regalaría una ronda de ventaja a quien esperaba.
+    const seedByKey = new Map<
+      string,
+      { winner: number | null; loser: number | null; pending: boolean }
+    >();
     const rows: BracketRow[] = [];
 
-    const resolve = (source: BracketSource): number | null => {
-      if (source.kind === 'SEED') return source.seed;
-      if (source.kind === 'EMPTY') return null;
+    const resolve = (source: BracketSource): { seed: number | null; pending: boolean } => {
+      if (source.kind === 'SEED') return { seed: source.seed, pending: false };
+      if (source.kind === 'EMPTY') return { seed: null, pending: false };
       const referenced = seedByKey.get(source.key);
-      if (!referenced) return null;
-      return source.kind === 'WINNER' ? referenced.winner : referenced.loser;
+      if (!referenced) return { seed: null, pending: false };
+      // Un cruce cuyo resultado todavía no existe deja pendiente a su destino.
+      if (referenced.pending) return { seed: null, pending: true };
+      return {
+        seed: source.kind === 'WINNER' ? referenced.winner : referenced.loser,
+        pending: false,
+      };
     };
 
     for (const match of topology.matches) {
-      const home = resolve(match.home);
-      const away = resolve(match.away);
+      const homeSide = resolve(match.home);
+      const awaySide = resolve(match.away);
+      const home = homeSide.seed;
+      const away = awaySide.seed;
       const bothPresent = home !== null && away !== null;
-      const freeAdvance = bothPresent ? null : (home ?? away);
-      seedByKey.set(match.key, { winner: freeAdvance, loser: null });
+      const anyPending = homeSide.pending || awaySide.pending;
+      // El pase libre sólo existe cuando un lado es estructuralmente vacío.
+      const freeAdvance = bothPresent || anyPending ? null : (home ?? away);
+      seedByKey.set(match.key, {
+        winner: freeAdvance,
+        loser: null,
+        // Pendiente si depende de un cruce sin jugar, o si este cruce todavía se juega
+        // (ambos presentes): sus destinos tampoco conocen el resultado.
+        pending: anyPending || bothPresent,
+      });
 
       const homeUserId = home !== null ? (userBySeed.get(home) ?? null) : null;
       const awayUserId = away !== null ? (userBySeed.get(away) ?? null) : null;

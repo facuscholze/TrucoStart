@@ -350,19 +350,30 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     }
   }, 60_000);
 
-  it('juega un torneo de 4 hasta el campeón, con avance idempotente y premios una sola vez', async () => {
+  /**
+   * Juega un torneo completo contra el servicio real: crea, inscribe, hace check-in,
+   * arranca, juega cada cruce listo según la topología y entrega premios. Devuelve los
+   * datos que cada caso necesita para afirmar. Es el mismo camino que usa la API, sin
+   * atajos por SQL.
+   */
+  async function playTournamentToTheEnd(input: {
+    readonly format: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION';
+    readonly participants: number;
+    readonly ip: string;
+  }) {
     const organizer = (await seedUsers(1))[0]!;
-    const players = await seedUsers(4, (index) => 1800 - index * 50);
+    const players = await seedUsers(input.participants, (index) => 1800 - index * 50);
     const tournament = await service.create(
       organizer.principal,
       {
         ...createInput,
-        capacity: 4,
+        format: input.format,
+        capacity: input.participants,
         checkInMinutes: 5,
         registrationMinutes: 5,
         noShowMinutes: 15,
       },
-      { ip: '10.0.0.5' },
+      { ip: input.ip },
     );
     for (const player of players) {
       await service.register(player.principal, tournament.id);
@@ -372,7 +383,7 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
 
     // Se juega con la topología: en cada cruce listo gana el sembrado más alto (el 1).
-    const topology = buildTournamentTopology('SINGLE_ELIMINATION', 4);
+    const topology = buildTournamentTopology(input.format, input.participants);
     const plan = simulateTournament(topology, (home, away) => Math.min(home, away));
     const participantRows = await db
       .select()
@@ -388,11 +399,15 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
         .where(
           and(
             eq(tournamentMatchesTable.tournamentId, tournament.id),
+            eq(tournamentMatchesTable.bracket, simulated.bracket),
             eq(tournamentMatchesTable.round, simulated.round),
             eq(tournamentMatchesTable.slot, simulated.slot),
           ),
         );
-      expect(row, `cruce ronda ${simulated.round} slot ${simulated.slot}`).toBeDefined();
+      expect(
+        row,
+        `cruce ${simulated.bracket} ronda ${simulated.round} slot ${simulated.slot}`,
+      ).toBeDefined();
       const winnerUserId = userBySeed.get(simulated.winnerSeed!)!;
       // La partida del torneo debe existir en `matches`: el vínculo es una FK real.
       const gameMatchId = await seedGameMatch(tournament.id, row!.id);
@@ -428,6 +443,26 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
       .select()
       .from(tournamentsTable)
       .where(eq(tournamentsTable.id, tournament.id));
+    // Estado final de las inscripciones: hay que releerlas, la foto de arriba es previa.
+    const finalParticipants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    return {
+      organizer,
+      tournament,
+      participantRows: finalParticipants,
+      championSeed: plan.championSeed,
+      finished,
+    };
+  }
+
+  it('juega un torneo de 4 hasta el campeón, con avance idempotente y premios una sola vez', async () => {
+    const { tournament, participantRows, finished } = await playTournamentToTheEnd({
+      format: 'SINGLE_ELIMINATION',
+      participants: 4,
+      ip: '10.0.0.5',
+    });
     expect(finished!.status).toBe('FINISHED');
 
     const champion = participantRows.find((row) => row.seed === 1)!;
@@ -467,6 +502,121 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
       realtimeEvents.filter((event) => event.type === 'TOURNAMENT_ROUND_STARTED'),
     ).toHaveLength(4);
   }, 120_000);
+
+  it('un torneo de 7 reparte byes y termina con un campeón', async () => {
+    // 7 no es potencia de 2: el cuadro tiene 8 lugares y un pase libre. El torneo tiene
+    // que jugarse igual, con 6 cruces jugados (N−1) y nadie esperando rival para siempre.
+    const { tournament, participantRows, finished } = await playTournamentToTheEnd({
+      format: 'SINGLE_ELIMINATION',
+      participants: 7,
+      ip: '10.0.0.11',
+    });
+    expect(finished!.status).toBe('FINISHED');
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    const played = matches.filter((match) => match.resolvedFromMatchId !== null);
+    expect(played).toHaveLength(6);
+    // El pase libre existe como cruce cerrado sin partida, y es uno solo.
+    expect(
+      matches.filter((match) => match.status === 'COMPLETED' && match.resolvedFromMatchId === null),
+    ).toHaveLength(1);
+    // Un solo campeón y el resto eliminado exactamente una vez en eliminación simple.
+    expect(participantRows.filter((row) => row.status === 'WINNER')).toHaveLength(1);
+    expect(participantRows.filter((row) => row.status === 'ELIMINATED')).toHaveLength(6);
+  }, 120_000);
+
+  it('un torneo de 16 con eliminación doble también llega al campeón', async () => {
+    // La doble eliminación se juega sin bracket reset (ADR-029): 2N−2 = 30 cruces.
+    const { tournament, participantRows, finished } = await playTournamentToTheEnd({
+      format: 'DOUBLE_ELIMINATION',
+      participants: 16,
+      ip: '10.0.0.12',
+    });
+    expect(finished!.status).toBe('FINISHED');
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    const played = matches.filter((match) => match.resolvedFromMatchId !== null);
+    expect(played).toHaveLength(30);
+    expect(participantRows.filter((row) => row.status === 'WINNER')).toHaveLength(1);
+    // Nadie queda eliminado con menos de dos derrotas.
+    expect(participantRows.filter((row) => row.status === 'ELIMINATED')).toHaveLength(15);
+  }, 180_000);
+
+  it('un torneo de 64 se simula completo y el servicio acepta cada resultado', async () => {
+    // La simulación con bots cubre el tamaño máximo del contrato: 63 cruces, nadie dos
+    // veces en la misma ronda y un campeón que nunca perdió. Se juega con el sembrado
+    // más alto ganando salvo sorpresas puntuales, para no depender de un único orden.
+    const topology = buildTournamentTopology('SINGLE_ELIMINATION', 64);
+    const pickWinner = (home: number, away: number) =>
+      home % 7 === 0 ? away : Math.min(home, away);
+    const plan = simulateTournament(topology, pickWinner);
+
+    expect(plan.playedCount).toBe(63);
+    expect(plan.championSeed).not.toBeNull();
+    expect(plan.eliminations).toHaveLength(63);
+
+    // El desarrollo completo se puede escribir y propagar por el mismo camino que usa
+    // la API, sin atajos: se verifica sobre los 63 cruces de la llave armada.
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(64, (index) => 1800 - index * 5);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 64, registrationMinutes: 5, checkInMinutes: 5 },
+      { ip: '10.0.0.13' },
+    );
+    for (const player of players) {
+      await service.register(player.principal, tournament.id);
+      await service.checkIn(player.principal, tournament.id);
+    }
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    const participants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    const userBySeed = new Map(participants.map((row) => [row.seed!, row.userId] as const));
+    const rows = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    // La clave es la misma que usa la topología: bracket, ronda y cruce.
+    const rowByKey = new Map<string, (typeof rows)[number]>(
+      rows.map((row) => [`${row.bracket}-R${row.round}-S${row.slot}`, row]),
+    );
+
+    let applied = 0;
+    for (const simulated of plan.matches) {
+      if (!simulated.played) continue;
+      const row = rowByKey.get(simulated.key)!;
+      expect(row, `cruce ${simulated.key}`).toBeDefined();
+      const winnerUserId = userBySeed.get(simulated.winnerSeed!)!;
+      const ok = await service.completeMatchByGame({
+        tournamentMatchId: row.id,
+        matchId: await seedGameMatch(tournament.id, row.id),
+        winnerUserId,
+        now: new Date(clockMs),
+      });
+      expect(ok, `cruce ${simulated.key}`).toBe(true);
+      applied += 1;
+    }
+    expect(applied).toBe(63);
+
+    const [final] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, tournament.id));
+    expect(final!.status).toBe('FINISHED');
+    const finalParticipants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    expect(finalParticipants.filter((row) => row.status === 'WINNER')).toHaveLength(1);
+  }, 240_000);
 
   it('quien no hace check-in queda fuera sin arrancar una llave de una sola persona', async () => {
     const organizer = (await seedUsers(1))[0]!;

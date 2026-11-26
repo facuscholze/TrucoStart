@@ -276,3 +276,25 @@ M9c no agrega tipos de envelope ni broadcasts WebSocket públicos. La progresió
 6. Práctica y partidas con bots pueden dar recompensas reducidas mediante `botMatchXp`, `botDailyXpCap`, `botMatchCoins` y `botDailyCoinCap`. `matches.is_practice` excluye la práctica del historial/estadísticas públicas, y ni la práctica ni los bots califican en Glicko-2.
 
 `VIRTUAL_COIN` sólo desbloquea cosméticos visuales; las restricciones de PostgreSQL fuerzan `has_economic_value=false`, `player_transfers_enabled=false` y `money_purchases_enabled=false`. El saldo es la suma del libro mayor inmutable: correcciones administrativas agregan un asiento compensatorio con motivo, actor, sesión, IP y auditoría, nunca editan/eliminan el original. Los cosméticos tampoco afectan reglas ni matchmaking.
+
+### 9.3 Torneos — M10a
+
+M10a tampoco agrega envelopes WebSocket públicos. El ciclo del torneo vive en `apps/api` y se apoya en tres piezas durables: el barrido de mantenimiento, el `match.completed` que ya existe y el libro de notificaciones de M9a.
+
+1. **Barrido de mantenimiento.** Periódicamente, dentro de la API, cada torneo vencido avanza de estado: cierra la inscripción al llegar `registration_closes_at`, abre el check-in, arranca el torneo cuando vence `check_in_closes_at` (armando el cuadro con quienes hicieron check-in y marcando ausentes a los demás) y cierra cruces cuyo `deadline_at` pasó sin que ambos se presentaran. El barrido es idempotente: sólo actúa sobre torneos cuyo estado y plazos lo habilitan.
+2. **`match.completed`.** Si la partida pertenece a un torneo, la API resuelve el cruce con el ganador del resultado, avanza la llave y cierra el torneo si ya no quedan cruces pendientes. El avance es idempotente por `matchId`: un reintento del consumidor no duplica el avance ni vuelve a pagar premios.
+3. **Byes.** Al armar el cuadro, los cruces cuyos dos lados se conocen sin jugar (bye y sus consecuencias) se escriben ya resueltos. Después se propaga lo que quedó `READY`; nadie espera un resultado que no existe.
+4. **Sala de juego.** Cada cruce `READY` tiene `room_id` de una sala aprovisionada por el flujo existente (M4/M5a). El jugador entra por `/mesa/:roomId`. Los cruces de torneo nunca se completan con bots.
+5. **Rating.** Las partidas de torneo se persisten con la marca de no competitivas: no pasan por Glicko-2 ni por rankings (ADR-030).
+6. **Premios.** Al terminar el torneo se pagan una sola vez por posición, con asiento inmutable en `wallet_transactions` e `idempotencyKey = "tournament:<id>:prize:<posición>"`. Un torneo cancelado no paga nada.
+
+#### Notificaciones M9a
+
+Dos tipos nuevos, que se entregan por el mismo libro de notificaciones y respetan su regla de un aviso por `(usuario, tipo, referencia)`:
+
+| Tipo                       | Cuándo                                           | `payload`                                             |
+| -------------------------- | ------------------------------------------------ | ----------------------------------------------------- |
+| `TOURNAMENT_ROUND_STARTED` | El torneo arranca y la primera ronda queda lista | `{ tournamentId, round }`                             |
+| `TOURNAMENT_MATCH_READY`   | Un cruce pasa a `READY` con sala aprovisionada   | `{ tournamentId, tournamentMatchId, bracket, round }` |
+
+`referenceId` es el `tournamentId` en ambos casos. La deduplicación usa la clave del torneo, la ronda o el cruce, así que un reintento del barrido no genera un segundo aviso. Un cruce que se resuelve por incomparecencia no genera `TOURNAMENT_MATCH_READY`.

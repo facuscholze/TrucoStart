@@ -204,6 +204,40 @@ fuera del catálogo de IDs validado.
 > perfil deben ser revisados profesionalmente. La implementación no resuelve la
 > calificación jurídica ni constituye asesoramiento.
 
+### 2.8.1 Torneos — M10a
+
+Los torneos **no agregan datos personales nuevos**: no piden nombre real, documento,
+teléfono, dirección ni medio de pago. Todo lo que guardan ya existe en tablas
+descritas arriba.
+
+| Tabla                                     | Qué guarda                                                                                                       | Dato personal implicado                                                                                |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `tournaments`                             | Nombre del torneo (texto libre), formato, cupo, `ruleset`, ventanas de tiempo, visibilidad, código de invitación | El nombre lo escribe el organizador y podría contener datos: se recomienda no incluir datos personales |
+| `tournament_participants`                 | Quién se inscribió, cuándo, si hizo check-in, siembra y rating usado para sembrar                                | Identificador de cuenta + actividad competitiva (misma categoría que M9b)                              |
+| `tournament_matches`                      | Cruces, sala asociada, plazos, ganador, motivo de incomparecencia                                                | Identificador de cuenta + resultado                                                                    |
+| `tournament_prizes` / `tournament_awards` | Premio por posición y a quién se entregó                                                                         | Identificador de cuenta + recompensa obtenida (misma categoría que M9c)                                |
+| `audit_logs`                              | Creación, cancelación, avance e incidentes resueltos por staff, con motivo y estados anterior/nuevo              | Identificador del operador y del torneo                                                                |
+
+Puntos que la revisión profesional debe mirar:
+
+- **No hay dinero real en ninguna parte del flujo.** La inscripción es gratuita y no
+  existe compra de entrada, apuesta, pozo, retiro ni transferencia entre jugadores.
+  Los premios son monedas virtuales sin valor económico o cosméticos, con el mismo
+  libro mayor inmutable de M9c. Si en el futuro se quisiera cobrar una entrada,
+  estaría fuera de alcance y requeriría revisión legal previa.
+- **El nombre del torneo es texto libre visible** para otros jugadores cuando el
+  torneo es oficial o cuando alguien entra con el código. Conviene que la interfaz
+  recuerde no escribir datos personales ahí; hoy no hay validación de contenido más
+  allá de longitud.
+- **Visibilidad.** Un torneo privado no lista a sus participantes para quien no
+  participa: el detalle responde 404 a un jugador ajeno. El staff sí puede leerlo,
+  porque necesita resolver incidencias, y esa lectura queda auditada.
+- **Retención.** Hoy no hay política de purga de torneos. Se aplican las mismas
+  consideraciones que para historial y ratings: si se implementa borrado de cuenta,
+  hay que decidir qué pasa con la participación histórica en torneos ya cerrados.
+- **Premios y menores.** Un premio simbólico no constituye un beneficio económico,
+  pero la revisión de edad mínima de la sección 4 sigue aplicando igual.
+
 ---
 
 ## 3. Mecanismos técnicos ya implementados

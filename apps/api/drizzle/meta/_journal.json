@@ -78,6 +78,13 @@
       "when": 1795286400001,
       "tag": "0010_m9c_progression_economy",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795664823207,
+      "tag": "0011_m10a_tournaments",
+      "breakpoints": true
     }
   ]
 }

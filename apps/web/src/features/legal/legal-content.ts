@@ -39,7 +39,8 @@ export const legalDocuments: Readonly<Record<LegalDocumentSlug, LegalDocument>> 
         bullets: [
           'No hay depósitos ni pagos dentro del juego.',
           'No hay retiros, cobros ni conversión de puntos a dinero.',
-          'No existe transferencia de puntos, monedas ni objetos entre jugadores: los puntos de progreso son personales y no se pueden intercambiar.',
+          'La plataforma puede otorgar monedas virtuales simbólicas (VIRTUAL_COIN) por jugar, completar misiones o logros. No tienen valor económico, no se compran con dinero ni se transfieren; sólo se canjean por cosméticos que no alteran las reglas ni dan ventaja.',
+          'No existe transferencia de puntos, monedas ni objetos entre jugadores: el progreso es personal y no se puede intercambiar.',
         ],
       },
       {
@@ -101,6 +102,8 @@ export const legalDocuments: Readonly<Record<LegalDocumentSlug, LegalDocument>> 
           'Historial de partidas: participantes, asientos, puntajes, eventos de la partida, semilla de barajado revelada y reglas aplicadas.',
           'Reportes y sanciones: motivo, estado, resolución y fechas.',
           'Registro de auditoría de acciones administrativas y de seguridad, con actor, acción e IP.',
+          'Progreso del tutorial y del sistema de progresión: experiencia (XP), nivel, logros, misiones, notificaciones y cosméticos desbloqueados.',
+          'Saldo y movimientos de monedas virtuales simbólicas (VIRTUAL_COIN), ganadas por actividad y canjeables únicamente por cosméticos; no tienen valor económico ni se transfieren entre cuentas.',
           'Progreso del tutorial.',
           'Constancia de aceptación legal: versión aceptada de los Términos y de la Política, fecha de aceptación y edad mínima vigente en ese momento.',
         ],
@@ -110,7 +113,7 @@ export const legalDocuments: Readonly<Record<LegalDocumentSlug, LegalDocument>> 
         paragraphs: [
           'No se guarda la edad declarada: sólo se usa en el momento del alta para verificar el mínimo y se descarta.',
           'No se guardan datos sensibles en el sentido del artículo 7 de la Ley 25.326 (origen racial o étnico, opiniones políticas, convicciones religiosas o filosóficas, afiliación sindical, datos de salud o de vida sexual).',
-          'No se guardan datos de tarjetas, cuentas bancarias ni billeteras virtuales, porque el producto no procesa pagos.',
+          'No se guardan datos de tarjetas, cuentas bancarias ni billeteras financieras externas. El producto no procesa pagos y las monedas VIRTUAL_COIN que guarda son simbólicas, no transferibles, no comprables con dinero y sin valor económico.',
         ],
       },
       {

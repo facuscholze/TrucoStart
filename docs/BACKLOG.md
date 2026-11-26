@@ -13,16 +13,16 @@
 
 ## Etapa 2 — Crecimiento (Post-MVP)
 
-1. **Red social y presencia (`friendships`, invitaciones, desafíos):**
-   - Solicitudes de amistad, lista de amigos con estado conectado/jugando en tiempo real, invitaciones directas a mesa, desafíos 1v1/2v2 y bloqueo entre usuarios.
-2. **Rating competitivo Glicko-2 e historial enriquecido:**
-   - Cálculo de rating, desviación y volatilidad por modo tras cada partida rankeada; historial detallado de partidas jugadas.
-3. **Rankings y tablas de clasificación:**
-   - Rankings global, semanal, mensual y por modo cacheados en Redis, con cuenta regresiva de reinicio y requisitos mínimos de partidas y rivales únicos.
-4. **Progresión y gamificación sin pay-to-win:**
-   - XP, niveles, logros (`achievements`), misiones diarias (`quests`), rachas y libro mayor inmutable de monedas virtuales (`wallets`, `wallet_transactions`, saldo nunca negativo, sin retiros ni transferencias entre jugadores).
-5. **Notificaciones:**
-   - Notificaciones in-app y Web Push configurables sin spam.
+1. **Red social y presencia (`friendships`, invitaciones, desafíos) — Entregado en M9a.**
+   - Solicitudes de amistad, lista de amigos con estado conectado/jugando en tiempo real, invitaciones directas a mesa, desafíos 1v1/2v2, bloqueo, privacidad configurable, notificaciones e historial/estadísticas. Ver `docs/STATE.md`.
+2. **Rating competitivo Glicko-2 por modo — Entregado en M9b.**
+   - Rating, desviación y volatilidad para 1v1/2v2; sólo partidas competitivas humanas persistidas; temporadas, deltas e idempotencia transaccional. Práctica y bots no puntúan.
+3. **Rankings y tablas de clasificación — Entregado en M9b.**
+   - Rankings global/semanal/mensual por modo, paginación, cuenta regresiva y mínimos de partidas/rivales; proyección reconstruible Redis y filtro de privacidad `statsVisibility=ALL`.
+4. **Progresión y gamificación sin pay-to-win — Entregado en M9c.**
+   - XP/niveles, logros, misiones diarias/semanales, notificaciones, libro mayor inmutable de `VIRTUAL_COIN` y canje de cosméticos, con idempotencia/topes y administración auditada. Sin valor económico, compras con dinero ni transferencias; práctica/bots reciben progreso reducido, sin rating ni estadísticas públicas. Rachas y pase de temporada quedan pendientes para una etapa futura.
+5. **Notificaciones — Entregado en M9a.**
+   - Notificaciones in-app persistidas; Web Push configurable sigue pendiente de proveedor y consentimiento.
 
 ---
 
@@ -36,8 +36,8 @@
    - Extensión de modos sobre el motor N-asientos ya preparado desde M1.
 4. **Modo espectador con retraso:**
    - Transmisión diferida sin exposición de manos activas en tiempo real para impedir asistencia externa.
-5. **Detección avanzada de colusión y anomalías:**
-   - Heurísticas estadísticas sobre emparejamientos repetidos, abandonos dirigidos y patrones de señas, siempre con cola de revisión humana antes de sancionar.
+5. **Ampliar detección de colusión y anomalías más allá de M9b — Pendiente.**
+   - M9b ya registra indicios de rivalidades repetidas, partidas cortas, abandonos coordinados y posible feeding en una cola de revisión humana; ampliar análisis estadístico (incluidos patrones de señas) manteniendo siempre la intervención humana antes de sancionar.
 
 ---
 

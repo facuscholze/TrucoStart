@@ -58,7 +58,7 @@ export function ReportsView({
                 : 'border-ivory/15 bg-surface/50 hover:border-sky/30'
             }`}
           >
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-ivory/55">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
               {REPORT_STATUS_LABELS_ES_AR[status]}
             </p>
             <p className="mt-1 font-display text-2xl font-bold text-ivory">{data.totals[status]}</p>

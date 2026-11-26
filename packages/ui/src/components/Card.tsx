@@ -1,5 +1,10 @@
 import type { CSSProperties } from 'react';
-import { describeSpanishCard, type SpanishRank, type SpanishSuit } from '../cards/deck-catalog.js';
+import {
+  describeSpanishCard,
+  SUIT_IDENTITIES,
+  type SpanishRank,
+  type SpanishSuit,
+} from '../cards/deck-catalog.js';
 import { SpanishCardBackSvg, SpanishCardSvg } from '../cards/SpanishCardSvg.js';
 import { usePrefersReducedMotion } from '../tokens/motion.js';
 import { designTokens } from '../tokens/theme.js';
@@ -43,8 +48,12 @@ export function Card({
   const prefersReduced = usePrefersReducedMotion(reducedMotion);
   const dims = SIZE_DIMENSIONS[size];
   const isFaceDown = faceDown || !rank || !suit;
-  const computedLabel =
-    ariaLabel ?? (isFaceDown ? 'Carta cubierta' : describeSpanishCard(rank, suit));
+  const visualText = isFaceDown
+    ? ''
+    : `${rank}${SUIT_IDENTITIES[suit!].glyphCode}${rank}${SUIT_IDENTITIES[suit!].glyphCode}`;
+  const computedLabel = isFaceDown
+    ? (ariaLabel ?? 'Carta cubierta')
+    : `${ariaLabel ?? describeSpanishCard(rank!, suit!)} ${visualText}`;
 
   const sharedBoxStyle: CSSProperties = {
     position: 'relative',

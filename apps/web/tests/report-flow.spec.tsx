@@ -119,7 +119,22 @@ describe('M7 — reportar a otro jugador desde el cliente', () => {
     await waitFor(() => expect(screen.queryByText('Reportar a un jugador')).toBeNull());
   });
 
-  it('la pantalla de resultado ofrece reportar a los rivales humanos', () => {
+  it('cierra con Escape y devuelve el foco al botón que abrió el reporte', async () => {
+    render(<ReportButton targets={[TARGET]} matchId={MATCH_ID} myUserId={null} />);
+    const trigger = screen.getByRole('button', { name: 'Reportar' });
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Reportar a un jugador' });
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('traduce el motivo real de finalización y ofrece reportar a los rivales humanos', () => {
     const noop = () => undefined;
     render(
       <MatchResultModal
@@ -131,7 +146,7 @@ describe('M7 — reportar a otro jugador desde el cliente', () => {
           usScore: 15,
           themScore: 11,
           targetScore: 15,
-          reason: 'TARGET_SCORE_REACHED',
+          reason: 'TARGET_SCORE',
           seedCommitment: 'ab'.repeat(32),
           seedReveal: 'cd'.repeat(32),
         }}
@@ -144,7 +159,33 @@ describe('M7 — reportar a otro jugador desde el cliente', () => {
       />,
     );
     expect(screen.getByTestId('match-result-report')).toBeTruthy();
+    expect(screen.getByText('Partida definida por alcanzar el puntaje objetivo.')).toBeTruthy();
+    expect(screen.queryByText('TARGET_SCORE')).toBeNull();
     const reportButtons = screen.getAllByRole('button', { name: 'Reportar' });
     expect(reportButtons.length).toBeGreaterThan(0);
+  });
+
+  it('no expone códigos internos cuando recibe un motivo de cierre desconocido', () => {
+    render(
+      <MatchResultModal
+        open
+        myTeam={0}
+        summary={{
+          matchId: MATCH_ID,
+          winnerTeam: 0,
+          usScore: 15,
+          themScore: 11,
+          targetScore: 15,
+          reason: 'INTERNAL_REASON',
+          seedCommitment: 'ab'.repeat(32),
+          seedReveal: 'cd'.repeat(32),
+        }}
+        rematchRequested={false}
+        onRequestRematch={() => undefined}
+        onExitToHome={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Partida finalizada.')).toBeTruthy();
+    expect(screen.queryByText('INTERNAL_REASON')).toBeNull();
   });
 });

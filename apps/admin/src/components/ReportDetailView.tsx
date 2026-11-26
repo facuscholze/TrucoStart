@@ -99,7 +99,7 @@ export function ReportDetailView({
       {error && (
         <p
           role="alert"
-          className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+          className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger-strong"
         >
           {error}
         </p>
@@ -125,35 +125,35 @@ export function ReportDetailView({
           >
             <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="text-[11px] uppercase tracking-wide text-ivory/50">Motivo</dt>
+                <dt className="text-[11px] uppercase tracking-wide text-muted">Motivo</dt>
                 <dd className="text-ivory">{REPORT_REASON_LABELS_ES_AR[report.reasonCode]}</dd>
               </div>
               <div>
-                <dt className="text-[11px] uppercase tracking-wide text-ivory/50">Creado</dt>
+                <dt className="text-[11px] uppercase tracking-wide text-muted">Creado</dt>
                 <dd className="text-ivory">{formatDateTime(report.createdAt)}</dd>
               </div>
               <div>
-                <dt className="text-[11px] uppercase tracking-wide text-ivory/50">Partida</dt>
+                <dt className="text-[11px] uppercase tracking-wide text-muted">Partida</dt>
                 <dd className="text-ivory">
                   {report.matchId ? report.matchId : 'Sin partida asociada'}
                 </dd>
               </div>
               <div>
-                <dt className="text-[11px] uppercase tracking-wide text-ivory/50">Versión</dt>
+                <dt className="text-[11px] uppercase tracking-wide text-muted">Versión</dt>
                 <dd className="text-ivory">
                   v{report.version}
                   {report.claimedByNickname ? ` · tomado por ${report.claimedByNickname}` : ''}
                 </dd>
               </div>
               <div className="sm:col-span-2">
-                <dt className="text-[11px] uppercase tracking-wide text-ivory/50">
+                <dt className="text-[11px] uppercase tracking-wide text-muted">
                   Comentario del jugador
                 </dt>
                 <dd className="text-ivory/85">{report.details ?? 'Sin comentario adicional.'}</dd>
               </div>
               {report.resolutionNote && (
                 <div className="sm:col-span-2">
-                  <dt className="text-[11px] uppercase tracking-wide text-ivory/50">Resolución</dt>
+                  <dt className="text-[11px] uppercase tracking-wide text-muted">Resolución</dt>
                   <dd className="text-ivory/85">
                     {report.resolutionNote}
                     {report.resolvedByNickname ? ` · ${report.resolvedByNickname}` : ''} ·{' '}
@@ -175,7 +175,7 @@ export function ReportDetailView({
                   </Button>
                 )}
                 {canResolve && (
-                  <span className="text-xs text-ivory/50">
+                  <span className="text-xs text-muted">
                     Para resolver, justificá la decisión abajo (mínimo 10 caracteres).
                   </span>
                 )}
@@ -250,9 +250,9 @@ export function ReportDetailView({
                 <ol className="max-h-64 space-y-1 overflow-auto rounded-xl border border-ivory/10 bg-surface/50 p-3 text-xs">
                   {replay.events.map((event) => (
                     <li key={event.seq} className="flex gap-2">
-                      <span className="w-8 shrink-0 text-ivory/40">#{event.seq}</span>
+                      <span className="w-8 shrink-0 text-muted">#{event.seq}</span>
                       <span className="font-mono text-sky">{event.type}</span>
-                      <span className="text-ivory/55">{formatDateTime(event.at)}</span>
+                      <span className="text-muted">{formatDateTime(event.at)}</span>
                     </li>
                   ))}
                 </ol>
@@ -286,7 +286,7 @@ export function ReportDetailView({
           <Card title="Jugador reportado" subtitle={`Estado actual de ${target.nickname}`}>
             <div className="space-y-1.5 text-xs text-ivory/75">
               <p>
-                <span className="text-ivory/50">Estado:</span>{' '}
+                <span className="text-muted">Estado:</span>{' '}
                 <StatusPill
                   tone={
                     target.status === 'ACTIVE'

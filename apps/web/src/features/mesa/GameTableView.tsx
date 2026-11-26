@@ -360,7 +360,7 @@ export function GameTableView({
       {isMuted && (
         <div
           role="status"
-          className="rounded-xl border border-danger/50 bg-danger/10 p-3 text-xs text-danger"
+          className="rounded-xl border border-danger/50 bg-danger/10 p-3 text-xs text-danger-strong"
         >
           Estás silenciado hasta el {new Date(mutedUntil as string).toLocaleString('es-AR')}: no
           podés usar el chat rápido ni enviar señas. Podés seguir jugando.

@@ -101,16 +101,6 @@ export class ModerationService {
       }
     }
 
-    const openByReporter = await this.repo.countOpenReportsByReporter(principal.userId);
-    if (openByReporter >= this.config.maxOpenReportsPerReporter) {
-      throw new DomainApiException(
-        409,
-        'CONFLICT',
-        `Tenés ${openByReporter} reportes abiertos (máximo ${this.config.maxOpenReportsPerReporter}). Esperá a que se resuelvan.`,
-        { reason: 'TOO_MANY_OPEN_REPORTS', openReports: openByReporter },
-      );
-    }
-
     const nowMs = this.config.nowFn();
     const now = new Date(nowMs);
     const dedupeKey = this.dedupeKey(
@@ -130,6 +120,16 @@ export class ModerationService {
         mergedWithExisting: true,
         eventLogRef: (duplicate.eventLogRef as unknown as ReportEventLogRef | null) ?? null,
       };
+    }
+
+    const openByReporter = await this.repo.countOpenReportsByReporter(principal.userId);
+    if (openByReporter >= this.config.maxOpenReportsPerReporter) {
+      throw new DomainApiException(
+        409,
+        'CONFLICT',
+        `Tenés ${openByReporter} reportes abiertos (máximo ${this.config.maxOpenReportsPerReporter}). Esperá a que se resuelvan.`,
+        { reason: 'TOO_MANY_OPEN_REPORTS', openReports: openByReporter },
+      );
     }
 
     const eventLogRef = matchId ? await this.repo.buildEventLogRef(matchId) : null;

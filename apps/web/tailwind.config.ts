@@ -18,6 +18,7 @@ const config: Config = {
         gold: designTokens.colors.accentGold,
         sky: designTokens.colors.accentSky,
         danger: designTokens.colors.danger,
+        'danger-strong': designTokens.colors.dangerTextOnSurface,
         success: designTokens.colors.success,
       },
       fontFamily: {

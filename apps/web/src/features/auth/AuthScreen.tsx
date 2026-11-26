@@ -511,7 +511,7 @@ export function AuthScreen({
               </div>
 
               {legalError && (
-                <p role="alert" className="text-[11px] font-semibold text-danger">
+                <p role="alert" className="text-[11px] font-semibold text-danger-strong">
                   {legalError}
                 </p>
               )}

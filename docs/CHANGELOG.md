@@ -4,6 +4,54 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [Unreleased] — 2026-11-19 (Auditoría de producto M0–M9c, tandas 1–3)
+
+### Corregido
+
+- La revancha ya puede iniciar una segunda partida en la misma sala: `RoomActor` permite reemplazar el estado terminado y una prueba de ciclo de vida verifica `game.started` y el nuevo reparto para ambos clientes.
+- La pantalla de resultado traduce el motivo real `TARGET_SCORE` y no muestra claves internas desconocidas.
+- Se simplificó copy visible para jugadores: conexión, cantos, baraja verificable, ranking y reconexión, sin términos de infraestructura en esos mensajes.
+- El E2E multi-cliente acota el clic de jugada para tolerar la carrera en que aparece el resultado entre la comprobación y el clic.
+- Ranking responsive: en móvil se muestran tarjetas compactas con todas las estadísticas sin una tabla recortada; desde tablet se conserva la tabla semántica. El puntaje global dejó de repetirse como si fuera una variación.
+- La captura M9b espera controles por rol y el texto vigente, y falla si la página de ranking desborda horizontalmente a 360 px.
+- El ciclo de práctica ahora publica `match.completed` al terminar para persistir XP/misiones de bot con sus topes reducidos; el contrato acepta un solo humano cuando los demás asientos son bots. Una finalización de práctica libera el asiento SQL sin marcar la mesa `FINISHED`, para permitir revancha y evitar bloquear nuevas mesas.
+- La referencia de eventos adjunta a reportes dejó de usar MD5 de secuencia/tipo: ahora usa SHA-256 determinista de los eventos ordenados, incluyendo secuencia, tipo, timestamp y payload canonicalizado (64 hex, conforme al contrato compartido).
+- `full-match-e2e.spec.ts` integra dos clientes en el recorrido invitado→promoción→práctica vs bot→amistad/invitación→partida humana→XP/misión→reporte→partida competitiva→ranking; mantiene además la prueba competitiva independiente.
+
+### Verificación local
+
+- Suite web: 47/47; suites de monorepo: `pnpm test` terminó con exit 0 (API: 158 aprobados, 8 omitidos por servicios externos no configurados en sandbox).
+- `format:check`, lint, typecheck y build recursivos del monorepo pasaron. El bundle web principal mide 114.29 KB gzip; admin 94.29 KB gzip. Permanecen advertencias no bloqueantes de Rollup por comentarios `@__PURE__` de Zod.
+- `apps/game-server`: `provisioning-and-lifecycle.spec.ts` 1 aprobado / 1 omitido (integración Redis/BullMQ), lint, typecheck y build.
+- Tanda 3 focal: `full-match-e2e.spec.ts` 3/3 (incluye el recorrido integrado, 61 s de suite; 52 s el flujo), reportes API 5/5, bots game-server 6/6, contratos shared 4/4; lint/typecheck API y game-server en verde. El E2E local usa PGlite + bus en memoria, así que la integración PostgreSQL/Redis reales queda para CI.
+- Playwright multi-cliente con API y game-server reales del stack E2E: Desktop 1280×800 y Mobile 360×800, ambos pasan e incluyen revancha. El stack local usa PGlite y bus de ciclo de vida en memoria; no equivale a PostgreSQL/Redis reales.
+- `screenshots:m9b` completó 6 capturas de ranking, rating de perfil y Fair Play admin a 360/1200; la captura móvil del ranking verifica además que la página no tenga scroll horizontal. `check:bundle` del admin pasó.
+
+### Cierre de la auditoría
+
+- Completada la revisión visual de las capturas disponibles de web, mesa y admin a 360/1200, las auditorías de accesibilidad y responsive, y las mediciones móviles observadas. Las nueve oportunidades UX, su evidencia y criterios de aceptación están en `docs/UX_AUDIT_M0-M9C.md`; no se implementaron.
+- No iniciar Etapa 3. El cierre general requiere CI remoto 4/4 para el SHA final empujado y los demás gates de M0–M9c; la revisión profesional legal sigue pendiente.
+
+---
+
+## [0.9.0-m9b] — 2026-11-19 (M9b — Rating competitivo, rankings y revisión humana)
+
+### Agregado
+
+- **Glicko-2 por modo y temporada:** ratings, desviaciones y volatilidades independientes para 1v1/2v2; captura de temporada al iniciar, procesamiento idempotente tras persistir la partida, deltas por jugador y estadísticas semanales/mensuales.
+- **Matchmaking competitivo separado:** ventanas de rating crecientes con espera, balance de equipos 2v2 y límite de revancha; la cola casual permanece separada.
+- **Rankings públicos:** global/semanal/mensual por modo con paginación, mínimos de actividad, filtro `statsVisibility=ALL`, tarjeta en perfiles y nueva ruta web `/ranking`.
+- **Revisión humana de integridad:** evidencia de rivales repetidos, partidas breves, abandonos coordinados y posibles patrones de feeding; consola Admin con RBAC, claim/resolución optimista y auditoría. Las señales nunca aplican sanciones automáticamente.
+- **Persistencia y temporadas:** migraciones `0008_m9b_rankings.sql` y `0009_m9b_competitive_season_capture.sql`, outbox durable para Redis, snapshots de cierre y reinicio suave.
+
+### Verificación
+
+- QA local final: `corepack pnpm build`, lint, typecheck, suite completa del monorepo, `format:check` y `git diff --check` en verde. Total: 334 tests aprobados; 11 omitidos, incluidos los contratos Redis/BullMQ sin `REDIS_URL`.
+- Migraciones `0007`–`0009` ejecutadas mediante PGlite; el endpoint OpenAPI vivo pasó paridad exacta con `docs/openapi.v1.json`.
+- CI remota run `45463088742`: 4/4 jobs exitosos. El job principal corrió tests, lint/typecheck, build y guardas de bundle con PostgreSQL 16 y Redis 7; el job de backup/restore con PostgreSQL 16 también terminó en verde.
+
+---
+
 ## [0.8.1-m8b-perf] — 2026-11-18 (M8b — Rendimiento y carga)
 
 ### Agregado

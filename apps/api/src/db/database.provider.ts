@@ -1,10 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { INITIAL_RULESETS } from '@truco/engine';
-import { sql } from 'drizzle-orm';
+import { sql, type ExtractTablesWithRelations } from 'drizzle-orm';
 import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres';
 import { migrate as migrateNodePg } from 'drizzle-orm/node-postgres/migrator';
-import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import type { PgDatabase, PgQueryResultHKT, PgTransaction } from 'drizzle-orm/pg-core';
 import pg from 'pg';
 import { generateUuidV7 } from '../common/uuidv7.js';
 import * as schema from './schema/index.js';
@@ -13,6 +13,11 @@ export const DRIZZLE_DB = Symbol('DRIZZLE_DB');
 export const DB_CONNECTION_HANDLE = Symbol('DB_CONNECTION_HANDLE');
 
 export type AppDatabase = PgDatabase<PgQueryResultHKT, typeof schema>;
+export type AppTransaction = PgTransaction<
+  PgQueryResultHKT,
+  typeof schema,
+  ExtractTablesWithRelations<typeof schema>
+>;
 
 export interface DatabaseConnectionHandle {
   readonly kind: 'postgres' | 'pglite';
@@ -175,6 +180,11 @@ export async function createPgliteDatabase(
  */
 export async function createAdaptiveTestDatabase(): Promise<DatabaseConnectionHandle> {
   const dbUrl = process.env['DATABASE_URL'];
+  if (process.env['TRUCO_REQUIRE_REAL_SERVICES'] === '1' && !dbUrl?.trim()) {
+    throw new Error(
+      'TRUCO_REQUIRE_REAL_SERVICES=1 refuses the PGlite fallback: DATABASE_URL must point to PostgreSQL.',
+    );
+  }
   if (dbUrl && dbUrl.trim().length > 0) {
     const isolatedDatabaseName = `truco_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     return createPostgresDatabase({

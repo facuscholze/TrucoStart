@@ -102,8 +102,18 @@ export function PracticeSetupPanel({
             {messagesEsAr.home.machineModeLabel}
           </legend>
           <div className="flex gap-2">
-            {optionButton(mode === '1v1', '1 vs 1', () => setMode('1v1'), 'Modo 1 contra 1')}
-            {optionButton(mode === '2v2', '2 vs 2', () => setMode('2v2'), 'Modo 2 contra 2')}
+            {optionButton(
+              mode === '1v1',
+              '1 vs 1',
+              () => setMode('1v1'),
+              '1 vs 1, modo 1 contra 1',
+            )}
+            {optionButton(
+              mode === '2v2',
+              '2 vs 2',
+              () => setMode('2v2'),
+              '2 vs 2, modo 2 contra 2',
+            )}
           </div>
         </fieldset>
 
@@ -154,7 +164,7 @@ export function PracticeSetupPanel({
       </CallButton>
 
       {errorMsg && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-sm text-danger-strong">
           {errorMsg}
         </p>
       )}

@@ -38,12 +38,16 @@ export function HomeScreen({
     return u;
   };
 
-  const handleQuickMatch = async (mode: '1v1' | '2v2') => {
+  const handleQuickMatch = async (mode: '1v1' | '2v2', competitive = false) => {
     setBusyAction(true);
     setErrorMsg(null);
     try {
       await ensureUser();
-      const res = await enqueueMatchmakingRequest({ mode, rulesetCode: 'ar-standard-v1' });
+      const res = await enqueueMatchmakingRequest({
+        mode,
+        rulesetCode: 'ar-standard-v1',
+        competitive,
+      });
       if (res.status === 'MATCHED') {
         onNavigate(`/sala/${encodeURIComponent(res.tableId)}`);
       } else {
@@ -198,6 +202,38 @@ export function HomeScreen({
               onClick={() => void handleQuickMatch('2v2')}
             >
               {messagesEsAr.home.quickPlay2v2Title}
+            </CallButton>
+          </div>
+        </section>
+
+        <section className="rounded-2xl bg-surface border border-gold/35 p-5 space-y-3.5 shadow-lg">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <h2 className="font-display text-xl font-bold text-gold">
+                {messagesEsAr.home.competitiveTitle}
+              </h2>
+              <p className="max-w-2xl text-xs leading-relaxed text-muted">
+                {messagesEsAr.home.competitiveBody}
+              </p>
+            </div>
+            <CallButton tone="neutral" onClick={() => onNavigate('/ranking')}>
+              {messagesEsAr.home.openRankings}
+            </CallButton>
+          </div>
+          <div className="grid grid-cols-1 tablet:grid-cols-2 gap-3">
+            <CallButton
+              tone="truco"
+              disabled={busyAction || isOffline}
+              onClick={() => void handleQuickMatch('1v1', true)}
+            >
+              {messagesEsAr.home.competitive1v1}
+            </CallButton>
+            <CallButton
+              tone="flor"
+              disabled={busyAction || isOffline}
+              onClick={() => void handleQuickMatch('2v2', true)}
+            >
+              {messagesEsAr.home.competitive2v2}
             </CallButton>
           </div>
         </section>

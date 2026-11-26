@@ -80,6 +80,8 @@ describe('M8d — documento legal individual', () => {
     const text = document.body.textContent ?? '';
     expect(text).toMatch(/no hay depósitos ni pagos dentro del juego/i);
     expect(text).toMatch(/no hay retiros, cobros ni conversión de puntos a dinero/i);
+    expect(text).toMatch(/monedas virtuales simbólicas \(virtual_coin\)/i);
+    expect(text).toMatch(/no tienen valor económico, no se compran con dinero ni se transfieren/i);
     expect(text).toMatch(/no existe transferencia de puntos, monedas ni objetos entre jugadores/i);
   });
 
@@ -96,6 +98,8 @@ describe('M8d — documento legal individual', () => {
     // Y declara lo que NO se guarda.
     expect(text).toMatch(/no se guarda la edad declarada/i);
     expect(text).toMatch(/no se guardan datos de tarjetas/i);
+    expect(text).toMatch(/monedas virtuales simbólicas \(virtual_coin\)/i);
+    expect(text).toMatch(/no tienen valor económico ni se transfieren entre cuentas/i);
   });
 
   it('la política de cookies no inventa cookies de terceros', () => {

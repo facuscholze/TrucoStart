@@ -256,6 +256,7 @@ describe('M3 Auth Flows, Security Hardening & Session Family Protection', () => 
     const historyAfterPromote = await app.inject({
       method: 'GET',
       url: `/v1/users/${promoted.id}/matches`,
+      headers: { cookie: buildCookieHeader(promotedJar) },
     });
     expect(historyAfterPromote.statusCode).toBe(200);
     expect(historyAfterPromote.json().items).toHaveLength(1);

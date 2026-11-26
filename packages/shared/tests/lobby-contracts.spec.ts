@@ -116,5 +116,17 @@ describe('M4 Shared Lobby, Invite, Provisioning & Match Lifecycle Contracts', ()
     };
 
     expect(MatchLifecycleEventSchema.safeParse(completed).success).toBe(true);
+
+    const practiceWithBot = {
+      ...completed,
+      practice: true,
+      hasBots: true,
+      players: completed.players.slice(0, 1),
+    };
+    expect(MatchLifecycleEventSchema.safeParse(practiceWithBot).success).toBe(true);
+    expect(
+      MatchLifecycleEventSchema.safeParse({ ...practiceWithBot, practice: false, hasBots: false })
+        .success,
+    ).toBe(false);
   });
 });

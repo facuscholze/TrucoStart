@@ -140,6 +140,7 @@ export async function emitMatchCompletedLifecycle(params: {
   await publisher.publish({
     kind: 'match.completed',
     practice: params.practice ?? false,
+    hasBots: seats.some((seat) => seat.isBot),
     matchId,
     roomId,
     mode,

@@ -3,23 +3,29 @@ import type { MatchCompletedLifecycleEvent, MatchStartedLifecycleEvent } from '@
 import type { AppDatabase } from '../../../db/database.provider.js';
 import { MatchPersistenceService } from '../match-persistence.service.js';
 
-/**
- * M6: una mesa de práctica (bots) nunca contamina estadísticas ni rankings competitivos.
- * Verificamos que la persistencia de la partida se saltea por completo antes de tocar la base.
- */
+/** La práctica conserva su progreso simbólico, pero nunca se procesa como rating competitivo. */
 function buildService() {
-  const dbTransaction = vi.fn(async () => {
-    throw new Error('la práctica no debe abrir transacción de persistencia');
-  });
+  const dbTransaction = vi.fn(async () => null);
   const db = { transaction: dbTransaction } as unknown as AppDatabase;
   const lobbyRepository = {
+    ensureRulesetRow: vi.fn(async () => ({ id: '00000000-0000-7000-8000-000000000001' })),
     findTableById: vi.fn(),
     updateTableStatus: vi.fn(),
     reactivateSeats: vi.fn(),
   };
-  const realtimeGateway = { broadcastTableUpsert: vi.fn(), broadcastQueueSnapshot: vi.fn() };
-  const provisioner = { provisionPracticeRoom: vi.fn(), provisionRoom: vi.fn() };
+  const realtimeGateway = {
+    broadcastTableUpsert: vi.fn(),
+    broadcastQueueSnapshot: vi.fn(),
+    refreshSocialPresence: vi.fn(),
+  };
+  const provisioner = {
+    provisionPracticeRoom: vi.fn(),
+    provisionRoom: vi.fn(),
+    deleteRoom: vi.fn(),
+  };
   const consumer = { start: vi.fn(), close: vi.fn() };
+  const ratingsService = { processMatch: vi.fn() };
+  const progressionService = { processCompletedMatch: vi.fn() };
 
   const service = new MatchPersistenceService(
     db,
@@ -27,17 +33,26 @@ function buildService() {
     realtimeGateway as never,
     provisioner as never,
     consumer as never,
+    ratingsService as never,
+    progressionService as never,
   );
-  return { service, dbTransaction, lobbyRepository, realtimeGateway, provisioner };
+  return {
+    service,
+    dbTransaction,
+    realtimeGateway,
+    ratingsService,
+    progressionService,
+  };
 }
 
 const ROOM_ID = '3f7f1e6a-9a1b-4c3d-8e2f-0a1b2c3d4e5f';
+const MATCH_ID = '0f9a1b2c-3d4e-4f50-8a1b-2c3d4e5f6a7b';
 
 const startedEvent: MatchStartedLifecycleEvent = {
   kind: 'match.started',
   practice: true,
   roomId: ROOM_ID,
-  matchId: '0f9a1b2c-3d4e-4f50-8a1b-2c3d4e5f6a7b',
+  matchId: MATCH_ID,
   startedAtMs: 1_760_000_000_000,
   seats: [
     { seat: 0, team: 0, userId: 'humano' },
@@ -48,10 +63,11 @@ const startedEvent: MatchStartedLifecycleEvent = {
 const completedEvent: MatchCompletedLifecycleEvent = {
   kind: 'match.completed',
   practice: true,
-  matchId: '0f9a1b2c-3d4e-4f50-8a1b-2c3d4e5f6a7b',
+  hasBots: true,
+  matchId: MATCH_ID,
   roomId: ROOM_ID,
   mode: '1v1',
-  rulesetCode: 'AR_STANDARD_V1',
+  rulesetCode: 'ar-standard-v1',
   seedCommitment: 'a'.repeat(64),
   seedReveal: 'b'.repeat(64),
   startedAtMs: 1_760_000_000_000,
@@ -64,23 +80,26 @@ const completedEvent: MatchCompletedLifecycleEvent = {
     { seat: 1, team: 1, userId: 'bot:seat:1', cardsPlayed: 6, envidoPoints: 25, trucoAccepted: 1 },
   ],
   events: [
-    { seq: 1, type: 'hand.started', payload: { handNumber: 1 } },
-    { seq: 2, type: 'match.completed', payload: { winnerTeam: 0 } },
+    { seq: 1, type: 'game.cardPlayed', payload: { handNumber: 1 } },
+    { seq: 2, type: 'game.ended', payload: { winnerTeam: 0 } },
   ],
 } as unknown as MatchCompletedLifecycleEvent;
 
-describe('M6 — las mesas de práctica no se persisten como competitivas', () => {
-  it('match.started de práctica no toca la base ni el broadcast del lobby', async () => {
+describe('M6/M9c — práctica separada del rating y elegible para XP bot reducida', () => {
+  it('match.started de práctica no cambia la mesa competitiva', async () => {
     const { service, dbTransaction, realtimeGateway } = buildService();
     await service.handleLifecycleEvent(startedEvent);
     expect(dbTransaction).not.toHaveBeenCalled();
     expect(realtimeGateway.broadcastTableUpsert).not.toHaveBeenCalled();
   });
 
-  it('match.completed de práctica no crea partida, ni eventos, ni estadísticas', async () => {
-    const { service, dbTransaction, realtimeGateway } = buildService();
+  it('match.completed conserva el flujo de progresión, sin calcular rating', async () => {
+    const { service, dbTransaction, realtimeGateway, ratingsService, progressionService } =
+      buildService();
     await service.handleLifecycleEvent(completedEvent);
-    expect(dbTransaction).not.toHaveBeenCalled();
+    expect(dbTransaction).toHaveBeenCalledOnce();
+    expect(progressionService.processCompletedMatch).toHaveBeenCalledWith(MATCH_ID);
+    expect(ratingsService.processMatch).not.toHaveBeenCalled();
     expect(realtimeGateway.broadcastTableUpsert).not.toHaveBeenCalled();
   });
 });

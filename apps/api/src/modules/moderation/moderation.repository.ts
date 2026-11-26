@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { CreateReportResponse, ReportEventLogRef } from '@truco/shared';
-import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { generateUuidV7 } from '../../common/uuidv7.js';
 import { type AppDatabase, DRIZZLE_DB } from '../../db/database.provider.js';
 import { matchEventsTable, matchesTable, reportsTable, usersTable } from '../../db/schema/index.js';
@@ -15,6 +16,15 @@ export interface InsertReportInput {
   readonly dedupeKey: string;
   readonly eventLogRef: ReportEventLogRef | null;
   readonly now: Date;
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
 }
 
 @Injectable()
@@ -42,22 +52,37 @@ export class ModerationRepository {
       .limit(1);
     if (!meta) return null;
 
-    const stats = await this.db
+    const events = await this.db
       .select({
-        total: count(),
-        lastSeq: sql<number>`coalesce(max(${matchEventsTable.seq}), 0)`,
-        digest: sql<string>`coalesce(md5(string_agg(${matchEventsTable.seq} || ':' || ${matchEventsTable.type}, ',' order by ${matchEventsTable.seq})), md5(''))`,
+        seq: matchEventsTable.seq,
+        type: matchEventsTable.type,
+        payload: matchEventsTable.payload,
+        createdAt: matchEventsTable.createdAt,
       })
       .from(matchEventsTable)
-      .where(eq(matchEventsTable.matchId, matchId));
+      .where(eq(matchEventsTable.matchId, matchId))
+      .orderBy(asc(matchEventsTable.seq));
+    if (events.length === 0) return null;
 
-    const total = Number(stats[0]?.total ?? 0);
-    if (total === 0) return null;
+    const canonicalEvents = events
+      .map((event) =>
+        JSON.stringify([
+          event.seq,
+          event.type,
+          event.createdAt.toISOString(),
+          stableJson(event.payload),
+        ]),
+      )
+      .join('\n');
+    const digest = createHash('sha256')
+      .update(`truco-match-event-log-v1\n${matchId}\n${canonicalEvents}`, 'utf8')
+      .digest('hex');
+
     return {
       matchId,
-      eventCount: total,
-      lastSeq: Number(stats[0]?.lastSeq ?? 0),
-      digest: String(stats[0]?.digest ?? ''),
+      eventCount: events.length,
+      lastSeq: events[events.length - 1]!.seq,
+      digest,
     };
   }
 

@@ -203,6 +203,8 @@ export const MatchmakingEnqueueRequestSchema = z
   .object({
     mode: GameModeSchema,
     rulesetCode: RulesetCodeSchema.optional().default('ar-standard-v1'),
+    /** La cola competitiva acepta solo humanos y puntúa partidas completas; falso conserva cola casual. */
+    competitive: z.boolean().optional().default(false),
   })
   .strict();
 export type MatchmakingEnqueueRequest = z.infer<typeof MatchmakingEnqueueRequestSchema>;
@@ -213,6 +215,7 @@ export const MatchmakingQueueStatusResponseSchema = z.discriminatedUnion('status
     status: z.literal('QUEUED'),
     mode: GameModeSchema,
     rulesetCode: RulesetCodeSchema,
+    competitive: z.boolean().optional().default(false),
     position: z.number().int().positive(),
     enqueuedAt: z.string(),
     expiresAt: z.string(),
@@ -223,6 +226,7 @@ export const MatchmakingQueueStatusResponseSchema = z.discriminatedUnion('status
     roomId: z.string().uuid(),
     mode: GameModeSchema,
     rulesetCode: RulesetCodeSchema,
+    competitive: z.boolean().optional().default(false),
     mySeat: z.number().int().nonnegative(),
     myTeam: z.number().int().nonnegative(),
   }),
@@ -317,24 +321,36 @@ export const MatchCompletedSequencedEventSchema = z.object({
   payload: z.record(z.string(), z.unknown()),
 });
 
-export const MatchCompletedLifecycleEventSchema = z.object({
-  kind: z.literal('match.completed'),
-  /** `true` en mesas de práctica: no se persiste como partida competitiva. */
-  practice: z.boolean().optional(),
-  matchId: z.string().uuid(),
-  roomId: z.string().min(3).max(64),
-  mode: GameModeSchema,
-  rulesetCode: RulesetCodeSchema,
-  seedCommitment: z.string().regex(/^[a-f0-9]{64}$/),
-  seedReveal: z.string().regex(/^[a-f0-9]{64}$/),
-  startedAtMs: z.number().int().positive(),
-  endedAtMs: z.number().int().positive(),
-  winnerTeam: z.number().int().nonnegative(),
-  scoresByTeam: z.record(z.string(), z.number().int().nonnegative()),
-  reason: z.string().min(1),
-  players: z.array(MatchCompletedPlayerResultSchema).min(2),
-  events: z.array(MatchCompletedSequencedEventSchema).min(1),
-});
+export const MatchCompletedLifecycleEventSchema = z
+  .object({
+    kind: z.literal('match.completed'),
+    /** `true` en mesas de práctica: se persiste para progreso, nunca como partida competitiva. */
+    practice: z.boolean().optional(),
+    /** `true` si un bot de reemplazo ocupó uno o más asientos en la partida. */
+    hasBots: z.boolean().optional(),
+    matchId: z.string().uuid(),
+    roomId: z.string().min(3).max(64),
+    mode: GameModeSchema,
+    rulesetCode: RulesetCodeSchema,
+    seedCommitment: z.string().regex(/^[a-f0-9]{64}$/),
+    seedReveal: z.string().regex(/^[a-f0-9]{64}$/),
+    startedAtMs: z.number().int().positive(),
+    endedAtMs: z.number().int().positive(),
+    winnerTeam: z.number().int().nonnegative(),
+    scoresByTeam: z.record(z.string(), z.number().int().nonnegative()),
+    reason: z.string().min(1),
+    players: z.array(MatchCompletedPlayerResultSchema).min(1),
+    events: z.array(MatchCompletedSequencedEventSchema).min(1),
+  })
+  .superRefine((event, ctx) => {
+    if (!event.practice && !event.hasBots && event.players.length < 2) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['players'],
+        message: 'Una partida sin práctica ni bots necesita al menos dos jugadores humanos.',
+      });
+    }
+  });
 
 /**
  * Sala destruida por inactividad en `apps/game-server` (TTL sin conexiones activas).

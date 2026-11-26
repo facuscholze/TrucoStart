@@ -46,6 +46,7 @@ jobs:
       APP_NAME: 'Mesa de Truco'
       DATABASE_URL: postgresql://truco_test:truco_test_password@localhost:5432/truco_test
       REDIS_URL: redis://localhost:6379
+      TRUCO_REQUIRE_REAL_SERVICES: '1'
       SESSION_SECRET: ci_test_session_secret_at_least_32_characters_long
       SEED_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       REFRESH_TOKEN_TTL: '2592000'

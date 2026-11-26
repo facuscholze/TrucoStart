@@ -577,7 +577,8 @@ export class RoomActor {
   }
 
   private async startMatchIfAllReady(now: number): Promise<void> {
-    if (this.status === 'IN_GAME' || this.gameState) return;
+    if (this.status === 'IN_GAME' || (this.gameState && this.gameState.status !== 'FINISHED'))
+      return;
     if (!this.seats.every((s) => s.userId !== null && s.ready)) {
       await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
       return;
@@ -740,10 +741,11 @@ export class RoomActor {
 
     if (!matchJustFinished) this.scheduleBotTurnIfNeeded();
 
-    // Las mesas de práctica son efímeras: no generan partidas ni estadísticas competitivas.
+    // La práctica persiste su resultado para progresión con tope reducido, sin rating competitivo.
+    const hasHumanPlayer = snapshotSeatsAtEnd.some((seat) => seat.userId !== null && !seat.isBot);
     if (
-      !this.practice &&
       matchJustFinished &&
+      hasHumanPlayer &&
       this.matchId &&
       this.seedCommitment &&
       this.revealedSeed
@@ -762,7 +764,7 @@ export class RoomActor {
         finalState: this.gameState,
         triggeringAction: action,
         seats: snapshotSeatsAtEnd,
-        practice: false,
+        practice: Boolean(this.practice),
       });
     }
   }

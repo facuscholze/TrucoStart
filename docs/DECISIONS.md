@@ -281,7 +281,8 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
 - **Decisión:**
   1. **Aprovisionamiento unidireccional firmado (`apps/api -> apps/game-server`):** al crear una mesa (`POST /v1/tables` o matchmaking), `apps/api` construye y valida el `RuleSet` canónico de `@truco/engine`, persiste `tables` + `table_seats` en PostgreSQL e invoca el puerto `GameRoomProvisioner.provisionRoom(RoomProvisionSpec)`. En transporte HTTP (`POST /internal/rooms` y `DELETE /internal/rooms/:roomId`), el cuerpo viaja firmado con HMAC-SHA256 con separación de dominio (`internal-rpc-v1:<SECRET>`). `game-server` valida `RoomProvisionSpecSchema` + `validateRuleSet`, reclama el lease en `GameStore` e hidrata el `PersistedRoomSnapshot` usando `roomId === tables.id` y el objeto `RuleSet` recibido directamente (en producción `allowAdHocRooms = false`, impidiendo salas huérfanas fuera del lobby).
   2. **Eventos asíncronos de ciclo de vida y cierre (`apps/game-server -> BullMQ -> apps/api`):** `game-server` publica eventos tipados `MatchLifecycleEventSchema` (`match.started`, `table.seatVacated` y `match.completed`) a través del puerto `MatchLifecyclePublisher` (`BullMqMatchLifecyclePublisher` sobre la cola `truco-match-lifecycle` en Redis 7 con `jobId` determinístico por `matchId`, e `InMemoryMatchLifecycleBus` para tests sin Redis).
-  3. **Persistencia transaccional idempotente en `apps/api`:** `MatchPersistenceService` consume `match.completed` y ejecuta **una única transacción PostgreSQL (`db.transaction`)** que verifica idempotencia sobre `matches.id`, actualiza `tables.status = 'FINISHED'`, libera asientos activos e inserta `matches`, `match_players` y `match_events`.
+  3. **Persistencia transaccional idempotente en `apps/api`:** `MatchPersistenceService` consume `match.completed` y ejecuta **una única transacción PostgreSQL (`db.transaction`)** que verifica idempotencia sobre `matches.id`, libera asientos activos e inserta `matches`, `match_players` y `match_events`. Las mesas normales pasan a `tables.status = 'FINISHED'`; las mesas de práctica persisten el resultado para progresión reducida sin cambiar el estado de la mesa privada, de modo que siga disponible para revancha.
+  4. **Práctica y bots:** una práctica terminada emite `match.completed` con `practice: true`; el evento puede incluir sólo los participantes humanos (`players` admite mínimo uno). Si una partida queda enteramente automatizada, `game-server` no publica un resultado humano. Práctica/bots nunca califican para rating competitivo; los topes de M9c los aplica la API.
 - **Alternativas consideradas:**
   - _Compartir credenciales de PostgreSQL en `apps/game-server`_: descartado porque rompe fronteras de dominio, acopla migraciones entre despliegues y mete latencia SQL en el bucle de eventos de partidas en vivo.
   - _Reconstruir reglas en `game-server` a partir de flags sueltos enviados por clientes WS_: descartado porque duplica lógica de negocio y abre vectores donde un cliente manipula `rulesetCode` o `turnTimeoutMs` al hacer `table.join`.
@@ -380,3 +381,68 @@ Este documento registra las decisiones arquitectónicas y tecnológicas del proy
   6. **Regla 13 ejecutable.** `scripts/check-no-real-money.mjs` corre en CI y busca **mecanismos**, no palabras: pasarelas de pago, columnas de saldo/billetera/libro contable, endpoints de depósito/retiro y copy que prometa dinero. Excluye explícitamente el vocabulario del truco («Real Envido», «gana la baza») y los archivos que nombran dinero para negarlo o para detectar claves filtradas. Se verificó que falla ante las cuatro clases de violación.
 - **Alternativas:** Aceptación implícita por el mero uso (no acreditable, y la ley exige consentimiento expreso); guardar sólo un booleano `accepted_terms` (no permite saber qué texto se aceptó); edad mínima fija en código (obliga a un deploy para cambiarla y no permite decidir por jurisdicción); revisar la regla 13 a mano en cada PR (no protege contra el próximo contribuyente).
 - **Consecuencias:** El alta pasa a tener un paso más y una migración; cualquier cliente nuevo **debe** enviar `legal` o recibe 400. Cambiar el texto de un documento obliga a bumpear su versión en `LEGAL_DOCUMENT_VERSIONS`, y un cliente con la versión vieja recibe 409 en vez de aceptar términos obsoletos. Los textos **no** pueden publicarse como definitivos hasta que se cierre `docs/LEGAL_CHECKLIST.md`: el código impide crear cuentas sin consentimiento, pero no garantiza que el contenido del consentimiento sea jurídicamente correcto.
+
+---
+
+## ADR-024: Grafo social M9a y políticas independientes de privacidad
+
+- **Fecha:** 2026-11-19
+- **Estado:** Aceptado
+- **Contexto:** La etapa social necesita amistades, bloqueos, invitaciones, notificaciones, presencia y consulta de historial/estadísticas sin mezclar sus controles de exposición. El canal de tiempo real del lobby también transporta presencia y no debe filtrar snapshots públicos a una conexión social. Un bloqueo tiene que prevalecer aunque el perfil elija visibilidad `ALL`.
+- **Decisión:**
+  1. Persistir amistades, bloqueos, invitaciones y notificaciones en PostgreSQL; canonicalizar los pares de amistad y usar constraints únicos/transactions para solicitudes cruzadas e idempotencia. Las notificaciones HTTP persistidas son la fuente de verdad; Socket.IO sólo señala cambios por la sala privada `user:<userId>`.
+  2. Mantener `historyVisibility`, `statsVisibility` y `presenceVisibility` separadas en los ajustes de perfil (`ALL`, `FRIENDS`, `NOBODY`), con default técnico `FRIENDS`. Un PATCH modifica únicamente los campos enviados; los defaults de la respuesta no deben reescribir ajustes omitidos.
+  3. Denegar historial, estadísticas y presencia en cualquiera de las dos direcciones cuando existe un bloqueo, aun si el valor configurado es `ALL`. Al cambiar elegibilidad se puede emitir `OFFLINE` con `visible: false` para borrar una caché anterior; nunca se publica estado `ONLINE`/`IN_GAME` al bloqueado.
+  4. Mantener presencia en un store efímero (lease de 45 s, heartbeat cada 15 s), derivar el estado de conexión/juego en servidor y mantener el socket social autenticado y aislado de los snapshots/eventos de mesas del lobby.
+  5. El historial y las estadísticas son lecturas derivadas de partidas persistidas, pero su autorización es independiente. No se agregan rankings, Glicko-2, XP, logros, misiones ni otra gamificación en M9a.
+- **Alternativas consideradas:** Un único `historyVisibility` para estadísticas e historial (acopla decisiones distintas); estado de presencia persistido como actividad histórica (retiene más datos personales de los necesarios); publicar notificaciones en un room global del lobby (expone relaciones y actividad social); permitir que `ALL` supere un bloqueo (contradice el límite de seguridad entre cuentas).
+- **Consecuencias:** Se incorpora una migración social y cambios de contratos/API/web; la privacidad requiere validar tanto acceso REST como audiencia WebSocket. Los defaults y controles técnicos no resuelven finalidad, base legal ni retención: esos puntos siguen sujetos a revisión legal en `docs/LEGAL_CHECKLIST.md`.
+
+---
+
+## ADR-025: Rating competitivo Glicko-2, temporadas y revisión humana M9b
+
+- **Fecha:** 2026-11-19
+- **Estado:** Aceptado
+- **Contexto:** M9a habilitó relaciones, privacidad e historial; el siguiente hito necesita rankings competitivos por modalidad sin convertir partidas de práctica ni partidas con bots en puntuación, además de revisar anomalías sin castigos algorítmicos.
+- **Decisión:**
+  1. Mantener ratings Glicko-2 independientes para `1v1` y `2v2`, dentro de temporadas persistidas. Los defaults de Glicko-2 son rating 1500, desviación 350, volatilidad 0.06 y `tau=0.5`. En 2v2, cada jugador recibe el mismo resultado de equipo en dos comparaciones separadas, una contra cada rival; ambas aportan como observaciones Glicko-2 independientes y no se divide ni se copia un delta de equipo entre compañeros.
+  2. Sólo la cola competitiva humana marca la mesa; la temporada se captura al iniciar la partida y se copia a la fila durable de `matches`. El trabajo post-partida se ejecuta después del commit durable y persiste rating, variación por jugador, agregados y clave idempotente dentro de una transacción.
+  3. PostgreSQL es la fuente de verdad. Redis guarda proyecciones reconstruibles de ranking; el outbox durable permite reintentar si Redis no está disponible sin perder la actualización.
+  4. Publicar rankings globales, semanales y mensuales por modo, sólo para perfiles `statsVisibility=ALL` que satisfacen mínimos de partidas y rivales distintos. Las lecturas de perfil propio/público aplican el mismo control de estadísticas y bloqueos que M9a.
+  5. Señales de rivales repetidos, partidas demasiado cortas, abandonos coordinados y posible alimentación de cuentas nuevas sólo documentan evidencia en una cola administrativa. Tomar y resolver casos requiere `competitive:review`, versión optimista y `audit_logs`; las señales no afectan rating, acceso a la cola ni sanciones automáticamente. Una sanción es un flujo humano separado.
+  6. El cierre y la rotación siguen las garantías transaccionales de ADR-026: no se cierra con mesas activas ni ratings pendientes; los puestos elegibles se congelan y el rating se reinicia suavemente.
+- **Alternativas consideradas:** Elo simple (no modela incertidumbre ni inactividad); puntuar prácticas/bots (inflaría/desvirtuaría clasificaciones); bloquear ratings o sancionar por heurística (alto riesgo de falsos positivos); Redis como fuente de verdad (pérdida ante fallos y acoplamiento entre cálculo y caché).
+- **Consecuencias:** M9b agrega migraciones de ratings y temporada, separación explícita de colas, endpoints de ranking/perfil y una vista de revisión. Para ver el ranking público se exige visibilidad estadística pública; las decisiones disciplinarias no se automatizan.
+
+---
+
+## ADR-026: Cierre transaccional e idempotente de temporadas competitivas
+
+- **Fecha:** 2026-11-19
+- **Estado:** Aceptado
+- **Contexto:** Una temporada no debe rotar mientras una partida competitiva todavía usa su identificador o mientras un resultado durable aún no actualizó ratings. A la vez, fallos parciales no deben dejar cero o dos temporadas activas, snapshots incompletos ni perfiles reiniciados a medias.
+- **Decisión:**
+  1. Cada mesa competitiva captura `competitive_season_id` al iniciar. El cierre se difiere mientras exista una mesa `IN_GAME` asociada a esa temporada o una partida competitiva persistida sin su fila `rating_jobs`.
+  2. En una sola transacción PostgreSQL, bloquear la temporada activa, congelar perfiles que cumplen los mínimos, marcar la temporada anterior `CLOSED`, crear exactamente una temporada siguiente, copiar perfiles con reinicio suave y registrar `rating_season_audits` y `audit_logs`.
+  3. El ranking congelado conserva por modo la posición, rating, desviación, partidas, rivales, victorias y división de cada perfil elegible. El nuevo perfil reinicia contadores; conserva `1500 + (rating_anterior - 1500) × 0,75`, aumenta la desviación según `sqrt(old² + 70²)` con tope 350, y conserva la volatilidad.
+  4. Una restricción única permite una sola temporada activa. `rating_season_audits.season_id` fija el resultado del cierre: la repetición devuelve el mismo `nextSeasonId` sin duplicar snapshots, perfiles ni auditorías. Cualquier error antes del commit revierte toda la rotación y permite reintentar.
+  5. El mantenedor de ratings comprueba temporadas vencidas cada 30 segundos; una temporada diferida vuelve a evaluarse después, sin forzar el cierre de partidas en curso.
+- **Alternativas consideradas:** rotar aunque haya partidas vivas (asigna resultados a una temporada distinta o perdida); cerrar con varios commits (deja estados intermedios); reset completo (descarta continuidad y aumenta incertidumbre más de lo necesario).
+- **Consecuencias:** las temporadas mantienen su historial congelado y el rating activo tiene reinicios previsibles. La prueba de fallo intermedio inyecta una restricción SQL, verifica rollback integral y reintento; la ejecución contra PostgreSQL real debe comprobarse también en CI.
+
+---
+
+## ADR-027: Progresión M9c y moneda virtual estrictamente simbólica
+
+- **Fecha:** 2026-11-19
+- **Estado:** Aceptado
+- **Contexto:** Después de M9b, XP, logros, misiones y economía virtual seguían pendientes. El producto necesita recompensas de progreso sin apuestas, monetización, transferencias ni ventaja competitiva. La regla 13 de ADR-023 prohibía dinero real, no una unidad virtual no económica; M9c precisa esa frontera.
+- **Decisión:**
+  1. Persistir XP, logros, misiones, notificaciones y economía en PostgreSQL. La API deriva progreso de partidas/eventos completados y lecciones tutoriales validadas; el cliente no puede enviar importes ni contadores de progreso. Recibos idempotentes, topes diarios por clase de origen y transacciones serializan reintentos y reclamaciones.
+  2. Permitir sólo la unidad `VIRTUAL_COIN`, con `has_economic_value=false`, transferencias deshabilitadas y compras monetarias deshabilitadas. La moneda se gana por actividad, no se compra y sólo se canjea por cosméticos; no tiene conversión, depósitos ni retiros. Constraints SQL y tests protegen estas invariantes.
+  3. Derivar el saldo de `wallet_transactions`; los asientos son inmutables, se rechazan saldos negativos y una corrección admin agrega una compensación vinculada al crédito original. Configurar recompensas o revertir créditos requiere `gamification:configure`, motivo, actor/sesión/IP y `audit_logs` en la misma transacción.
+  4. Cosméticos tienen precio positivo y `affects_rules=false`/`affects_matchmaking=false`. Práctica y partidas con bots pueden conceder progreso reducido con topes separados, pero no afectan rating ni estadísticas públicas; no se introduce evento WS público de progresión.
+  5. Actualizar OpenAPI, avisos/datos de privacidad en borrador y checklist legal; estas afirmaciones técnicas no son una determinación jurídica y siguen sujetas a revisión profesional.
+- **Alternativas consideradas:** no incorporar moneda (descartado porque la economía simbólica es alcance M9c); mantener un contador de saldo mutable (rechazado por falta de trazabilidad); permitir transferencias, compras con dinero o premios de valor (prohibido); dejar que progreso enviado por cliente determine recompensas (rechazado por abuso y duplicación).
+- **Consecuencias:** el control de dinero real admite esta excepción virtual estrecha, respaldada por flags/constraints, tests y revisión del escáner `scripts/check-no-real-money.mjs`. El saldo y el historial de progreso son datos vinculados a cuenta cuya finalidad y retención siguen pendientes ante el asesor legal (`docs/LEGAL_CHECKLIST.md`).

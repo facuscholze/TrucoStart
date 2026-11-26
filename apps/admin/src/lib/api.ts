@@ -9,12 +9,18 @@ import type {
   AdminSessionSummary,
   AdminUserDetail,
   AdminUserListResponse,
+  CompetitiveReviewClaimRequest,
+  CompetitiveReviewListResponse,
+  CompetitiveReviewResolveRequest,
+  CompetitiveReviewStatus,
   ClaimReportRequest,
   CreateSanctionRequest,
   CreateSanctionResponse,
   ResolveReportRequest,
   ReportReasonCode,
   ReportStatus,
+  ProgressionConfig,
+  ProgressionConfigUpdateRequest,
 } from '@truco/shared';
 
 export interface AdminCredentials {
@@ -62,7 +68,28 @@ export interface AdminClient {
     input: ResolveReportRequest,
   ): Promise<{ status: string; version: number }>;
   replay(matchId: string, reason: string): Promise<AdminMatchReplay>;
+  listCompetitiveReviews(params: {
+    status?: CompetitiveReviewStatus;
+    cursor?: number;
+    limit?: number;
+  }): Promise<CompetitiveReviewListResponse>;
+  claimCompetitiveReview(
+    caseId: string,
+    input: CompetitiveReviewClaimRequest,
+  ): Promise<{ status: string; version: number }>;
+  resolveCompetitiveReview(
+    caseId: string,
+    input: CompetitiveReviewResolveRequest,
+  ): Promise<{ status: string; version: number }>;
   listAudit(params: AuditFilters): Promise<AdminAuditListResponse>;
+  progressionConfig(): Promise<ProgressionConfig>;
+  updateProgressionConfig(
+    input: ProgressionConfigUpdateRequest,
+  ): Promise<{ config: ProgressionConfig; audited: true }>;
+  reverseWalletTransaction(
+    transactionId: string,
+    input: { reason: string },
+  ): Promise<{ transactionId: string; reversed: boolean }>;
 }
 
 export class AdminApiError extends Error {
@@ -180,9 +207,45 @@ export const httpAdminClient: AdminClient = {
   replay(matchId, reason) {
     return request<AdminMatchReplay>(withQuery(`/matches/${matchId}/replay`, { reason }));
   },
+  listCompetitiveReviews(params) {
+    return request<CompetitiveReviewListResponse>(
+      withQuery('/competitive-reviews', {
+        status: params.status,
+        cursor: params.cursor === undefined ? undefined : String(params.cursor),
+        limit: params.limit === undefined ? undefined : String(params.limit),
+      }),
+    );
+  },
+  claimCompetitiveReview(caseId, input) {
+    return request<{ status: string; version: number }>(`/competitive-reviews/${caseId}/claim`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  resolveCompetitiveReview(caseId, input) {
+    return request<{ status: string; version: number }>(`/competitive-reviews/${caseId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
   listAudit(params) {
     return request<AdminAuditListResponse>(
       withQuery('/audit', { action: params.action, entityId: params.entityId }),
+    );
+  },
+  progressionConfig() {
+    return request<ProgressionConfig>('/progression/config');
+  },
+  updateProgressionConfig(input) {
+    return request<{ config: ProgressionConfig; audited: true }>('/progression/config', {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  reverseWalletTransaction(transactionId, input) {
+    return request<{ transactionId: string; reversed: boolean }>(
+      `/progression/wallet-transactions/${encodeURIComponent(transactionId)}/reverse`,
+      { method: 'POST', body: JSON.stringify(input) },
     );
   },
 };

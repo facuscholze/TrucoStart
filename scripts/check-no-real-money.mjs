@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 /**
- * Verificación automática de la regla 13: «Producto sin dinero real».
+ * Verificación automática de la regla 13: «Sin dinero real ni ventaja pagada».
  *
- * La regla 13 prohíbe implementar apuestas, depósitos, retiros, premios en dinero
- * o transferencias de monedas entre jugadores. Hasta M8d eso se revisaba a mano y
- * una revisión manual no protege contra la próxima persona que abra un PR.
+ * Se prohíben apuestas, depósitos, retiros, premios monetarios, compra de monedas
+ * con dinero y transferencias entre jugadores. M9c permite únicamente `VIRTUAL_COIN`
+ * sin valor económico, sin compras ni transferencias y canjeable por cosméticos;
+ * sus flags y el libro mayor inmutable se protegen además en PostgreSQL/tests.
  *
- * Este script busca MECANISMOS, no palabras: pasarelas de pago, columnas de saldo
- * o billetera, endpoints de depósito/retiro y copy que prometa dinero. Las
- * palabras del truco («Real Envido», «apuesta» como canto, «gana la baza») se
- * excluyen explícitamente, porque son vocabulario del juego y no un mecanismo.
+ * Este script busca MECANISMOS de dinero real: pasarelas de pago, campos de saldo
+ * monetario mutable, endpoints de depósito/retiro y copy que prometa dinero. No
+ * confunde el libro mayor simbólico de M9c con dinero real. Las palabras del truco
+ * («Real Envido», «apuesta» como canto, «gana la baza») se excluyen explícitamente.
  *
- * IMPORTANTE: el script escanea `git ls-files`, así que un archivo NUEVO sólo se
- * revisa después de `git add`. Si se corre antes de agregarlo, no se ve. En CI
- * esto no pasa (el checkout ya tiene todo trackeado), pero al verificar en local
- * hay que correrlo DESPUÉS de `git add` o los resultados no son comparables.
+ * Se escanean archivos trackeados y archivos nuevos no ignorados del working tree,
+ * sin requerir `git add`; así una revisión local ve los mismos cambios que CI.
  *
  * Uso: node scripts/check-no-real-money.mjs
  */
@@ -61,7 +60,7 @@ const MECHANISM_ALLOWLIST = [
 const PAYMENT_PROVIDER =
   /\b(mercadopago|mercado_pago|stripe|paypal|culqi|payu|checkout\.com|webpay|braintree|adyen|debin|transferencia_bancaria|cbu|cvu|alias_bancario)\b/i;
 
-/** Columnas o campos que representarían saldo, billetera o libro contable. */
+/** Campos mutables que representarían un saldo de valor real; el ledger simbólico M9c no coincide con estos nombres. */
 const BALANCE_MECHANISM =
   /\b(wallet_?balance|coin_?balance|token_?balance|credit_?balance|account_?balance|wallet_?id|ledger_?entry|ledger_?account|deposit_?amount|withdraw_?amount|payout_?amount)\b/i;
 
@@ -74,7 +73,10 @@ const MONEY_PROMISE =
   /\b(gan[aá] (dinero|plata|efectivo)|dinero real|plata real|premios? en (dinero|efectivo)|retir[aá] (tu|tus) (dinero|ganancias|saldo)|cobr[aá] tus ganancias|apost[aá] (dinero|plata)|deposit[aá] dinero)\b/i;
 
 function listFiles() {
-  const out = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
+  const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
   return out
     .split('\n')
     .map((line) => line.trim())
@@ -117,7 +119,7 @@ for (const file of listFiles()) {
 if (findings.length === 0) {
   const checked = listFiles().length;
   console.log(
-    `Regla 13 OK: sin pasarelas de pago, saldos, endpoints de dinero ni promesas de dinero (${checked} archivos revisados).`,
+    `Regla 13 OK: sin pasarelas de pago, saldos monetarios mutables, endpoints ni promesas de dinero (${checked} archivos revisados).`,
   );
 } else {
   console.error('Regla 13 VIOLADA — se encontraron mecanismos de dinero real:');

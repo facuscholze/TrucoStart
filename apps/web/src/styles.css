@@ -40,6 +40,17 @@ textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+@keyframes progression-pop {
+  from {
+    opacity: 0.72;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 :root[data-reduced-motion='true'] *,
 :root[data-reduced-motion='true'] *::before,
 :root[data-reduced-motion='true'] *::after {

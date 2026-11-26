@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { TUTORIAL_LESSON_IDS } from '@truco/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApiApp } from '../../../bootstrap.js';
@@ -132,6 +133,42 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     expect(ownPatch.json().user.nickname).toBe('AlfaRenovado');
     expect(ownPatch.json().profile.settings.confirmCalls).toBe(true);
     expect(ownPatch.json().user.id).toBe(userA.id);
+
+    const tutorialUpdate = await app.inject({
+      method: 'PUT',
+      url: '/v1/me/tutorial',
+      headers: { cookie: buildCookieHeader(jarA) },
+      payload: { completedLessons: TUTORIAL_LESSON_IDS },
+    });
+    expect(tutorialUpdate.statusCode).toBe(200);
+    expect(tutorialUpdate.json().completedLessons).toEqual(TUTORIAL_LESSON_IDS);
+
+    const progression = await app.inject({
+      method: 'GET',
+      url: '/v1/me/progression',
+      headers: { cookie: buildCookieHeader(jarA) },
+    });
+    expect(progression.statusCode).toBe(200);
+    expect(progression.json().wallet).toMatchObject({
+      currencyType: 'VIRTUAL_COIN',
+      hasEconomicValue: false,
+      playerTransfersEnabled: false,
+      moneyPurchasesEnabled: false,
+    });
+    expect(progression.json().missions).toEqual(expect.any(Array));
+    expect(progression.json().achievements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'tutorial_graduate', unlockedAt: expect.any(String) }),
+      ]),
+    );
+    expect((await app.inject({ method: 'GET', url: '/v1/me/progression' })).statusCode).toBe(401);
+
+    const missingMission = await app.inject({
+      method: 'POST',
+      url: `/v1/me/progression/missions/${generateUuidV7(clockMs)}/claim`,
+      headers: { cookie: buildCookieHeader(jarA) },
+    });
+    expect(missingMission.statusCode).toBe(404);
   });
 
   it('computes stats, cursor-paginates match history, exports account data, and anonymizes PII on deletion', async () => {
@@ -172,7 +209,56 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
       });
     }
 
-    const statsRes = await app.inject({ method: 'GET', url: `/v1/users/${userId}/stats` });
+    // Los encuentros con bots pueden aparecer en el historial, pero no alteran estadísticas públicas.
+    clockMs += 10_000;
+    const botMatchId = generateUuidV7(clockMs);
+    await dbHandle.db.insert(matchesTable).values({
+      id: botMatchId,
+      mode: '1v1',
+      rulesetCode: 'ar-standard-v1',
+      seedCommitment: 'c'.repeat(64),
+      startedAt: new Date(clockMs - 5_000),
+      endedAt: new Date(clockMs),
+      hasBots: true,
+      isPractice: false,
+    });
+    await dbHandle.db.insert(matchPlayersTable).values({
+      matchId: botMatchId,
+      seat: 0,
+      userId,
+      team: 0,
+      score: 30,
+      outcome: 'WIN',
+    });
+
+    // La práctica se excluye también del historial y de las estadísticas públicas.
+    clockMs += 10_000;
+    const practiceMatchId = generateUuidV7(clockMs);
+    await dbHandle.db.insert(matchesTable).values({
+      id: practiceMatchId,
+      mode: '1v1',
+      rulesetCode: 'ar-standard-v1',
+      seedCommitment: 'd'.repeat(64),
+      startedAt: new Date(clockMs - 5_000),
+      endedAt: new Date(clockMs),
+      hasBots: false,
+      isPractice: true,
+    });
+    await dbHandle.db.insert(matchPlayersTable).values({
+      matchId: practiceMatchId,
+      seat: 0,
+      userId,
+      team: 0,
+      score: 30,
+      outcome: 'WIN',
+    });
+
+    const authHeaders = { cookie: buildCookieHeader(jar) };
+    const statsRes = await app.inject({
+      method: 'GET',
+      url: `/v1/users/${userId}/stats`,
+      headers: authHeaders,
+    });
     expect(statsRes.statusCode).toBe(200);
     expect(statsRes.json()).toEqual({
       userId,
@@ -181,22 +267,47 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
       losses: 1,
       abandons: 0,
       winRate: 0.6667,
+      byMode: {
+        '1v1': {
+          matchesPlayed: 3,
+          wins: 2,
+          losses: 1,
+          abandons: 0,
+          winRate: 0.6667,
+          currentStreak: 1,
+          envido: { resolved: 0, won: 0, winRate: 0 },
+          truco: { resolved: 0, won: 0, winRate: 0 },
+        },
+        '2v2': {
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          abandons: 0,
+          winRate: 0,
+          currentStreak: 0,
+          envido: { resolved: 0, won: 0, winRate: 0 },
+          truco: { resolved: 0, won: 0, winRate: 0 },
+        },
+      },
     });
 
     const page1 = await app.inject({
       method: 'GET',
       url: `/v1/users/${userId}/matches?limit=2`,
+      headers: authHeaders,
     });
     expect(page1.statusCode).toBe(200);
     expect(page1.json().items).toHaveLength(2);
+    expect(page1.json().items.some((item: { hasBots: boolean }) => item.hasBots)).toBe(true);
     expect(page1.json().nextCursor).toBeTruthy();
 
     const page2 = await app.inject({
       method: 'GET',
       url: `/v1/users/${userId}/matches?limit=2&cursor=${page1.json().nextCursor}`,
+      headers: authHeaders,
     });
     expect(page2.statusCode).toBe(200);
-    expect(page2.json().items).toHaveLength(1);
+    expect(page2.json().items).toHaveLength(2);
     expect(page2.json().nextCursor).toBeNull();
 
     // Exportación propia (GET /v1/me/export)
@@ -207,7 +318,15 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
     });
     expect(exportRes.statusCode).toBe(200);
     expect(exportRes.json().user.email).toBe('export.delete@truco.ar');
-    expect(exportRes.json().recentMatches).toHaveLength(3);
+    expect(exportRes.json().recentMatches).toHaveLength(4);
+    expect(
+      exportRes.json().recentMatches.some((match: { hasBots: boolean }) => match.hasBots),
+    ).toBe(true);
+    expect(
+      exportRes
+        .json()
+        .recentMatches.some((match: { matchId: string }) => match.matchId === practiceMatchId),
+    ).toBe(false);
 
     // Intento de borrar con clave errónea -> 401
     const badDel = await app.inject({

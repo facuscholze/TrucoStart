@@ -32,7 +32,7 @@ export function ReportButton({
         onClick={() => setOpen(true)}
         className={
           className ??
-          'rounded-lg border border-danger/40 bg-danger/10 px-3 py-1.5 text-xs font-semibold text-danger transition hover:bg-danger/20'
+          'rounded-lg border border-danger/40 bg-danger/10 px-3 py-1.5 text-xs font-semibold text-danger-strong transition hover:bg-danger/20'
         }
       >
         {label}

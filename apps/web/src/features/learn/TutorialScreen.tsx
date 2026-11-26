@@ -287,7 +287,7 @@ export function TutorialScreen({ syncWithAccount = true }: TutorialScreenProps) 
             <p
               role="status"
               data-testid="tutorial-feedback"
-              className={`text-sm font-bold ${feedback.tone === 'ok' ? 'text-success' : 'text-danger'}`}
+              className={`text-sm font-bold ${feedback.tone === 'ok' ? 'text-success' : 'text-danger-strong'}`}
             >
               {feedback.text}
             </p>

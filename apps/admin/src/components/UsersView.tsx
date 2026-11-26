@@ -70,7 +70,7 @@ export function UsersView({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
-              <tr className="text-[11px] uppercase tracking-wider text-ivory/45">
+              <tr className="text-[11px] uppercase tracking-wider text-muted">
                 <th className="pb-2">Jugador</th>
                 <th className="pb-2">Email</th>
                 <th className="pb-2">Rol</th>
@@ -84,7 +84,7 @@ export function UsersView({
                 <tr key={user.id}>
                   <td className="py-2">
                     <p className="font-semibold text-ivory">{user.nickname}</p>
-                    <p className="text-[11px] text-ivory/45">
+                    <p className="text-[11px] text-muted">
                       Última conexión: {formatDateTime(user.lastSeenAt)}
                     </p>
                   </td>
@@ -171,13 +171,13 @@ export function UserDetailPanel({
                     </p>
                     <div className="flex items-center gap-2">
                       {sanction.revokedAt && <StatusPill tone="neutral">Revocada</StatusPill>}
-                      <span className="text-[11px] text-ivory/45">
+                      <span className="text-[11px] text-muted">
                         {formatDateTime(sanction.createdAt)}
                       </span>
                     </div>
                   </div>
                   <p className="mt-1 text-xs text-ivory/70">{sanction.reason}</p>
-                  <p className="mt-1 text-[11px] text-ivory/45">
+                  <p className="mt-1 text-[11px] text-muted">
                     {sanction.issuedByNickname ? `Por ${sanction.issuedByNickname}` : 'Sistema'} ·{' '}
                     {formatExpiry(sanction.expiresAt)}
                   </p>
@@ -187,7 +187,7 @@ export function UserDetailPanel({
           )}
 
           <div className="mt-4">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ivory/55">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
               Partidas recientes
             </h3>
             {detail.recentMatches.length === 0 ? (
@@ -196,11 +196,11 @@ export function UserDetailPanel({
               <ul className="space-y-1 text-xs text-ivory/70">
                 {detail.recentMatches.map((match) => (
                   <li key={match.matchId} className="flex justify-between gap-2">
-                    <span className="font-mono text-ivory/50">{match.matchId.slice(0, 8)}…</span>
+                    <span className="font-mono text-muted">{match.matchId.slice(0, 8)}…</span>
                     <span>
                       {match.mode} · {match.outcome}
                     </span>
-                    <span className="text-ivory/45">{formatDateTime(match.endedAt)}</span>
+                    <span className="text-muted">{formatDateTime(match.endedAt)}</span>
                   </li>
                 ))}
               </ul>
@@ -212,19 +212,19 @@ export function UserDetailPanel({
           <Card title="Datos de la cuenta">
             <dl className="space-y-1 text-xs text-ivory/75">
               <div>
-                <dt className="text-ivory/45">Email</dt>
+                <dt className="text-muted">Email</dt>
                 <dd>{canReadPii ? (detail.email ?? '—') : (detail.emailMasked ?? '—')}</dd>
               </div>
               <div>
-                <dt className="text-ivory/45">Rol</dt>
+                <dt className="text-muted">Rol</dt>
                 <dd>{detail.role}</dd>
               </div>
               <div>
-                <dt className="text-ivory/45">Alta</dt>
+                <dt className="text-muted">Alta</dt>
                 <dd>{formatDateTime(detail.createdAt)}</dd>
               </div>
               <div>
-                <dt className="text-ivory/45">Reportes abiertos</dt>
+                <dt className="text-muted">Reportes abiertos</dt>
                 <dd>{detail.openReportsAgainst}</dd>
               </div>
             </dl>

@@ -80,5 +80,10 @@ describe('@truco/shared M3 Auth & Users schemas and nickname profanity filter', 
         isAdmin: true,
       }).success,
     ).toBe(false);
+
+    // PATCH parcial no debe materializar defaults y resetear otros ajustes.
+    expect(
+      PatchMeRequestSchema.parse({ settings: { historyVisibility: 'NOBODY' } }).settings,
+    ).toEqual({ historyVisibility: 'NOBODY' });
   });
 });

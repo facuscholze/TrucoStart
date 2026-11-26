@@ -15,12 +15,29 @@ describe('Drizzle SQL Migrations (PGlite locally / PostgreSQL 16 in CI) & UUIDv7
     await handle.close();
   });
 
-  it('uses PostgreSQL 16 when CI=true (DATABASE_URL defined) and PGlite when running in local sandbox without Docker', async () => {
-    if (process.env['CI'] === 'true') {
+  it('uses PostgreSQL when CI or the real-services gate is enabled, and PGlite for local runs', async () => {
+    if (process.env['CI'] === 'true' || process.env['TRUCO_REQUIRE_REAL_SERVICES'] === '1') {
       expect(Boolean(process.env['DATABASE_URL'])).toBe(true);
       expect(handle.kind).toBe('postgres');
     }
     expect(await handle.checkReady()).toBe(true);
+  });
+
+  it('fails closed instead of falling back to PGlite when real services are required', async () => {
+    const previousDatabaseUrl = process.env['DATABASE_URL'];
+    const previousRequirement = process.env['TRUCO_REQUIRE_REAL_SERVICES'];
+    try {
+      process.env['TRUCO_REQUIRE_REAL_SERVICES'] = '1';
+      delete process.env['DATABASE_URL'];
+      await expect(createAdaptiveTestDatabase()).rejects.toThrow(
+        'TRUCO_REQUIRE_REAL_SERVICES=1 refuses the PGlite fallback',
+      );
+    } finally {
+      if (previousDatabaseUrl === undefined) delete process.env['DATABASE_URL'];
+      else process.env['DATABASE_URL'] = previousDatabaseUrl;
+      if (previousRequirement === undefined) delete process.env['TRUCO_REQUIRE_REAL_SERVICES'];
+      else process.env['TRUCO_REQUIRE_REAL_SERVICES'] = previousRequirement;
+    }
   });
 
   it('generates monotonic RFC 9562 UUIDv7 identifiers and seeds official RuleSets', async () => {

@@ -317,11 +317,17 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
     <div className="space-y-6">
       {/* Cabecera de jugador */}
       <header className="rounded-2xl bg-surface border border-gold/40 p-5 flex items-center justify-between gap-4 flex-wrap shadow-lg">
-        <div className="flex items-center gap-3.5">
-          <Avatar nickname={meData.user.nickname} sizePx={52} connected team={0} />
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="font-display text-2xl font-bold text-ivory">{meData.user.nickname}</h1>
+        {/* `min-w-0` + `flex-1` dejan que un apodo largo se parta en vez de empujar la
+            tarjeta más allá del viewport (overflows a 320 px con apodos generados). */}
+        <div className="flex min-w-0 flex-1 items-center gap-3.5">
+          <div className="shrink-0">
+            <Avatar nickname={meData.user.nickname} sizePx={52} connected team={0} />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 items-center gap-2 flex-wrap">
+              <h1 className="min-w-0 font-display text-2xl font-bold text-ivory break-words">
+                {meData.user.nickname}
+              </h1>
               <Badge variant={meData.user.isGuest ? 'gold' : 'success'}>
                 {meData.user.isGuest
                   ? messagesEsAr.profile.guestBadge
@@ -335,7 +341,7 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
                 </Badge>
               )}
             </div>
-            <p className="text-xs text-muted">{messagesEsAr.profile.subtitle}</p>
+            <p className="text-xs text-muted break-words">{messagesEsAr.profile.subtitle}</p>
           </div>
         </div>
 

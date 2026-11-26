@@ -112,3 +112,57 @@ test('barre overflow horizontal en pantallas representativas y puntos de quiebre
     await browser?.close();
   }
 });
+
+/**
+ * Regresión concreta: un apodo largo empujaba la cabecera de /perfil más allá del
+ * viewport. Los apodos de invitado son aleatorios, así que el audit general sólo lo
+ * encontraba a veces; acá se fuerza el caso extremo de forma determinista.
+ */
+test('un apodo largo no desborda la cabecera de perfil a 320 y 360 px', async () => {
+  test.setTimeout(120_000);
+  const LONG_NICKNAME = 'EnvidoFielDelSur_2026_XX';
+  let browser: Browser | undefined;
+  try {
+    browser = await launchIsolatedChromium();
+    const context = await browser.newContext({
+      viewport: { width: 320, height: 800 },
+      isMobile: true,
+      hasTouch: true,
+      locale: 'es-AR',
+    });
+    const page = await context.newPage();
+    await page.goto(`${BASE_URL}/acceso`, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: /Entrar como invitado/i }).click();
+    await page.waitForURL(/\/lobby$/);
+
+    // Se reemplaza el apodo por uno de 25 caracteres sin espacios al pedir el perfil.
+    await page.route('**/v1/me', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { user?: { nickname?: string } };
+      if (body.user) body.user.nickname = LONG_NICKNAME;
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+
+    for (const width of [320, 360] as const) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(`${BASE_URL}/perfil`, { waitUntil: 'domcontentloaded' });
+      await page.locator('main').first().waitFor({ state: 'visible' });
+      await settleWidth(page);
+
+      // El apodo forzado llegó a la cabecera: si no, la prueba no cubre nada.
+      await expect(page.getByRole('heading', { level: 1 }).first()).toContainText(LONG_NICKNAME);
+
+      const dimensions = await page.evaluate(() => ({
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+      }));
+      expect(
+        dimensions.pageWidth,
+        `perfil con apodo largo desborda a ${width}px (documento ${dimensions.pageWidth}px, viewport ${dimensions.viewportWidth}px)`,
+      ).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+    }
+    await context.close();
+  } finally {
+    await browser?.close();
+  }
+});

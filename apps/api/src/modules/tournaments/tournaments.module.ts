@@ -36,6 +36,10 @@ export class TournamentsModule {
     const config = buildTournamentsRuntimeConfig(options.runtimeConfig);
     return {
       module: TournamentsModule,
+      // El lobby se importa sólo para reutilizar su aprovisionamiento de salas y su
+      // gateway de notificaciones. La vuelta (avisar que una partida terminó) no es una
+      // dependencia de módulo: va por `MatchCompletionBridge`, que este módulo ocupa al
+      // arrancar. `forwardRef` no servía acá porque este módulo es dinámico.
       imports: [LobbyModule, AuditModule],
       controllers: [TournamentsController, AdminTournamentsController],
       providers: [

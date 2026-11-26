@@ -26,6 +26,7 @@ import { AuditRepository } from '../../audit/audit.repository.js';
 import { InMemoryRateLimitStore } from '../../../common/rate-limit/in-memory-rate-limit-store.js';
 import { buildLobbyRuntimeConfigFromEnv } from '../../lobby/lobby.config.js';
 import { LobbyRepository } from '../../lobby/lobby.repository.js';
+import { MatchCompletionBridge } from '../../lobby/ports/match-completion-bridge.js';
 import { InMemoryGameRoomProvisioner } from '../../lobby/ports/game-room-provisioner.js';
 import { buildTournamentsRuntimeConfig } from '../tournaments.config.js';
 import { TournamentsRepository } from '../tournaments.repository.js';
@@ -50,6 +51,7 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
   let seasonId: string;
   let realtimeEvents: Array<{ userId: string; type: string }> = [];
   let provisioner: InMemoryGameRoomProvisioner;
+  let matchCompletion: MatchCompletionBridge;
 
   beforeAll(async () => {
     dbHandle = await createAdaptiveTestDatabase();
@@ -62,6 +64,7 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     });
     const rateLimit = new InMemoryRateLimitStore(() => clockMs);
     provisioner = new InMemoryGameRoomProvisioner();
+    matchCompletion = new MatchCompletionBridge();
     service = new TournamentsService(
       repository,
       buildTournamentsRuntimeConfig({
@@ -82,7 +85,10 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
           realtimeEvents.push({ userId, type: payload.type });
         },
       } as never,
+      matchCompletion,
     );
+    // El puente lo ocupa el propio servicio al arrancar, igual que en Nest.
+    service.onApplicationBootstrap();
 
     // La base ya trae una temporada activa por el seed de desarrollo; se reutiliza.
     const [existingSeason] = await db
@@ -666,6 +672,114 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(next.match?.roomId).toBe(ready[0]!.roomId);
     expect(next.tournament?.id).toBe(tournament.id);
     expect(next.match?.deadlineAt).not.toBeNull();
+  }, 120_000);
+
+  it('con pases libres la llave sigue avanzando: la final se abre sola', async () => {
+    // Regresión: la cantidad de jugadores se deducía del mayor sembrado escrito en los
+    // cruces. Un pase libre no guarda semilla del lado vacío, así que al propagarlo la
+    // topología se reconstruía con menos jugadores, el avance no encontraba destinos y la
+    // llave quedaba congelada (la final nunca pasaba de `SCHEDULED`). Un cuadro de 6
+    // tiene dos pases libres en la primera ronda, justo el caso que lo rompía.
+    const { tournament, participantRows, finished } = await playTournamentToTheEnd({
+      format: 'SINGLE_ELIMINATION',
+      participants: 6,
+      ip: '10.0.0.31',
+    });
+    expect(finished!.status).toBe('FINISHED');
+    expect(participantRows.filter((row) => row.status === 'WINNER')).toHaveLength(1);
+
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    // Cinco cruces jugados (N−1) y ningún cruce pendiente al terminar.
+    expect(matches.filter((match) => match.resolvedFromMatchId !== null)).toHaveLength(5);
+    expect(
+      matches.filter((match) => match.status === 'SCHEDULED' || match.status === 'READY'),
+    ).toHaveLength(0);
+    // La final existe, se jugó y su ganador es el campeón.
+    const final = matches.find((match) => match.round === 3);
+    expect(final?.status).toBe('COMPLETED');
+    expect(final?.winnerUserId).not.toBeNull();
+  }, 120_000);
+
+  it('el resultado de la mesa cierra el cruce de su sala y avanza la llave', async () => {
+    // Regresión del puente `match.completed` → torneo: sin esto, jugar la partida en la
+    // mesa no cerraba el cruce, la llave quedaba congelada y el torneo nunca terminaba.
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(4, (index) => 1800 - index * 50);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4, registrationMinutes: 5, checkInMinutes: 5 },
+      { ip: '10.0.0.41' },
+    );
+    for (const player of players) {
+      await service.register(player.principal, tournament.id);
+      await service.checkIn(player.principal, tournament.id);
+    }
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    const semi = matches.find((match) => match.round === 1 && match.slot === 1)!;
+    expect(semi.roomId).toBeTruthy();
+    expect(semi.homeUserId).toBeTruthy();
+
+    // El equipo 0 es el local del cruce: gana el local. La partida tiene que existir en
+    // `matches` porque el vínculo del cruce es una FK real.
+    const gameMatchId = await seedGameMatch(tournament.id, semi.id);
+    const applied = await service.completeByRoom({
+      roomId: semi.roomId!,
+      matchId: gameMatchId,
+      winnerTeam: 0,
+      endedAt: new Date(clockMs),
+    });
+    expect(applied).toBe(true);
+
+    const [afterSemi] = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.id, semi.id));
+    expect(afterSemi!.status).toBe('COMPLETED');
+    expect(afterSemi!.winnerUserId).toBe(semi.homeUserId);
+    expect(afterSemi!.resolvedFromMatchId).toBe(gameMatchId);
+
+    // Reentrega del mismo resultado: no vuelve a aplicarse.
+    expect(
+      await service.completeByRoom({
+        roomId: semi.roomId!,
+        matchId: gameMatchId,
+        winnerTeam: 0,
+        endedAt: new Date(clockMs),
+      }),
+    ).toBe(false);
+
+    // Una sala que no es de ningún torneo no toca nada.
+    expect(
+      await service.completeByRoom({
+        roomId: generateUuidV7(),
+        matchId: generateUuidV7(),
+        winnerTeam: 0,
+        endedAt: new Date(clockMs),
+      }),
+    ).toBe(false);
+
+    // El ganador del local quedó escrito en la final, que ahora espera al otro lado.
+    const final = (
+      await db
+        .select()
+        .from(tournamentMatchesTable)
+        .where(
+          and(
+            eq(tournamentMatchesTable.tournamentId, tournament.id),
+            eq(tournamentMatchesTable.round, 2),
+          ),
+        )
+    )[0]!;
+    expect(final.homeUserId ?? final.awayUserId).toBe(semi.homeUserId);
   }, 120_000);
 
   it('quien no hace check-in queda fuera sin arrancar una llave de una sola persona', async () => {

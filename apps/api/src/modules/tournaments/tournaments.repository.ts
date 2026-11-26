@@ -257,8 +257,12 @@ export class TournamentsRepository {
       .orderBy(asc(tournamentPrizesTable.position));
   }
 
-  async listParticipants(tournamentId: string): Promise<ParticipantRow[]> {
-    return this.db
+  /**
+   * Inscripciones del torneo. Acepta una transacción abierta: leer por el pool mientras
+   * la misma transacción tiene el torneo bloqueado produciría deadlock.
+   */
+  async listParticipants(tournamentId: string, tx?: AppTransaction): Promise<ParticipantRow[]> {
+    return (tx ?? this.db)
       .select()
       .from(tournamentParticipantsTable)
       .where(eq(tournamentParticipantsTable.tournamentId, tournamentId))
@@ -414,6 +418,16 @@ export class TournamentsRepository {
       .update(tournamentMatchesTable)
       .set({ ...patch, updatedAt: new Date() })
       .where(eq(tournamentMatchesTable.id, id));
+  }
+
+  /** Cruce asociado a una sala, si la sala pertenece a un torneo. */
+  async findMatchByRoomId(roomId: string): Promise<TournamentMatchRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.roomId, roomId))
+      .limit(1);
+    return row ?? null;
   }
 
   /** Asocia la sala aprovisionada a un cruce ya escrito, sin abrir transacción propia. */

@@ -52,6 +52,38 @@ export function TournamentDetailScreen({
     void load();
   }, [load]);
 
+  /**
+   * El torneo cambia solo con el paso del tiempo: la inscripción cierra, arranca el
+   * check-in, el barrido del servidor arma la llave y la ronda siguiente se abre cuando
+   * termina una partida. Sin refresco, quien espera en esta pantalla ve un estado congelado
+   * y tiene que recargar a mano para enterarse de que ya puede jugar.
+   *
+   * El intervalo se corta en los estados finales y no solapa pedidos: si el anterior no
+   * terminó, este ciclo se saltea.
+   */
+  const settled =
+    detail?.tournament.status === 'FINISHED' || detail?.tournament.status === 'CANCELLED';
+  useEffect(() => {
+    if (settled) return undefined;
+    let inFlight = false;
+    const timer = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      void getTournamentDetailRequest(tournamentId)
+        .then((fresh) => {
+          setDetail(fresh);
+        })
+        .catch(() => {
+          // Un refresco fallido no borra lo que la persona ya está viendo; el siguiente
+          // intento lo corrige. El error de carga inicial sí se muestra.
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, [settled, tournamentId]);
+
   const run = async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
     setError(null);

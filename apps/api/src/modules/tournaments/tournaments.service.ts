@@ -47,6 +47,7 @@ import {
 import { resolveRuleSetByCode } from '../lobby/lobby.config.js';
 import { LobbyRepository } from '../lobby/lobby.repository.js';
 import { LobbyRealtimeGateway } from '../lobby/lobby-realtime.gateway.js';
+import { MatchCompletionBridge } from '../lobby/ports/match-completion-bridge.js';
 import {
   GAME_ROOM_PROVISIONER,
   type GameRoomProvisioner,
@@ -96,9 +97,14 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     // Mismo gateway de M9a: el namespace `/lobby` ya entrega `social.notification`
     // por el canal del usuario, así que las notificaciones de torneo llegan por ahí.
     @Inject(LobbyRealtimeGateway) private readonly realtime: LobbyRealtimeGateway,
+    // Puente del lobby: el lobby no importa este módulo, así que se anota acá el cierre
+    // de cruces. Es una interfaz, no una dependencia de módulo: no hay ciclo.
+    @Inject(MatchCompletionBridge) private readonly matchCompletion: MatchCompletionBridge,
   ) {}
 
   onApplicationBootstrap(): void {
+    // A partir de acá, cada `match.completed` del lobby intenta cerrar su cruce.
+    this.matchCompletion.register((info) => this.completeByRoom(info));
     if (this.config.maintenanceIntervalMs <= 0) return;
     this.maintenanceTimer = setInterval(() => {
       void this.runMaintenance().catch(() => undefined);
@@ -1054,7 +1060,8 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
       if (!tournament) return;
       lockedTournament = tournament;
       const matches = await this.repository.lockMatches(tx, tournamentId);
-      const entrantCount = countEntrants(tournament, matches);
+      const participants = await this.repository.listParticipants(tournamentId, tx);
+      const entrantCount = countEntrants(tournament, participants);
       if (entrantCount < 2) return;
 
       const topology = buildTournamentTopology(tournament.format, entrantCount);
@@ -1231,6 +1238,38 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     await this.advanceBracket(appliedTournamentId, now);
     await this.finishIfDecided(appliedTournamentId, now);
     return true;
+  }
+
+  /**
+   * Cierra el cruce de torneo que corresponde a una sala, a partir del resultado real de la
+   * partida. Es el puente entre `match.completed` y la llave.
+   *
+   * Devuelve `false` sin tocar nada si la sala no es de un torneo, si el cruce ya estaba
+   * cerrado o si el ganador no es uno de los dos jugadores del cruce. El avance queda
+   * idempotente por `matchId` a través de `completeMatchByGame`.
+   */
+  async completeByRoom(input: {
+    readonly roomId: string;
+    readonly matchId: string;
+    readonly winnerTeam: number;
+    readonly endedAt: Date;
+  }): Promise<boolean> {
+    const match = await this.repository.findMatchByRoomId(input.roomId);
+    if (match) {
+      if (match.status !== 'READY' && match.status !== 'IN_PROGRESS') return false;
+      // El equipo 0 es el local del cruce y el 1 el visitante: es cómo se armaron los
+      // asientos al aprovisionar la sala.
+      const winnerUserId = input.winnerTeam === 0 ? match.homeUserId : match.awayUserId;
+      if (!winnerUserId) return false;
+      return this.completeMatchByGame({
+        tournamentMatchId: match.id,
+        matchId: input.matchId,
+        winnerUserId,
+        now: input.endedAt,
+      });
+    }
+
+    return false;
   }
 
   /** Si ya no quedan cruces pendientes, el torneo termina y se pagan los premios. */
@@ -1646,14 +1685,21 @@ function decodeCursor(cursor: string | null): { createdAt: Date; id: string } | 
  * Cantidad de participantes que jugaron la llave, deducida de las filas. Es la misma
  * cifra que se congeló al arrancar, así que la topología se reconstruye idéntica.
  */
-function countEntrants(tournament: TournamentRow, matches: readonly TournamentMatchRow[]): number {
-  const seeds = new Set<number>();
-  for (const match of matches) {
-    if (match.homeSeed !== null) seeds.add(match.homeSeed);
-    if (match.awaySeed !== null) seeds.add(match.awaySeed);
-  }
-  if (seeds.size > 0) return Math.max(...seeds);
-  return tournament.capacity;
+/**
+ * Cuántos jugadores tiene el cuadro. No se puede deducir del mayor sembrado escrito en
+ * los cruces: una fila con pase libre no guarda semilla del lado vacío, y un participante
+ * que espera su turno todavía no aparece en ningún cruce. Si se usara esa cuenta, al
+ * propagar un bye el cuadro se reconstruía con menos jugadores y la topología no
+ * coincidía, así que el avance siguiente no encontraba destinos y la llave se congelaba.
+ *
+ * La cantidad real es la de los participantes que llegaron al cuadro (todos los que no se
+ * retiraron ni faltaron al check-in), acotada por el cupo.
+ */
+function countEntrants(tournament: TournamentRow, participants: readonly ParticipantRow[]): number {
+  const inBracket = participants.filter(
+    (participant) => participant.status !== 'WITHDRAWN' && participant.status !== 'NO_SHOW',
+  ).length;
+  return inBracket > 0 ? Math.min(inBracket, tournament.capacity) : tournament.capacity;
 }
 
 /**

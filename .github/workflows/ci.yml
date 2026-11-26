@@ -162,9 +162,11 @@ jobs:
   # PostgreSQL y Redis de servicio, para que la llave avance con el resultado real de
   # una partida y no sólo con tests de servicio.
   tournament-e2e:
-    name: Tournament E2E (4 jugadores)
+    name: Tournament E2E (1v1 y 2v2 con equipos)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Dos torneos completos: el 1v1 (~5 min) y el 2v2 con tres cruces y su caso de
+    # abandono (~6 min), más build e instalación de Chromium.
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -234,12 +236,16 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @truco/web exec playwright install --with-deps chromium
 
-      # El torneo se juega turno a turno por dos clientes por cruce: tarda minutos, no
-      # segundos. La salida se guarda para publicarla como anotación si falla.
-      - name: Tournament E2E (llave, semifinales y final)
+      # Los dos torneos se juegan de punta a punta contra la API, el game-server y la base
+      # reales: el 1v1 con dos navegadores por cruce y el 2v2 con los cuatro asientos por
+      # WebSocket (cuatro pestañas por cruce se pasaban del tiempo del job). Tarda minutos,
+      # no segundos: la salida se guarda para publicarla como anotación si falla.
+      - name: Tournament E2E (llave, partidas y campeón en 1v1 y 2v2)
         run: |
           set -o pipefail
-          pnpm --filter @truco/web exec playwright test e2e/m10a-tournament.spec.ts \
+          pnpm --filter @truco/web exec playwright test \
+            e2e/m10a-tournament.spec.ts \
+            e2e/m10a-tournament-2v2.spec.ts \
             2>&1 | tee /tmp/tournament.log
 
       - name: Publish tournament failure details

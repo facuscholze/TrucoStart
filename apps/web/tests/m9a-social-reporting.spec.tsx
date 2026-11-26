@@ -25,6 +25,7 @@ const api = vi.hoisted(() => ({
   listSocialNotificationsRequest: vi.fn(),
   getUnreadSocialNotificationCountRequest: vi.fn(),
   patchMeRequest: vi.fn(),
+  markSocialNotificationReadRequest: vi.fn(),
 }));
 
 vi.mock('../src/lib/api-client.js', async (importOriginal) => ({
@@ -199,6 +200,63 @@ describe('M9a report entry points', () => {
       }),
     );
     expect(screen.getByTestId('report-success')).toBeTruthy();
+  });
+
+  it('da a la acción de notificación un nombre accesible completo y una etiqueta corta', async () => {
+    api.listFriendsRequest.mockResolvedValue({ items: [] });
+    api.listFriendRequestsRequest.mockResolvedValue({ items: [] });
+    api.listSocialInvitationsRequest.mockResolvedValue({ items: [] });
+    api.listBlockedUsersRequest.mockResolvedValue({ items: [] });
+    api.listSocialNotificationsRequest.mockResolvedValue({
+      items: [
+        {
+          id: '019a7e40-0000-7000-8000-0000000000d1',
+          type: 'TABLE_INVITATION',
+          actorUserId: FRIEND_ID,
+          actorNickname: 'TanoBaston',
+          referenceId: null,
+          tableId: null,
+          createdAt: '2026-11-18T12:00:00.000Z',
+          readAt: null,
+        },
+      ],
+      nextCursor: null,
+      unreadCount: 1,
+    });
+    api.getUnreadSocialNotificationCountRequest.mockResolvedValue({ unreadCount: 1 });
+    api.markSocialNotificationReadRequest.mockResolvedValue({
+      notification: {
+        id: '019a7e40-0000-7000-8000-0000000000d1',
+        type: 'TABLE_INVITATION',
+        actorUserId: FRIEND_ID,
+        actorNickname: 'TanoBaston',
+        referenceId: null,
+        tableId: null,
+        createdAt: '2026-11-18T12:00:00.000Z',
+        readAt: '2026-11-18T12:05:00.000Z',
+      },
+    });
+
+    render(
+      <SocialScreen
+        currentUser={CURRENT_USER}
+        onSessionChanged={() => undefined}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    // Nombre accesible completo: quién y qué evento, sin perder el texto largo de la acción.
+    const action = await screen.findByRole('button', {
+      name: 'Marcar como leída la notificación: TanoBaston te invitó a una mesa',
+    });
+    // La etiqueta visible es corta para que no se parta en tres líneas en la tarjeta.
+    expect(action.textContent).toBe('Marcar leída');
+    fireEvent.click(action);
+    await waitFor(() =>
+      expect(api.markSocialNotificationReadRequest).toHaveBeenCalledWith(
+        '019a7e40-0000-7000-8000-0000000000d1',
+      ),
+    );
   });
 
   it('persists statistics visibility independently from history visibility', async () => {

@@ -365,6 +365,11 @@ export const screenMessagesEsAr = {
       CHALLENGE_DECLINED: 'rechazó tu desafío',
     } as Readonly<Record<string, string>>,
     markRead: 'Marcar como leída',
+    // Versión visible corta: en la tarjeta móvil la acción va en su propia fila y no debe
+    // partirse en tres líneas. El nombre accesible sigue siendo `markRead`.
+    markReadShort: 'Marcar leída',
+    notificationMarkReadAriaLabel: (actor: string, event: string) =>
+      `Marcar como leída la notificación: ${actor} ${event}`,
     markAllRead: 'Marcar todas como leídas',
     blockAction: 'Bloquear',
     removeFriend: 'Quitar amigo',

@@ -656,15 +656,25 @@ export function SocialScreen({ currentUser, onSessionChanged, onNavigate }: Soci
               {notifications.map((notification) => (
                 <li
                   key={notification.id}
-                  className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${notification.readAt ? 'border-ivory/10 bg-elevated/55' : 'border-gold/30 bg-elevated'}`}
+                  className={`flex flex-wrap items-start justify-between gap-x-3 gap-y-2 rounded-xl border p-3 ${notification.readAt ? 'border-ivory/10 bg-elevated/55' : 'border-gold/30 bg-elevated'}`}
                 >
-                  <p className="text-xs text-ivory">
+                  {/*
+                    El texto del evento ocupa su propia fila en móvil y la acción baja a una
+                    fila completa (< 640 px), así "Marcar leída" no se parte en tres líneas.
+                    El nombre accesible conserva el texto largo de la acción.
+                  */}
+                  <p className="min-w-0 flex-1 basis-full text-xs text-ivory tablet:basis-auto">
                     <strong>{notification.actorNickname ?? messagesEsAr.social.title}</strong>{' '}
                     {messagesEsAr.social.notificationTypes[notification.type] ?? notification.type}
                   </p>
                   {!notification.readAt && (
                     <CallButton
                       tone="neutral"
+                      ariaLabel={messagesEsAr.social.notificationMarkReadAriaLabel(
+                        notification.actorNickname ?? messagesEsAr.social.title,
+                        messagesEsAr.social.notificationTypes[notification.type] ??
+                          notification.type,
+                      )}
                       onClick={() =>
                         void withAction(notification.id, async () => {
                           await markSocialNotificationReadRequest(notification.id);
@@ -679,7 +689,7 @@ export function SocialScreen({ currentUser, onSessionChanged, onNavigate }: Soci
                         })
                       }
                     >
-                      {messagesEsAr.social.markRead}
+                      {messagesEsAr.social.markReadShort}
                     </CallButton>
                   )}
                 </li>

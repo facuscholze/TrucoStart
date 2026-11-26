@@ -281,7 +281,9 @@ export function TournamentDetailScreen({
                 className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm"
               >
                 <span className="w-6 shrink-0 text-white/50">{standing.position}º</span>
-                <span className="min-w-0 flex-1 break-words text-white">{standing.nickname}</span>
+                <span className="min-w-0 break-words text-white">{standing.nickname}</span>
+                {/* La nota acompaña al nombre: con `flex-1` en el nombre se iba al borde
+                    derecho de la pantalla y había que recorrer media línea para leerla. */}
                 <span className="text-xs text-white/60">{standing.tiebreakNote}</span>
               </li>
             ))}
@@ -299,7 +301,7 @@ export function TournamentDetailScreen({
               key={participant.userId}
               className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm"
             >
-              <span className="min-w-0 flex-1 break-words text-white">{participant.nickname}</span>
+              <span className="min-w-0 break-words text-white">{participant.nickname}</span>
               <span className="text-xs text-white/60">
                 {PARTICIPANT_STATUS_LABELS_ES_AR[participant.status] ?? participant.status}
                 {participant.seed ? ` · #${participant.seed}` : ''}

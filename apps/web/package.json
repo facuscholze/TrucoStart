@@ -19,7 +19,8 @@
     "screenshots:m9b": "corepack pnpm --filter @truco/web build && VITE_ADMIN_DEMO=1 corepack pnpm --filter @truco/admin build && node scripts/capture-m9b-screenshots.mjs",
     "screenshots:m9c": "corepack pnpm --filter @truco/web build && node scripts/capture-m9c-screenshots.mjs",
     "screenshots:ux": "node scripts/capture-ux-batch-screenshots.mjs",
-    "measure:ux": "node scripts/measure-ux-signals.mjs"
+    "measure:ux": "node scripts/measure-ux-signals.mjs",
+    "screenshots:m10a": "corepack pnpm --filter @truco/web build && node scripts/capture-m10a-screenshots.mjs"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.2.0",

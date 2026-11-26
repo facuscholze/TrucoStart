@@ -2,7 +2,7 @@
 
 - **Última actualización:** 2026-11-26
 - **Tanda de pulido UX (2026-11-26):** sobre la base M0–M9c se implementaron las mejoras 1, 2, 3, 6, 7 y 9 de `docs/UX_AUDIT_M0-M9C.md` (acción principal móvil y práctica diferida por umbral, señal de continuidad en la barra inferior, encabezado de escritorio en una sola fila, notificaciones y metadatos del ranking legibles en 360 px, y revisión de casos admin con contexto fijo e identificadores legibles). Las mejoras 5 y 8 quedaron diferidas con criterio de medición con jugadores reales en `docs/BACKLOG.md`. Cierre medido con `pnpm --filter @truco/web measure:ux` (CLS por ruta y ancho, filas de encabezado, pista de la barra), axe WCAG 2.2 A/AA sin hallazgos y auditoría responsive sin overflow. Detalle en ADR-028 y `docs/CHANGELOG.md`. **Etapa 3 no iniciada.**
-- **Etapa activa:** Etapa 2 — M9c (progresión persistente y economía virtual simbólica), sobre las capacidades sociales M9a y competitivas M9b.
+- **Etapa activa:** Etapa 3 — Competitividad, módulo **M10a (torneos)**. La Etapa 2 quedó cerrada y el detalle histórico de M9a/M9b/M9c sigue al final del documento.
 - **Módulo actual:** M9c implementado en esta rama. Los CI anotados en los apartados M9a/M9b/M9c corresponden a sus tandas históricas y no certifican el conjunto de commits de esta auditoría; para el cierre, consultar en el reporte el CI del SHA final empujado. El gate de tests falla si falta PostgreSQL o Redis y la ruta DB no permite fallback a PGlite. M8a–M8d siguen cerrados en código con dependencias de infraestructura real pendientes. El detalle de M9a/M9b/M9c se registra al final de este documento. _(M8b: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
 
 ---
@@ -445,3 +445,57 @@ infraestructura real** (no se puede cerrar sin un despliegue).
 - Verificar que el CI remoto del SHA final empujado termine con los cuatro jobs obligatorios en verde, usando PostgreSQL 16 y Redis 7 reales en el job de calidad/pruebas. Los runs históricos de etapas anteriores no sustituyen esa verificación; la evidencia del cierre actual queda en el reporte de cierre.
 - Revisión profesional pendiente de `docs/LEGAL_CHECKLIST.md`; los documentos legales siguen siendo borradores y el aviso visible no debe presentarse como aprobado.
 - La auditoría local no cierra por sí sola Etapa 2. No iniciar Etapa 3 hasta resolver los pendientes M0–M9c y los gates anteriores.
+
+---
+
+## M10a — Torneos (Etapa 3, primer módulo)
+
+**Estado:** implementado en la rama activa. API, web y panel administrativo con CI en verde por commit; el SHA final se anota en el reporte de cierre.
+
+### Alcance entregado
+
+| Criterio pedido                           | Implementación                                                                                                                                                                                                     | Evidencia                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Formatos simple y doble, 1v1 y 2v2        | `buildTournamentTopology` en `packages/shared/src/tournaments/topology.ts`: función pura que arma la llave completa. Cupos 2–64, potencias de 2 y no potencias.                                                    | `packages/shared/tests/tournament-topology.spec.ts` (14 pruebas sobre 16 tamaños y ambos formatos)     |
+| Byes bien repartidos                      | Pases libres a las mejores siembras, propagados en cadena. Un cruce con un lado vacío no se juega; un lado **pendiente** no da el triunfo a nadie.                                                                 | Prueba de 7 jugadores en `tournaments.spec.ts`; el caso de 64 verifica 63 cruces jugados               |
+| Swiss                                     | Documentado como interfaz pendiente, no implementado. `TournamentFormatSchema` sólo admite los dos formatos de eliminación.                                                                                        | Sin código de Swiss: fuera de alcance por pedido explícito                                             |
+| Ciclo de vida completo                    | `DRAFT` → `REGISTRATION` → `CHECK_IN` → `IN_PROGRESS` → `FINISHED`, más `CANCELLED`. Ventanas fijadas al crear y guardadas como instantes absolutos; barrido de mantenimiento avanza los estados vencidos.         | `tournaments.spec.ts` (arranque por barrido, no-show fuera del cuadro)                                 |
+| Inscripción con plazo y cupo              | Cupo controlado dentro de la transacción con bloqueo del torneo; unicidad `(torneo, usuario)`. Dos inscripciones simultáneas no superan el cupo. Baja sólo antes del cierre; reinscribirse reactiva la misma fila. | Pruebas de concurrencia, cupo y baja/reinscripción                                                     |
+| Check-in con ventana y no-show automático | Ventana propia; quien no se presenta queda `NO_SHOW` y no entra al cuadro. Un cruce sin presentación vence por `deadline_at` y se cierra con `forfeit_reason`.                                                     | Pruebas de check-in y de llave que no arranca con un solo jugador                                      |
+| Siembra por Glicko-2 y avance idempotente | Siembra con el rating vigente (leer no modifica). Avance automático al terminar la partida, idempotente por `matchId`; un evento con otro `matchId` sobre un cruce cerrado tampoco avanza.                         | Torneo completo de 4, 7, 16 y 64 hasta el campeón                                                      |
+| Partidas de torneo en salas reales        | Cada cruce `READY` aprovisiona su mesa `PRIVATE` con el `RuleSet` y el puntaje del torneo. `my-next-match` devuelve el cruce con su `roomId`. Nunca bots.                                                          | Prueba de sala aprovisionada + verificación contra el game-server real                                 |
+| Sin impacto en el ranking                 | `is_competitive = false` en la mesa; los cruces no pasan por Glicko-2 ni por el leaderboard.                                                                                                                       | ADR-030; aserción de `tables.is_competitive = false`                                                   |
+| Premios simbólicos idempotentes           | Monedas virtuales o cosméticos por el libro mayor de M9c, `kind = MISSION_REWARD`, asiento con `idempotencyKey` y único `(tournament, position)`. Sin entrada paga ni reintegro.                                   | Prueba de pago único y de reintento que no acredita de nuevo; regla 13 en verde                        |
+| Creación oficial vs privada               | Oficiales sólo por staff (`403` para jugadores); privados con código para cualquier jugador, con topes por cuenta e IP. El código de 6 caracteres evita 0/O y 1/I para poder dictarse.                             | Pruebas de `403` y de límites                                                                          |
+| Web: listado, detalle, cuadro, mi partida | `/torneos` y `/torneos/:id` con filtros, entrada por código, acciones según `canRegister`/`canCheckIn`, cuadro legible a 320 px y "Mi próxima partida" hacia `/mesa/:roomId`.                                      | `apps/web/tests/m10a-tournaments.spec.tsx`; capturas a 360 y 1200 px; medición de ancho a 320/360/1200 |
+| Notificaciones de ronda y partida lista   | `TOURNAMENT_ROUND_STARTED` y `TOURNAMENT_MATCH_READY` por el libro de M9a, con deduplicación por torneo/ronda/cruce.                                                                                               | Prueba de eventos de ronda para los cuatro jugadores                                                   |
+| Panel administrativo                      | Sección Torneos con filtros, creación de oficiales con motivo, cancelación con motivo obligatorio, avance manual y resolución de incidentes cruce por cruce, todo auditado.                                        | `apps/admin/tests/admin.spec.tsx` (18 pruebas) + recorrido en navegador contra la API real             |
+| Documentación                             | `API.md` §10, `EVENTS.md` §9.3, `THREAT_MODEL.md` (11 amenazas), `LEGAL_CHECKLIST.md` §2.8.1, ADR-029 y ADR-030, este apartado.                                                                                    | —                                                                                                      |
+
+### Errores reales encontrados y corregidos
+
+Los tres aparecieron al ejercitar el sistema, no al escribir pruebas unitarias:
+
+1. **`withdraw` prohibido por la regla 13.** La ruta de baja se llamaba `POST /:id/withdraw` y `check-no-real-money` la marcó como endpoint de retiro de dinero. CI lo detectó. La ruta pasó a `/:id/unregister`; el guard no se tocó ni se le agregó una excepción.
+2. **El pase libre regalaba una ronda.** Al jugar un torneo de 7 contra el servicio, la ronda 2 se daba por ganada por un solo jugador. La causa era tratar "lado vacío" (bye) y "lado pendiente" (ronda anterior sin jugar) como lo mismo. Ahora sólo se resuelve el pase libre real.
+3. **Los cruces nunca tenían sala.** `GAME_ROOM_PROVISIONER` estaba inyectado y nunca se llamaba: el cruce quedaba `READY` con `roomId: null` y "mi próxima partida" devolvía `null`. Un torneo no se podía jugar. Ahora se aprovisiona la mesa del cruce, fuera de la transacción del torneo (el repositorio del lobby escribe por el pool y usarlo dentro produciría deadlock).
+
+Además, en el panel: el cliente mandaba `content-type: application/json` en POST sin cuerpo (Fastify lo rechazaba y abrir un cuadro fallaba), el formulario de incidencia quedaba abierto sobre un cruce ya resuelto, cancelación e incidencia compartían el campo de motivo, y un torneo cancelado ofrecía "forzar avance de ronda". En el jugador, la tabla de posiciones decía "Cayó en la ronda —" a los cuatro antes de jugar.
+
+### Verificación
+
+- `tournaments.spec.ts`: **15 pruebas** sobre PGlite, incluyendo torneo completo de 4, 7, 16 y 64 participantes, concurrencia de inscripciones, no-show, sala aprovisionada, tabla sin eliminaciones inventadas y acceso de staff a torneos privados.
+- `packages/shared`: 157 pruebas, entre ellas 14 de topología que verifican todos colocados una vez, byes a las mejores siembras, nadie contra sí mismo, N−1 y 2N−2 cruces para cada tamaño de 2 a 64, y campeón que nunca perdió.
+- Web: 72 pruebas; admin: 18.
+- `format:check`, lint, typecheck y `check-no-real-money` en verde. Migraciones desde cero verificadas sobre PGlite.
+- Medición en navegador: `/torneos` a 320, 360 y 1200 px sin desborde del documento.
+- Recorrido real: torneo de 4 creado por HTTP, arrancado por el barrido, cuadro armado con salas, incidencia resuelta desde el panel y torneo cancelado con motivo auditado.
+- **PostgreSQL 16 y Redis 7 reales:** verificados sólo por CI remoto (el sandbox no tiene Docker). El job de calidad y el de Playwright pasaron en verde para cada commit de M10a.
+
+### Lo que queda fuera de alcance (explícito)
+
+- Swiss: documentado como interfaz, no implementado.
+- M10b (ligas, truco de 6) y espectadores: no iniciados por pedido explícito.
+- _Bracket reset_ en eliminación doble: decisión registrada en ADR-029.
+- Torneos en el ranking competitivo: decisión registrada en ADR-030.
+- Revisión legal: los documentos siguen siendo borradores; el aviso visible no se presenta como aprobado.

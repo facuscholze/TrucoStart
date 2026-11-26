@@ -8,7 +8,8 @@ import {
   saveClientPreferences,
 } from '../lib/preferences.js';
 
-export type NavSection = 'home' | 'lobby' | 'learn' | 'scorer' | 'profile' | 'auth';
+export type NavSection =
+  'home' | 'lobby' | 'ranking' | 'learn' | 'scorer' | 'profile' | 'social' | 'progression' | 'auth';
 
 /**
  * Enlaces legales del pie. El orden coincide con `legalDocumentOrder` para que el
@@ -59,8 +60,15 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
   const navItems: ReadonlyArray<{ id: NavSection; label: string; path: string }> = [
     { id: 'home', label: messagesEsAr.nav.home, path: '/' },
     { id: 'lobby', label: messagesEsAr.nav.lobby, path: '/lobby' },
+    { id: 'ranking', label: messagesEsAr.nav.rankings, path: '/ranking' },
     { id: 'learn', label: messagesEsAr.nav.learn, path: '/aprender' },
     { id: 'scorer', label: messagesEsAr.nav.scorer, path: '/anotador' },
+    ...(currentUser
+      ? [
+          { id: 'social' as const, label: messagesEsAr.nav.social, path: '/amigos' },
+          { id: 'progression' as const, label: messagesEsAr.nav.progression, path: '/progreso' },
+        ]
+      : []),
     currentUser
       ? { id: 'profile', label: messagesEsAr.nav.profile, path: '/perfil' }
       : { id: 'auth', label: messagesEsAr.nav.auth, path: '/acceso' },
@@ -209,7 +217,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
             </ul>
           </nav>
         </div>
-        <p className="max-w-6xl mx-auto mt-3 text-[10px] font-bold uppercase tracking-wide text-danger/90">
+        <p className="max-w-6xl mx-auto mt-3 text-[10px] font-bold uppercase tracking-wide text-danger-strong">
           {LEGAL_DRAFT_BANNER}
         </p>
       </footer>
@@ -217,7 +225,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
       {/* Barra inferior táctil en móvil (< 768px) */}
       <nav
         aria-label={messagesEsAr.nav.mainAria}
-        className="tablet:hidden fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur border-t border-gold/30 px-2 py-1.5 flex items-center justify-around gap-1"
+        className="tablet:hidden fixed bottom-0 inset-x-0 z-30 overflow-x-auto bg-surface/95 backdrop-blur border-t border-gold/30 px-2 py-1.5 flex items-center justify-start gap-1"
       >
         {navItems.map((item) => {
           const active = activeSection === item.id;
@@ -227,7 +235,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
               type="button"
               aria-current={active ? 'page' : undefined}
               onClick={() => onNavigate(item.path)}
-              className={`min-h-[44px] flex-1 rounded-xl px-1.5 text-[11px] font-bold transition-colors ${
+              className={`min-h-[44px] min-w-[58px] flex-none rounded-xl px-1.5 text-[10px] leading-tight font-bold transition-colors ${
                 active
                   ? 'bg-elevated text-gold border border-gold/45'
                   : 'text-muted hover:text-ivory border border-transparent'

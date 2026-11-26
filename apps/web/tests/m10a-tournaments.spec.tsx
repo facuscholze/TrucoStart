@@ -173,6 +173,8 @@ describe('detalle del torneo', () => {
   function detail(overrides: Partial<TournamentDetailResponse> = {}): TournamentDetailResponse {
     return {
       tournament: SUMMARY,
+      // Los torneos 1v1 no tienen equipos: el detalle siempre trae la lista vacía.
+      teams: [],
       participants: [
         {
           userId: USER_ID,

@@ -414,13 +414,14 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
           : null,
     }));
 
-    const matchViews = matches.map((match) => this.toMatchView(match, nicknames));
+    const teams = row.mode === '2v2' ? await this.repository.listTeams(row.id) : [];
+    const teamNames = new Map(teams.map((team) => [team.id, team.name]));
+    const matchViews = matches.map((match) => this.toMatchView(match, nicknames, teamNames));
     const now = this.now();
     const summary = await this.toSummary(row, viewerUserId, { participants, prizes });
 
     // Equipos del torneo 2v2 con sus integrantes: es lo que ocupa cada lado del cuadro
     // y lo que la pantalla muestra en lugar de una lista de personas sueltas.
-    const teams = row.mode === '2v2' ? await this.repository.listTeams(row.id) : [];
     const teamMembers = row.mode === '2v2' ? await this.repository.listTeamMembers(row.id) : [];
     const teamViews = teams.map((team) => ({
       id: team.id,
@@ -462,18 +463,28 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
   private toMatchView(
     match: TournamentMatchRow,
     nicknames: ReadonlyMap<string, string>,
+    teamNames?: ReadonlyMap<string, string>,
   ): TournamentMatchView {
+    // En 2v2 el lado se muestra con el nombre del equipo; en 1v1, con el apodo. El cuadro
+    // tiene un solo campo por lado para que la web no tenga que saber de qué torneo es.
+    const sideName = (userId: string | null, teamId: string | null): string | null => {
+      if (teamId !== null) return teamNames?.get(teamId) ?? 'Equipo';
+      return userId ? (nicknames.get(userId) ?? 'Jugador') : null;
+    };
     return {
       id: match.id,
       round: match.round,
       slot: match.slot,
       bracket: match.bracket,
       status: match.status,
-      homeNickname: match.homeUserId ? (nicknames.get(match.homeUserId) ?? 'Jugador') : null,
-      awayNickname: match.awayUserId ? (nicknames.get(match.awayUserId) ?? 'Jugador') : null,
+      homeNickname: sideName(match.homeUserId, match.homeTeamId),
+      awayNickname: sideName(match.awayUserId, match.awayTeamId),
       homeUserId: match.homeUserId,
       awayUserId: match.awayUserId,
       winnerUserId: match.winnerUserId,
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      winnerTeamId: match.winnerTeamId,
       roomId: match.roomId,
       deadlineAt: match.deadlineAt?.toISOString() ?? null,
       forfeitReason: match.forfeitReason,
@@ -501,8 +512,13 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
       const nicknames = await this.repository.nicknamesFor(
         [pending.homeUserId, pending.awayUserId].filter((id): id is string => id !== null),
       );
+      const teams = tournament.mode === '2v2' ? await this.repository.listTeams(tournament.id) : [];
       return {
-        match: this.toMatchView(pending, nicknames),
+        match: this.toMatchView(
+          pending,
+          nicknames,
+          new Map(teams.map((team) => [team.id, team.name])),
+        ),
         tournament: await this.toSummary(tournament, viewerUserId),
       };
     }

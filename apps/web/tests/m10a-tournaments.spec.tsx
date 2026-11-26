@@ -40,6 +40,10 @@ function match(overrides: Partial<TournamentDetailResponse['matches'][number]> =
     homeUserId: USER_ID,
     awayUserId: '019a7e40-0000-7000-8000-0000000000b2',
     winnerUserId: null,
+    // En 1v1 los lados son personas: los equipos quedan nulos.
+    homeTeamId: null,
+    awayTeamId: null,
+    winnerTeamId: null,
     roomId: null,
     deadlineAt: null,
     forfeitReason: null,
@@ -279,5 +283,68 @@ describe('detalle del torneo', () => {
     );
     expect((await screen.findAllByText(/sin valor económico/)).length).toBeGreaterThan(0);
     expect(screen.getByText('ABC234')).toBeTruthy();
+  });
+});
+
+/**
+ * Torneos 2v2: la pantalla tiene que inscribir EQUIPOS. Anotar personas sueltas en un
+ * torneo de cuatro asientos deja la mesa sin poder llenarse, que fue el hueco de M10a.
+ */
+describe('detalle de un torneo 2v2', () => {
+  function teamDetail(overrides: Partial<TournamentDetailResponse> = {}): TournamentDetailResponse {
+    return {
+      tournament: { ...SUMMARY, mode: '2v2', capacity: 4 },
+      participants: [],
+      teams: [
+        {
+          id: '019a7e40-0000-7000-8000-0000000000c1',
+          name: 'Los Pibes',
+          seed: 1,
+          captainUserId: USER_ID,
+          members: [
+            { userId: USER_ID, nickname: 'TanaDelSur', status: 'CHECKED_IN' },
+            {
+              userId: '019a7e40-0000-7000-8000-0000000000b2',
+              nickname: 'Envidioso',
+              status: 'CHECKED_IN',
+            },
+          ],
+        },
+      ],
+      matches: [],
+      standings: [],
+      myNextMatch: null,
+      canRegister: false,
+      canCheckIn: false,
+      registrationClosedReason: null,
+      ...overrides,
+    };
+  }
+
+  function renderDetail(detail: TournamentDetailResponse) {
+    api.getTournamentDetailRequest.mockResolvedValue(detail);
+    return render(
+      <TournamentDetailScreen
+        tournamentId={SUMMARY.id}
+        currentUserId={USER_ID}
+        onNavigate={vi.fn()}
+      />,
+    );
+  }
+
+  it('ofrece inscribir un equipo en vez de anotar a una sola persona', async () => {
+    renderDetail(teamDetail({ canRegister: true }));
+    expect(await screen.findByRole('heading', { name: /Inscribir mi equipo/i })).toBeTruthy();
+    // No hay botón de inscripción individual en un torneo por equipos.
+    expect(screen.queryByRole('button', { name: /^Inscribirme$/i })).toBeNull();
+  });
+
+  it('muestra los equipos con sus dos integrantes', async () => {
+    renderDetail(teamDetail());
+    expect(await screen.findByRole('heading', { name: /Equipos \(1\)/i })).toBeTruthy();
+    // El nombre del equipo y sus integrantes son dos datos: nunca se concatenan.
+    expect(screen.getByText('Los Pibes')).toBeTruthy();
+    expect(screen.getByText('TanaDelSur + Envidioso')).toBeTruthy();
+    expect(screen.getByText('sembrado #1')).toBeTruthy();
   });
 });

@@ -571,6 +571,23 @@ export async function registerForTournamentRequest(id: string): Promise<{ partic
   );
 }
 
+/**
+ * Inscripción de un equipo completo en un torneo 2v2. El capitán anota a los dos
+ * integrantes juntos: o queda todo el equipo o no queda nadie.
+ */
+export async function registerTeamForTournamentRequest(
+  id: string,
+  body: { readonly name: string; readonly teammateUserId: string },
+): Promise<{ teamId: string; participants: number }> {
+  return requestJson<{ teamId: string; participants: number }>(
+    `/v1/tournaments/${encodeURIComponent(id)}/teams`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ name: body.name, teammateUserIds: [body.teammateUserId] }),
+    },
+  );
+}
+
 export async function unregisterFromTournamentRequest(id: string): Promise<{ withdrawn: true }> {
   return requestJson<{ withdrawn: true }>(`/v1/tournaments/${encodeURIComponent(id)}/unregister`, {
     method: 'POST',

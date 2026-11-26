@@ -1,9 +1,11 @@
-import type { TournamentDetailResponse } from '@truco/shared';
+import type { PlayerSearchResponse, TournamentDetailResponse } from '@truco/shared';
 import { useCallback, useEffect, useState } from 'react';
 import {
   checkInTournamentRequest,
   getTournamentDetailRequest,
   registerForTournamentRequest,
+  registerTeamForTournamentRequest,
+  searchPlayersRequest,
   unregisterFromTournamentRequest,
 } from '../../lib/api-client.js';
 import { TournamentBracket } from './TournamentBracket.js';
@@ -35,6 +37,13 @@ export function TournamentDetailScreen({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Inscripción de equipo (2v2): nombre del equipo y usuario del compañero.
+  const [teamName, setTeamName] = useState('');
+  const [teammateNickname, setTeammateNickname] = useState('');
+  const [foundPlayers, setFoundPlayers] = useState<PlayerSearchResponse['items']>([]);
+  const [selectedTeammate, setSelectedTeammate] = useState<{ id: string; nickname: string } | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,7 +218,100 @@ export function TournamentDetailScreen({
         <h2 id="tournament-actions" className="sr-only">
           Acciones del torneo
         </h2>
-        {canRegister ? (
+        {canRegister && tournament.mode === '2v2' ? (
+          // En 2v2 no alcanza con anotarse solo: la mesa necesita los cuatro asientos.
+          <form
+            className="space-y-2 rounded-xl border border-white/15 p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const trimmedName = teamName.trim();
+              if (!trimmedName || !selectedTeammate) return;
+              void run(
+                () =>
+                  registerTeamForTournamentRequest(tournament.id, {
+                    name: trimmedName,
+                    teammateUserId: selectedTeammate.id,
+                  }),
+                'Quedó inscripto el equipo completo.',
+              );
+            }}
+          >
+            <h3 className="font-display text-base text-gold">Inscribir mi equipo</h3>
+            <p className="text-xs text-white/60">
+              Un equipo de 2v2 son dos jugadores. Los dos tienen que hacer check-in para que el
+              equipo entre al cuadro.
+            </p>
+            <label className="block text-sm" htmlFor="tournament-team-name">
+              Nombre del equipo
+              <input
+                id="tournament-team-name"
+                required
+                maxLength={40}
+                value={teamName}
+                onChange={(event) => setTeamName(event.target.value)}
+                className="mt-1 min-h-11 w-full rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-white"
+              />
+            </label>
+            <label className="block text-sm" htmlFor="tournament-team-teammate">
+              Tu compañero (apodo)
+              <input
+                id="tournament-team-teammate"
+                required
+                minLength={2}
+                value={teammateNickname}
+                onChange={(event) => {
+                  setTeammateNickname(event.target.value);
+                  setSelectedTeammate(null);
+                }}
+                className="mt-1 min-h-11 w-full rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-white"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || teammateNickname.trim().length < 2}
+              onClick={() => {
+                void (async () => {
+                  try {
+                    const found = await searchPlayersRequest(teammateNickname.trim());
+                    setFoundPlayers(found.items);
+                    setError(found.items.length === 0 ? 'No encontramos a ese jugador.' : null);
+                  } catch (caught) {
+                    setError(readableError(caught));
+                  }
+                })();
+              }}
+              className="min-h-11 w-full rounded-lg border border-white/25 px-4 py-2 text-sm text-white/80 disabled:opacity-50"
+            >
+              Buscar compañero
+            </button>
+            {foundPlayers.length > 0 ? (
+              <fieldset className="space-y-1">
+                <legend className="text-xs text-white/60">Elegí a tu compañero</legend>
+                {foundPlayers.map((player) => (
+                  <label key={player.userId} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="tournament-teammate"
+                      checked={selectedTeammate?.id === player.userId}
+                      onChange={() =>
+                        setSelectedTeammate({ id: player.userId, nickname: player.nickname })
+                      }
+                    />
+                    <span className="break-words">{player.nickname}</span>
+                  </label>
+                ))}
+              </fieldset>
+            ) : null}
+            <button
+              type="submit"
+              disabled={busy || selectedTeammate === null}
+              className="min-h-11 w-full rounded-lg bg-gold px-4 py-2 font-bold text-black disabled:opacity-50"
+            >
+              Inscribir equipo
+            </button>
+          </form>
+        ) : null}
+        {canRegister && tournament.mode !== '2v2' ? (
           <button
             type="button"
             disabled={busy}
@@ -320,6 +422,27 @@ export function TournamentDetailScreen({
               </li>
             ))}
           </ol>
+        </section>
+      ) : null}
+
+      {detail.teams.length > 0 ? (
+        <section aria-labelledby="tournament-teams">
+          <h2 id="tournament-teams" className="font-display text-base text-gold">
+            Equipos ({detail.teams.length})
+          </h2>
+          <ul className="mt-2 space-y-1">
+            {detail.teams.map((team) => (
+              <li key={team.id} className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="min-w-0 break-words text-white">{team.name}</span>
+                <span className="text-xs text-white/60">
+                  {team.members.map((member) => member.nickname).join(' + ')}
+                </span>
+                {team.seed ? (
+                  <span className="text-xs text-white/50">sembrado #{team.seed}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
 

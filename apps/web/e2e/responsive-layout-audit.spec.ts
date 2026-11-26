@@ -1,4 +1,4 @@
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 import { launchIsolatedChromium } from './support/launch.js';
 
 const BASE_URL = 'http://localhost:4173';
@@ -14,6 +14,29 @@ const ROUTES = [
   '/perfil',
   '/legal',
 ] as const;
+
+/**
+ * Mide el ancho del documento cuando dejó de cambiar. Un `waitForTimeout` fijo
+ * fotografía la página mientras todavía se acomoda (bootstrap de sesión, carga de
+ * datos, fuentes) y el audit se vuelve intermitente en CI. Se espera a que el ancho
+ * se estabilice entre dos lecturas consecutivas.
+ */
+async function settleWidth(page: Page, { timeoutMs = 4_000, quietMs = 150 } = {}) {
+  const start = Date.now();
+  let previous = -1;
+  let stableSince = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    if (width !== previous) {
+      previous = width;
+      stableSince = Date.now();
+    } else if (Date.now() - stableSince >= quietMs) {
+      return width;
+    }
+    await page.waitForTimeout(50);
+  }
+  return previous;
+}
 
 test('barre overflow horizontal en pantallas representativas y puntos de quiebre responsive', async () => {
   test.setTimeout(300_000);
@@ -39,11 +62,13 @@ test('barre overflow horizontal en pantallas representativas y puntos de quiebre
       for (const route of ROUTES) {
         await page.goto(`${BASE_URL}${route}`, { waitUntil: 'domcontentloaded' });
         await page.locator('main').first().waitFor({ state: 'visible' });
-        await page.waitForTimeout(80);
+        const settledWidth = await settleWidth(page);
         const dimensions = await page.evaluate(() => ({
           pageWidth: document.documentElement.scrollWidth,
           viewportWidth: document.documentElement.clientWidth,
         }));
+        // Si la medición estable no coincide con la última lectura, se reporta la estable.
+        if (settledWidth > dimensions.pageWidth) dimensions.pageWidth = settledWidth;
         checked.push({ width, route, pageWidth: dimensions.pageWidth });
         expect(
           dimensions.pageWidth,
@@ -66,11 +91,12 @@ test('barre overflow horizontal en pantallas representativas y puntos de quiebre
 
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 800 });
-      await page.waitForTimeout(100);
+      const settledWidth = await settleWidth(page);
       const dimensions = await page.evaluate(() => ({
         pageWidth: document.documentElement.scrollWidth,
         viewportWidth: document.documentElement.clientWidth,
       }));
+      if (settledWidth > dimensions.pageWidth) dimensions.pageWidth = settledWidth;
       checked.push({ width, route: 'mesa-practica', pageWidth: dimensions.pageWidth });
       expect(
         dimensions.pageWidth,

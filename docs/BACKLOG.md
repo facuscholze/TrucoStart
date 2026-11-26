@@ -26,6 +26,23 @@
 
 ---
 
+---
+
+## Deuda UX acordada (no implementada a propósito)
+
+Estas dos oportunidades del [`UX_AUDIT_M0-M9C.md`](./UX_AUDIT_M0-M9C.md) **no se implementaron** en la tanda de pulido UX: la persona a cargo de las prioridades pidió medirlas primero con jugadores reales antes de cambiar la estructura de las pantallas. No son un olvido.
+
+1. **P2 — Reducir el costo de recorrer pantallas largas de cuenta y progresión (mejora 5).**
+   - Perfil, Social y Progreso son recorridos extensos a 360 px. Antes de recortar o reordenar bloques hay que saber qué busca la gente ahí.
+   - **Criterio de apertura:** medir con jugadores reales (al menos 5 sesiones moderadas) el tiempo y los callejones sin salida para llegar a _editar perfil_, _privacidad_ y _seguridad_; si la mediana supera ~15 s o aparecen abandonos, priorizar la reagrupación.
+   - Restricción si se implementa: conservar todas las opciones y el orden de tabulación.
+2. **P2 — Acortar el tiempo hasta una primera acción útil en Inicio (mejora 8).**
+   - Los ≈2.08 s de FCP/LCP en carga fría limitada son un diagnóstico sintético, no una medición de personas.
+   - **Criterio de apertura:** instrumentar _tiempo hasta CTA utilizable_ con datos de dispositivos reales (RUM o laboratorio con hardware de gama baja) durante al menos una semana de uso; recién entonces decidir qué diferir.
+   - Restricción si se implementa: no degradar LCP/CLS ni mover el CTA principal debajo del pliegue en 360×800.
+
+---
+
 ## Etapa 3 — Competitividad
 
 1. **Torneos automatizados:**

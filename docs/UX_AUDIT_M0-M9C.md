@@ -22,7 +22,27 @@ La revisión es heurística y estática: no sustituye pruebas moderadas con juga
 
 - El desplazamiento grande del pie en Rankings se redujo: la reserva móvil de 37rem (592 px) queda próxima al contenido cargado (588 px); el pie pasó de y=575→765 px y CLS 0.0709 a y=769→765 px y CLS 0.0041. En la última corrida el residuo de 0.0038 se atribuyó al texto del párrafo de carga temporal (`p.min-h-[7rem]`), en y=590→590 px; no es otro salto del pie y queda por debajo del umbral habitual de CLS.
 
-## Oportunidades UX priorizadas (sin implementar)
+## Estado de implementación (2026-11-26)
+
+Tanda de pulido UX ejecutada sobre esta lista. Estado por oportunidad:
+
+| #   | Prioridad | Estado                                                                                                                       |
+| --- | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1        | Implementada — "Jugar ahora" es la acción principal; la práctica se ofrece al superar el umbral de espera (30 s por defecto) |
+| 2   | P1        | Implementada — señal de continuidad en la barra inferior (degradado, chevron y descripción accesible)                        |
+| 3   | P2        | Implementada — encabezado de escritorio en una sola fila de 61 px a 1024–1440 px                                             |
+| 4   | P2        | Implementada — mesas con personas primero, práctica en bloque secundario                                                     |
+| 5   | P2        | **Diferida** — criterio de medición con jugadores reales en `docs/BACKLOG.md`                                                |
+| 6   | P2        | Implementada — la acción de notificación va en su propia fila, sin partirse                                                  |
+| 7   | P2        | Implementada — metadatos del ranking legibles conservando los tres datos                                                     |
+| 8   | P2        | **Diferida** — criterio de medición con datos de dispositivos reales en `docs/BACKLOG.md`                                    |
+| 9   | P3        | Implementada — cabecera de caso fija y asas legibles sin perder el UUID íntegro                                              |
+
+Verificación: `pnpm --filter @truco/web measure:ux` (CLS por ruta y ancho, filas de encabezado, pista de la barra), `audit:a11y` sin hallazgos axe WCAG 2.2 A/AA, `audit:responsive` sin overflow y capturas antes/después a 360 y 1200 px en `docs/screenshots/`. Decisión registrada en ADR-028.
+
+---
+
+## Oportunidades UX priorizadas (estado original del relevamiento)
 
 Prioridad **P1**: afecta el inicio de la tarea o la orientación en móvil. **P2**: fricción recurrente o de lectura. **P3**: eficiencia de una tarea especializada.
 

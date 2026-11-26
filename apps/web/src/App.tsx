@@ -6,11 +6,11 @@ import {
 } from '@truco/shared';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { AppShell } from './components/AppShell.js';
+import { RouteFallback } from './components/RouteFallback.js';
 import { OnboardingModal } from './components/OnboardingModal.js';
 import type { AuthTab } from './features/auth/AuthScreen.js';
 import { SocialRealtimeProvider } from './features/social/SocialRealtimeProvider.js';
 import { HomeScreen } from './features/home/HomeScreen.js';
-import { messagesEsAr } from './i18n/messages.es-AR.js';
 import {
   createGuestSessionRequest,
   getLegalStatusRequest,
@@ -185,28 +185,6 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
   return { kind: 'home' };
 }
 
-function RouteFallback({
-  reserveViewport = false,
-  reserveRankingContent = false,
-}: {
-  readonly reserveViewport?: boolean;
-  readonly reserveRankingContent?: boolean;
-}) {
-  const reservedSpace = reserveViewport
-    ? 'grid min-h-[100svh] place-items-center'
-    : reserveRankingContent
-      ? 'grid min-h-[37rem] tablet:min-h-[26rem] place-items-center'
-      : '';
-  return (
-    <div
-      role="status"
-      className={`rounded-2xl bg-surface border border-ivory/20 p-8 text-center text-sm text-muted ${reservedSpace}`}
-    >
-      {messagesEsAr.nav.loadingSection}
-    </div>
-  );
-}
-
 export function App() {
   const [locationState, setLocationState] = useState(() => ({
     pathname: typeof window !== 'undefined' ? window.location.pathname : '/',
@@ -363,6 +341,7 @@ export function App() {
             <RouteFallback
               reserveViewport={route.kind === 'learn'}
               reserveRankingContent={route.kind === 'ranking'}
+              reserveLobbyContent={route.kind === 'lobby'}
             />
           }
         >

@@ -138,6 +138,40 @@ describe('@truco/admin · panel M7', () => {
     expect(withReplay).toContain('Bloqueo permanente');
   });
 
+  it('la revisión del caso mantiene contexto, identifica la partida y no pierde el UUID', async () => {
+    const { detail } = await demoData();
+    const html = renderToStaticMarkup(
+      <ReportDetailView
+        detail={detail}
+        role="MODERATOR"
+        replay={null}
+        busy={false}
+        error={null}
+        notice={null}
+        actions={{
+          onBack: () => undefined,
+          onClaim: () => undefined,
+          onResolve: () => undefined,
+          onLoadReplay: () => undefined,
+          onSanction: () => undefined,
+          onNicknameChange: () => undefined,
+        }}
+      />,
+    );
+    // Contexto del caso siempre a la vista mientras se recorre la revisión.
+    expect(html).toContain('sticky top-0');
+    expect(html).toContain('Próxima acción');
+    // La partida se reconoce con un asa corta y el UUID íntegro sigue disponible.
+    const matchId = detail.report.matchId!;
+    expect(html).toContain(`P-${matchId.slice(0, 8).toUpperCase()}`);
+    expect(html).toContain(matchId);
+    // La cabecera del caso no se duplica (un solo h1 con las partes).
+    expect(html.match(/reportó a/g)?.length).toBe(1);
+    // Las acciones sensibles siguen presentes para el rol con permiso.
+    expect(html).toContain('Aplicar sanción');
+    expect(html).toContain('Resolver con acción');
+  });
+
   it('el rol SOPORTE no ve acciones de sanción ni de resolución', async () => {
     const { detail } = await demoData();
     const html = renderToStaticMarkup(

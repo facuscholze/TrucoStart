@@ -68,6 +68,26 @@ describe('Leaderboard responsive presentation', () => {
     expect(within(mobileList).queryByText('+1678')).toBeNull();
   });
 
+  it('presenta los metadatos con etiqueta y valor legibles y conserva los tres datos', async () => {
+    api.getLeaderboardRequest.mockResolvedValue(GLOBAL_RANKING);
+    render(<LeaderboardScreen onNavigate={vi.fn()} />);
+
+    const mobileList = await screen.findByRole('list', { name: 'Rankings competitivos' });
+    // Los tres metadatos siguen presentes: no se recortan datos para ganar legibilidad.
+    for (const label of ['Partidas', 'Rivales', 'Victorias']) {
+      expect(within(mobileList).getByText(label)).toBeTruthy();
+    }
+    // Etiqueta y valor viven en nodos separados con tamaños explícitos (12 px / 14 px),
+    // no en un bloque de 11 px que se leía chico a 360 px.
+    const term = within(mobileList).getByText('Partidas');
+    expect(term.tagName).toBe('DT');
+    expect(term.className).toContain('text-xs');
+    const value = within(mobileList).getByText('34');
+    expect(value.tagName).toBe('DD');
+    expect(value.className).toContain('text-sm');
+    expect(value.className).toContain('font-semibold');
+  });
+
   it('shows a separate period variation beside the current rating for weekly rankings', async () => {
     api.getLeaderboardRequest
       .mockResolvedValueOnce(GLOBAL_RANKING)

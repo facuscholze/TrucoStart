@@ -4,6 +4,39 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [Unreleased] — 2026-11-26 (Tanda de pulido UX sobre M0–M9c)
+
+### Agregado
+
+- `apps/web/scripts/measure-ux-signals.mjs` (`pnpm --filter @truco/web measure:ux`): mide la barra inferior (destinos, alcance por teclado, pista de continuidad, sección activa), la altura y filas del encabezado de escritorio y el CLS por ruta y ancho, con medianas de tres cargas contra una línea base registrada. Falla el gate si una señal empeora.
+- `RouteFallback` extraído a componente propio con reserva de altura por ruta.
+- `EntityHandle` en `apps/admin`: asa corta legible (`P-019A7E40`) junto al UUID completo y seleccionable.
+
+### Corregido
+
+- **Inicio (mejora 1):** "Jugar ahora" contra una persona es la acción principal; practicar contra la máquina pasa a bloque secundario y se ofrece solo cuando la espera por rival supera el umbral configurable (30 s por defecto).
+- **Lobby (mejora 4):** las mesas con personas van primero; la práctica queda en un bloque aparte y secundario.
+- **Barra inferior móvil (mejora 2):** degradado y chevron dorado mientras queden destinos fuera de cuadro, descripción para lectores de pantalla y retiro de la señal al llegar al final. La sección activa se revela una vez y el bootstrap de sesión ya no devuelve la barra al medio.
+- **Encabezado de escritorio (mejora 3):** una sola fila de controles de 61 px a 1024/1200/1440 px, antes dos filas de 117 px y sin scroll horizontal.
+- **Notificaciones (mejora 6):** la acción va en su propia fila en móvil y "Marcar leída" deja de partirse en tres líneas; el nombre accesible conserva el texto largo con quién y qué evento.
+- **Ranking móvil (mejora 7):** metadatos de 11 px a etiqueta 12 px / valor 14 px seminegrita, conservando partidas, rivales y victorias.
+- **CLS del lobby:** la causa era el fallback del chunk diferido, no la barra de desplazamiento. Con la altura reservada, el CLS mediano del Lobby a 1200 px baja de 0.0554 a 0.0001. Se retiró el `scrollbar-gutter: stable` que no movía la aguja.
+- **Administración (mejora 9):** cabecera de caso fija con estado y próxima acción orientativa según RBAC, y partidas identificables por asa corta sin perder el UUID íntegro en evidencia y auditoría.
+- `accessibility-audit`: el primer `Tab` sin origen de foco caía en `BODY`; ahora se enfoca un punto neutro antes de recorrer los controles.
+
+### Verificación local
+
+- `pnpm lint`, `typecheck`, `test`, `build`, `format:check` del monorepo en verde; web 60 tests, admin 15.
+- `audit:a11y` con 0 hallazgos axe WCAG 2.2 A/AA, `audit:responsive` 80 combinaciones sin overflow, `audit:mobile-perf` en verde, `check-no-real-money` y `scan-secrets` OK, `check:bundle` del admin OK.
+- `measure:ux` en verde en tres corridas consecutivas: encabezado 61 px / 1 fila a 1024–1440, barra con pista y 8/8 destinos por teclado, CLS mediano 0 a 360 px y ≤ 0.0209 a 1200 px (línea base 0.0231).
+- Capturas antes/después en 360 y 1200 px en `docs/screenshots/` (`ux-*-before.png`, `ux-*-after.png`).
+
+### Diferido a propósito
+
+- Mejoras 5 (pantallas largas de cuenta y progresión) y 8 (tiempo hasta la primera acción útil en Inicio) quedan en `docs/BACKLOG.md` con el criterio de medirlas primero con jugadores reales.
+
+---
+
 ## [Unreleased] — 2026-11-19 (Auditoría de producto M0–M9c, tandas 1–3)
 
 ### Corregido

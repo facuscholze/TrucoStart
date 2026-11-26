@@ -1,7 +1,15 @@
 import type { CompetitiveReviewListResponse, CompetitiveReviewStatus } from '@truco/shared';
 import { useState, type FormEvent } from 'react';
 import { formatDateTime } from '../lib/format.js';
-import { Button, Card, EmptyState, Field, StatusPill, inputClass } from './primitives.js';
+import {
+  Button,
+  Card,
+  EmptyState,
+  EntityHandle,
+  Field,
+  StatusPill,
+  inputClass,
+} from './primitives.js';
 
 const STATUS_LABELS: Record<CompetitiveReviewStatus, string> = {
   OPEN: 'Pendiente',
@@ -136,10 +144,15 @@ export function CompetitiveReviewView({
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                       Partidas vinculadas
                     </p>
-                    <ul className="mt-1 flex flex-wrap gap-2 text-xs text-ivory/65">
-                      {item.matchIds.map((matchId) => (
-                        <li key={matchId} className="rounded bg-surface/60 px-2 py-1 font-mono">
-                          {matchId}
+                    {/*
+                      Asas legibles para reconocer partidas de un vistazo, con el UUID
+                      completo y seleccionable al lado: la evidencia y la auditoría siguen
+                      usando el identificador íntegro.
+                    */}
+                    <ul className="mt-1 space-y-1 text-xs text-ivory/65">
+                      {item.matchIds.map((matchId, index) => (
+                        <li key={matchId}>
+                          <EntityHandle prefix="P" id={matchId} label={`partida ${index + 1}`} />
                         </li>
                       ))}
                     </ul>

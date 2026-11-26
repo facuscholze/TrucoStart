@@ -14,6 +14,7 @@ import {
   Button,
   Card,
   EmptyState,
+  EntityHandle,
   Field,
   StatusPill,
   inputClass,
@@ -80,20 +81,56 @@ export function ReportDetailView({
     ? ['WARNING', 'MUTE', 'SUSPEND', 'BAN']
     : ['WARNING', 'MUTE', 'SUSPEND'];
 
+  /**
+   * Próxima acción esperable según el estado del caso y el rol. Es orientativa y no
+   * habilita ni oculta acciones: los permisos siguen mandando (RBAC) y cada acción
+   * sensible conserva su confirmación y su registro en la auditoría.
+   */
+  const nextAction = isResolved
+    ? 'Caso resuelto: queda sólo consultar el detalle y la auditoría.'
+    : report.status === 'OPEN'
+      ? canClaim
+        ? 'Tomar el caso para revisarlo y dejar constancia de la decisión.'
+        : 'Pedile a un moderador con permiso de reclamo que tome el caso.'
+      : canResolve
+        ? 'Revisar la evidencia y resolver con una nota de al menos 10 caracteres.'
+        : 'El caso está en revisión por otro moderador.';
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">
-            Caso {report.id.slice(0, 8)}
+      {/*
+        Cabecera del caso pegada arriba: al recorrer la revisión el moderador mantiene a la
+        vista el caso, su estado y las partes sin volver a subir. Es una sola cabecera (no
+        se duplica el texto), así el lector de pantalla la anuncia una vez.
+      */}
+      <div
+        data-case-context
+        className="sticky top-0 z-10 rounded-xl border border-sky/30 bg-surface px-3 py-2 shadow-lg"
+      >
+        <div className="flex items-start justify-between gap-x-3 gap-y-2">
+          <p className="flex min-w-0 flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">
+            <span>
+              Caso <span className="font-mono tracking-normal">{report.id.slice(0, 8)}</span>
+            </span>
+            <StatusPill tone={STATUS_TONES[report.status]}>
+              {REPORT_STATUS_LABELS_ES_AR[report.status]}
+            </StatusPill>
           </p>
-          <h1 className="font-display text-xl font-bold text-ivory sm:text-2xl">
-            {report.reporterNickname} reportó a {report.targetNickname}
-          </h1>
+          <div className="shrink-0">
+            <Button variant="ghost" onClick={actions.onBack}>
+              ← Volver a la cola
+            </Button>
+          </div>
         </div>
-        <Button variant="ghost" onClick={actions.onBack}>
-          ← Volver a la cola
-        </Button>
+        <h1 className="mt-1 font-display text-lg font-bold text-ivory sm:text-2xl">
+          {report.reporterNickname} reportó a {report.targetNickname}
+        </h1>
+        {nextAction && (
+          <p className="mt-1 text-xs text-ivory/65">
+            <span className="font-semibold uppercase tracking-wide text-muted">Próxima acción</span>{' '}
+            {nextAction}
+          </p>
+        )}
       </div>
 
       {error && (
@@ -132,10 +169,14 @@ export function ReportDetailView({
                 <dt className="text-[11px] uppercase tracking-wide text-muted">Creado</dt>
                 <dd className="text-ivory">{formatDateTime(report.createdAt)}</dd>
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <dt className="text-[11px] uppercase tracking-wide text-muted">Partida</dt>
                 <dd className="text-ivory">
-                  {report.matchId ? report.matchId : 'Sin partida asociada'}
+                  {report.matchId ? (
+                    <EntityHandle prefix="P" id={report.matchId} label="partida vinculada" />
+                  ) : (
+                    'Sin partida asociada'
+                  )}
                 </dd>
               </div>
               <div>

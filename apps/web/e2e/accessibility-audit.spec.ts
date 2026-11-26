@@ -115,6 +115,9 @@ test('audita WCAG 2.2 A/AA en rutas públicas, estados autenticados y mesa de pr
           ).filter((element) => element.getClientRects().length > 0).length,
       );
       expect(focusableCount).toBeGreaterThan(0);
+      // El primer Tab de Chromium sin origen de foco cae en BODY: se establece el origen
+      // enfocando un punto neutro de la página antes de recorrer los controles.
+      await page.getByRole('heading', { level: 1 }).first().click();
       for (let step = 0; step < Math.min(8, focusableCount); step++) {
         await page.keyboard.press('Tab');
         const focused = await page.evaluate(() => {

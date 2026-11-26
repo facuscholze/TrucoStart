@@ -201,7 +201,7 @@ export function LeaderboardScreen({ onNavigate }: { readonly onNavigate: (path: 
                     />
                     <span
                       aria-label={`${messagesEsAr.rankings.rating}: ${Math.round(item.rating)}`}
-                      className="shrink-0 tabular-nums text-sm text-ivory"
+                      className="shrink-0 text-base font-semibold tabular-nums text-ivory"
                     >
                       {Math.round(item.rating)}
                     </span>
@@ -220,18 +220,28 @@ export function LeaderboardScreen({ onNavigate }: { readonly onNavigate: (path: 
                       </span>
                     )}
                   </div>
-                  <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-ivory/10 pt-2 text-[11px]">
+                  {/*
+                    Metadatos legibles a 360 px sin perder datos: la etiqueta deja de ser
+                    11 px y el valor sube a 14 px con peso, separados por una línea. La
+                    grilla sigue en 3 columnas, así no aparece scroll horizontal ni con
+                    zoom del navegador.
+                  */}
+                  <dl className="mt-3 grid grid-cols-3 gap-x-3 gap-y-1 border-t border-ivory/10 pt-2.5">
                     <div>
-                      <dt className="text-muted">{messagesEsAr.rankings.played}</dt>
-                      <dd className="tabular-nums text-ivory">{item.matchesPlayed}</dd>
+                      <dt className="text-xs text-muted">{messagesEsAr.rankings.played}</dt>
+                      <dd className="text-sm font-semibold tabular-nums text-ivory">
+                        {item.matchesPlayed}
+                      </dd>
                     </div>
                     <div>
-                      <dt className="text-muted">{messagesEsAr.rankings.opponents}</dt>
-                      <dd className="tabular-nums text-ivory">{item.opponentsCount}</dd>
+                      <dt className="text-xs text-muted">{messagesEsAr.rankings.opponents}</dt>
+                      <dd className="text-sm font-semibold tabular-nums text-ivory">
+                        {item.opponentsCount}
+                      </dd>
                     </div>
                     <div>
-                      <dt className="text-muted">{messagesEsAr.rankings.wins}</dt>
-                      <dd className="tabular-nums text-ivory">{item.wins}</dd>
+                      <dt className="text-xs text-muted">{messagesEsAr.rankings.wins}</dt>
+                      <dd className="text-sm font-semibold tabular-nums text-ivory">{item.wins}</dd>
                     </div>
                   </dl>
                 </li>

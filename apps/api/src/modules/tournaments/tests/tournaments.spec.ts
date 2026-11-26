@@ -14,6 +14,7 @@ import {
   ratingProfilesTable,
   ratingSeasonsTable,
   tablesTable,
+  tournamentAwardsTable,
   tournamentMatchesTable,
   tournamentParticipantsTable,
   tournamentsTable,
@@ -808,6 +809,123 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(participants.filter((p) => p.status === 'NO_SHOW')).toHaveLength(2);
     expect(participants.filter((p) => p.status === 'CHECKED_IN')).toHaveLength(1);
   }, 60_000);
+
+  /**
+   * Hueco de verificación de M10a: ventana de check-in, ausentes y cruce vencido.
+   *
+   * El reloj lo inyecta el servicio (`nowFn`), así que el caso recorre un torneo de días
+   * en milisegundos: no espera tiempo real en ningún paso.
+   */
+  it('check-in vencido: echa a los ausentes, define el cruce por incomparecencia y avanza', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(4, (index) => 1900 - index * 50);
+    // Los dos torneos se crean en el mismo instante: sus ventanas (inscripción 30 min,
+    // check-in 10 más) quedan ancladas al reloj inyectado.
+    const abandoned = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4 },
+      { ip: '10.0.0.21' },
+    );
+    const played = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4 },
+      { ip: '10.0.0.22' },
+    );
+    for (const player of players) {
+      await service.register(player.principal, abandoned.id);
+      await service.register(player.principal, played.id);
+    }
+
+    // 1) La inscripción ya cerró pero el check-in sigue abierto: se puede llegar tarde
+    //    a inscribirse no, a presentarse sí.
+    at(35);
+    expect(await service.startTournament(abandoned.id, new Date(clockMs))).toBe(false);
+    await service.checkIn(players[0]!.principal, played.id);
+    await service.checkIn(players[1]!.principal, played.id);
+
+    // 2) Vencida la ventana, quien no se presentó no puede colarse en el cuadro.
+    at(41);
+    await expect(service.checkIn(players[2]!.principal, played.id)).rejects.toMatchObject({
+      status: 409,
+    });
+
+    // 3) El torneo sin nadie presente se cancela y todos quedan como ausentes.
+    expect(await service.startTournament(abandoned.id, new Date(clockMs))).toBe(false);
+    const absent = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, abandoned.id));
+    expect(absent.every((row) => row.status === 'NO_SHOW')).toBe(true);
+    const [cancelled] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, abandoned.id));
+    expect(cancelled!.status).toBe('CANCELLED');
+
+    // 4) Con dos presentados la llave se arma igual: los ausentes quedan fuera del cuadro
+    //    y nadie juega contra alguien que no está.
+    expect(await service.startTournament(played.id, new Date(clockMs))).toBe(true);
+    const participants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, played.id));
+    expect(participants.filter((row) => row.status === 'CHECKED_IN')).toHaveLength(2);
+    expect(participants.filter((row) => row.status === 'NO_SHOW')).toHaveLength(2);
+
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, played.id));
+    expect(matches).toHaveLength(1);
+    const final = matches[0]!;
+    expect(final.status).toBe('READY');
+    expect(final.homeUserId).not.toBeNull();
+    expect(final.awayUserId).not.toBeNull();
+    // El plazo de presentación sale de `noShowMinutes` (10) contado desde que quedó listo.
+    expect(final.deadlineAt!.getTime()).toBe(new Date(clockMs).getTime() + 10 * 60_000);
+
+    // 5) Nadie se presenta al cruce: vence y se cierra por incomparecencia, sin inventar
+    //    ganador (doble ausencia).
+    at(52);
+    expect(await service.expireMatch(final, new Date(clockMs))).toBe(true);
+    const [forfeited] = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.id, final.id));
+    expect(forfeited!.status).toBe('FORFEITED');
+    expect(forfeited!.forfeitReason).toBe('NO_SHOW');
+    expect(forfeited!.winnerUserId).toBeNull();
+
+    // 6) La definición es idempotente: volver a pasarla no reabre ni redefine el cruce.
+    //    (El barrido general se prueba aparte: acá interesa este cruce, no los torneos
+    //    que dejaron abiertos los otros casos del archivo.)
+    at(53);
+    expect(await service.expireMatch(final, new Date(clockMs))).toBe(false);
+    const [still] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, played.id));
+    expect(still!.status).toBe('IN_PROGRESS');
+
+    // 7) La llave no se traba: el panel cierra el cuadro sin ganador y el torneo termina
+    //    sin pagar premio de campeón.
+    await service.forceAdvance(
+      { userId: organizer.id, sessionId: generateUuidV7(), permissions: [] } as never,
+      played.id,
+      { reason: 'Doble incomparecencia en la final.' },
+      { ip: '10.0.0.22' },
+    );
+    const [closed] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, played.id));
+    expect(closed!.status).toBe('FINISHED');
+    const awards = await db
+      .select()
+      .from(tournamentAwardsTable)
+      .where(eq(tournamentAwardsTable.tournamentId, played.id));
+    expect(awards).toHaveLength(0);
+  }, 90_000);
 
   it('la tabla no inventa eliminaciones: quien sigue en carrera lo dice', async () => {
     const organizer = (await seedUsers(1))[0]!;

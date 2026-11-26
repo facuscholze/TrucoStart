@@ -1281,7 +1281,14 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     if (pending > 0) return;
 
     const standings = await this.standingsFor(tournament);
-    const champion = standings[0];
+    // La posición 1 no es sinónimo de campeón: una final cerrada por incomparecencia
+    // (doble ausencia) deja el cuadro completo sin que nadie haya ganado. En ese caso
+    // no se corona a nadie y `payout` no paga premios inventados.
+    const matches = await this.repository.listMatches(tournament.id);
+    const championUserId = finalWinner(tournament.format, matches);
+    const champion = championUserId
+      ? standings.find((standing) => standing.userId === championUserId)
+      : undefined;
     await this.repository.transaction(async (tx) => {
       const locked = await this.repository.lockById(tx, tournament.id);
       if (!locked || locked.status !== 'IN_PROGRESS') return;
@@ -1319,10 +1326,14 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
   async payout(tournamentId: string, now = this.now()): Promise<number> {
     const tournament = await this.repository.findById(tournamentId);
     if (!tournament || tournament.status !== 'FINISHED') return 0;
-    const [prizes, standings] = await Promise.all([
+    const [prizes, standings, matches] = await Promise.all([
       this.repository.listPrizes([tournamentId]),
       this.standingsFor(tournament),
+      this.repository.listMatches(tournamentId),
     ]);
+    // Un torneo puede terminar sin campeón (final cerrada por incomparecencia de ambos
+    // lados). Sin ganador no se paga: la posición en la tabla no es un título.
+    if (finalWinner(tournament.format, matches) === null) return 0;
     let awarded = 0;
 
     for (const prize of prizes) {
@@ -1703,6 +1714,37 @@ function countEntrants(tournament: TournamentRow, participants: readonly Partici
 }
 
 /**
+ * El último cruce del cuadro: la final. En eliminación doble es la `GRAND_FINAL`; en
+ * simple, el último cruce de la llave de ganadores.
+ */
+function lastMatchOfBracket(
+  format: TournamentFormat,
+  matches: readonly TournamentMatchRow[],
+): TournamentMatchRow | undefined {
+  if (format === 'DOUBLE_ELIMINATION') {
+    return matches.filter((match) => match.bracket === 'GRAND_FINAL').at(-1);
+  }
+  const lastRound = Math.max(...matches.map((match) => match.round));
+  return matches.filter((match) => match.bracket === 'WINNERS' && match.round === lastRound).at(-1);
+}
+
+/**
+ * Campeón del torneo, o `null` si todavía no hay uno.
+ *
+ * Es la única fuente para coronar, para la tabla y para pagar premios: un torneo que
+ * termina con la final cerrada por incomparecencia de ambos lados no tiene campeón, y
+ * ese caso pagaba los premios al primero de la tabla como si hubiera ganado.
+ */
+function finalWinner(
+  format: TournamentFormat,
+  matches: readonly TournamentMatchRow[],
+): string | null {
+  const finalMatch = lastMatchOfBracket(format, matches);
+  if (!finalMatch || finalMatch.status !== 'COMPLETED') return null;
+  return finalMatch.winnerUserId ?? null;
+}
+
+/**
  * Tabla de posiciones con el desempate documentado (ver `docs/RULES.md` § Torneos):
  * 1.º campeón, 2.º subcampeón (perdedor de la final) y después quien cayó más tarde;
  * a igual ronda manda la mejor semilla. Antes de que haya llave, orden de inscripción.
@@ -1721,17 +1763,11 @@ function buildStandings(
   );
   const name = (userId: string): string => nicknames.get(userId) ?? 'Jugador';
 
-  const finalMatch = matches
-    .filter((match) =>
-      tournament.format === 'DOUBLE_ELIMINATION'
-        ? match.bracket === 'GRAND_FINAL'
-        : match.bracket === 'WINNERS' && match.round === Math.max(...matches.map((m) => m.round)),
-    )
-    .at(-1);
-  const championUserId =
-    finalMatch?.status === 'COMPLETED' ? (finalMatch.winnerUserId ?? null) : null;
-  const runnerUpUserId =
-    finalMatch?.status === 'COMPLETED' ? (finalMatch.loserUserId ?? null) : null;
+  const finalMatch = lastMatchOfBracket(tournament.format, matches);
+  // Sólo un cruce final GANADO corona: cerrado por incomparecencia de ambos lados no
+  // deja campeón (y por lo tanto tampoco subcampeón).
+  const championUserId = finalWinner(tournament.format, matches);
+  const runnerUpUserId = championUserId === null ? null : (finalMatch?.loserUserId ?? null);
 
   // Ronda de la última derrota de cada jugador: quien cayó más tarde quedó mejor.
   const lastLossRound = new Map<string, number>();

@@ -1,4 +1,8 @@
 import { OPENAPI_LOBBY_SCHEMAS } from './openapi-lobby.fragment.js';
+import { OPENAPI_M7_SCHEMAS } from './openapi-m7.fragment.js';
+import { OPENAPI_M9A_SCHEMAS } from './openapi-m9a.fragment.js';
+import { OPENAPI_M9B_SCHEMAS } from './openapi-m9b.fragment.js';
+import { OPENAPI_M9C_SCHEMAS } from './openapi-m9c.fragment.js';
 
 export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
   ApiErrorResponse: {
@@ -206,11 +210,21 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
       bio: { type: 'string', maxLength: 280 },
       settings: {
         type: 'object',
-        required: ['soundEnabled', 'animationsReduced', 'confirmCalls'],
+        required: [
+          'soundEnabled',
+          'animationsReduced',
+          'confirmCalls',
+          'historyVisibility',
+          'statsVisibility',
+          'presenceVisibility',
+        ],
         properties: {
           soundEnabled: { type: 'boolean' },
           animationsReduced: { type: 'boolean' },
           confirmCalls: { type: 'boolean' },
+          historyVisibility: { type: 'string', enum: ['ALL', 'FRIENDS', 'NOBODY'] },
+          statsVisibility: { type: 'string', enum: ['ALL', 'FRIENDS', 'NOBODY'] },
+          presenceVisibility: { type: 'string', enum: ['ALL', 'FRIENDS', 'NOBODY'] },
         },
       },
     },
@@ -237,6 +251,9 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
           soundEnabled: { type: 'boolean' },
           animationsReduced: { type: 'boolean' },
           confirmCalls: { type: 'boolean' },
+          historyVisibility: { type: 'string', enum: ['ALL', 'FRIENDS', 'NOBODY'] },
+          statsVisibility: { type: 'string', enum: ['ALL', 'FRIENDS', 'NOBODY'] },
+          presenceVisibility: { type: 'string', enum: ['ALL', 'FRIENDS', 'NOBODY'] },
         },
       },
     },
@@ -255,9 +272,41 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
       createdAt: { type: 'string', format: 'date-time' },
     },
   },
+  MatchCallStats: {
+    type: 'object',
+    required: ['resolved', 'won', 'winRate'],
+    properties: {
+      resolved: { type: 'integer', minimum: 0 },
+      won: { type: 'integer', minimum: 0 },
+      winRate: { type: 'number', minimum: 0, maximum: 1 },
+    },
+  },
+  UserModeStats: {
+    type: 'object',
+    required: [
+      'matchesPlayed',
+      'wins',
+      'losses',
+      'abandons',
+      'winRate',
+      'currentStreak',
+      'envido',
+      'truco',
+    ],
+    properties: {
+      matchesPlayed: { type: 'integer', minimum: 0 },
+      wins: { type: 'integer', minimum: 0 },
+      losses: { type: 'integer', minimum: 0 },
+      abandons: { type: 'integer', minimum: 0 },
+      winRate: { type: 'number', minimum: 0, maximum: 1 },
+      currentStreak: { type: 'integer', minimum: 0 },
+      envido: { $ref: '#/components/schemas/MatchCallStats' },
+      truco: { $ref: '#/components/schemas/MatchCallStats' },
+    },
+  },
   UserStatsResponse: {
     type: 'object',
-    required: ['userId', 'matchesPlayed', 'wins', 'losses', 'abandons', 'winRate'],
+    required: ['userId', 'matchesPlayed', 'wins', 'losses', 'abandons', 'winRate', 'byMode'],
     properties: {
       userId: { type: 'string', format: 'uuid' },
       matchesPlayed: { type: 'integer', minimum: 0 },
@@ -265,6 +314,14 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
       losses: { type: 'integer', minimum: 0 },
       abandons: { type: 'integer', minimum: 0 },
       winRate: { type: 'number', minimum: 0, maximum: 1 },
+      byMode: {
+        type: 'object',
+        required: ['1v1', '2v2'],
+        properties: {
+          '1v1': { $ref: '#/components/schemas/UserModeStats' },
+          '2v2': { $ref: '#/components/schemas/UserModeStats' },
+        },
+      },
     },
   },
   UserMatchesResponse: {
@@ -283,6 +340,7 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
             'team',
             'score',
             'outcome',
+            'hasBots',
             'startedAt',
             'endedAt',
           ],
@@ -294,6 +352,7 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
             team: { type: 'integer' },
             score: { type: 'integer' },
             outcome: { type: 'string', enum: ['WIN', 'LOSS', 'ABANDON'] },
+            hasBots: { type: 'boolean' },
             startedAt: { type: 'string', format: 'date-time' },
             endedAt: { type: ['string', 'null'], format: 'date-time' },
           },
@@ -329,5 +388,9 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
       userId: { type: 'string', format: 'uuid' },
     },
   },
+  ...OPENAPI_M7_SCHEMAS,
+  ...OPENAPI_M9A_SCHEMAS,
   ...OPENAPI_LOBBY_SCHEMAS,
+  ...OPENAPI_M9B_SCHEMAS,
+  ...OPENAPI_M9C_SCHEMAS,
 };

@@ -102,6 +102,7 @@ export function ReportDialog({
     <Modal
       open={open}
       title={result ? 'Reporte enviado' : 'Reportar a un jugador'}
+      onClose={close}
       footer={
         result ? (
           <CallButton tone="neutral" onClick={close}>
@@ -215,7 +216,7 @@ export function ReportDialog({
           {error && (
             <p
               role="alert"
-              className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger"
+              className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger-strong"
             >
               {error}
             </p>

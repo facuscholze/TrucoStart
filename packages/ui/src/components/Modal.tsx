@@ -10,6 +10,11 @@ export interface ModalProps {
   readonly onClose?: () => void;
 }
 
+/** Mantiene la interacción de teclado dentro de los diálogos, incluidos los modales anidados. */
+const activeDialogStack: HTMLDivElement[] = [];
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Modal({
   open,
   title,
@@ -20,20 +25,69 @@ export function Modal({
 }: ModalProps) {
   const headingId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
-    dialogRef.current?.focus();
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    activeDialogStack.push(dialog);
+    dialog.focus();
 
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && onClose) {
+      if (activeDialogStack.at(-1) !== dialog) return;
+
+      if (event.key === 'Escape' && onCloseRef.current) {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+        (element) =>
+          element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden',
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const activeElement = document.activeElement;
+      if (event.shiftKey) {
+        if (
+          activeElement === first ||
+          activeElement === dialog ||
+          !dialog.contains(activeElement)
+        ) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (
+        activeElement === last ||
+        activeElement === dialog ||
+        !dialog.contains(activeElement)
+      ) {
+        event.preventDefault();
+        first.focus();
       }
     };
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      const stackIndex = activeDialogStack.lastIndexOf(dialog);
+      if (stackIndex >= 0) activeDialogStack.splice(stackIndex, 1);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -59,6 +113,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={headingId}
         tabIndex={-1}
+        className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         style={{
           width: '100%',
           maxWidth: '460px',
@@ -69,7 +124,6 @@ export function Modal({
           boxShadow: '0 20px 44px rgba(0, 0, 0, 0.62)',
           padding: '1.15rem',
           fontFamily: designTokens.typography.sansFamily,
-          outline: 'none',
         }}
       >
         <div

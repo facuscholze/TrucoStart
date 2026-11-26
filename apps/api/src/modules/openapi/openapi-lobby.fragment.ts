@@ -205,6 +205,11 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
         enum: ['ar-standard-v1', 'ar-sin-flor-v1', 'ar-corto-15-v1', 'ar-corto-15-flor-v1'],
         default: 'ar-standard-v1',
       },
+      competitive: {
+        type: 'boolean',
+        default: false,
+        description: 'Activa matchmaking competitivo humano con rating Glicko-2.',
+      },
     },
   },
   MatchmakingQueueStatusResponse: {
@@ -214,6 +219,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
       status: { type: 'string', enum: ['IDLE', 'QUEUED', 'MATCHED'] },
       mode: { type: 'string', enum: ['1v1', '2v2'] },
       rulesetCode: { type: 'string' },
+      competitive: { type: 'boolean', default: false },
       enqueuedAt: { type: 'string', format: 'date-time' },
       expiresAt: { type: 'string', format: 'date-time' },
       position: { type: 'integer', minimum: 1 },

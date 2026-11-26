@@ -38,7 +38,7 @@ describe('M7 — reportes del jugador, límites y estado de moderación', () => 
 
   beforeAll(async () => {
     dbHandle = await createAdaptiveTestDatabase();
-    app = await createApp({ reportsPerWindow: 4, maxOpenReportsPerReporter: 3 });
+    app = await createApp({ reportsPerWindow: 10, maxOpenReportsPerReporter: 3 });
     // Segunda instancia con límite de abiertos alto, para aislar el rate limit por ventana.
     rateLimitApp = await createApp({ reportsPerWindow: 3, maxOpenReportsPerReporter: 50 });
   });
@@ -130,6 +130,7 @@ describe('M7 — reportes del jugador, límites y estado de moderación', () => 
       targets.push(await registerUser(`u${i}@truco.ar`, `ReportadoTres${i}`));
     }
     // Subimos la ventana de rate limit para aislar el límite de reportes abiertos.
+    let firstReportId: string | undefined;
     for (let i = 0; i < 3; i++) {
       const res = await app.inject({
         method: 'POST',
@@ -138,7 +139,18 @@ describe('M7 — reportes del jugador, límites y estado de moderación', () => 
         payload: { targetUserId: targets[i]!.id, reasonCode: 'COLLUSION' },
       });
       expect(res.statusCode).toBe(201);
+      if (i === 0) firstReportId = res.json().id as string;
     }
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/v1/me/reports',
+      headers: { cookie: reporter.cookie },
+      payload: { targetUserId: targets[0]!.id, reasonCode: 'COLLUSION' },
+    });
+    expect(duplicate.statusCode).toBe(201);
+    expect(duplicate.json()).toMatchObject({ id: firstReportId, mergedWithExisting: true });
+
     const blocked = await app.inject({
       method: 'POST',
       url: '/v1/me/reports',

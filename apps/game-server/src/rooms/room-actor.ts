@@ -741,10 +741,11 @@ export class RoomActor {
 
     if (!matchJustFinished) this.scheduleBotTurnIfNeeded();
 
-    // Las mesas de práctica son efímeras: no generan partidas ni estadísticas competitivas.
+    // La práctica persiste su resultado para progresión con tope reducido, sin rating competitivo.
+    const hasHumanPlayer = snapshotSeatsAtEnd.some((seat) => seat.userId !== null && !seat.isBot);
     if (
-      !this.practice &&
       matchJustFinished &&
+      hasHumanPlayer &&
       this.matchId &&
       this.seedCommitment &&
       this.revealedSeed
@@ -763,7 +764,7 @@ export class RoomActor {
         finalState: this.gameState,
         triggeringAction: action,
         seats: snapshotSeatsAtEnd,
-        practice: false,
+        practice: Boolean(this.practice),
       });
     }
   }

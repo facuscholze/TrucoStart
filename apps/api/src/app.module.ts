@@ -21,6 +21,8 @@ import {
   type ObservabilityModuleOptions,
 } from './modules/observability/observability.module.js';
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
+import { RatingsModule, type RatingsModuleOptions } from './modules/ratings/ratings.module.js';
+import { SocialModule } from './modules/social/social.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 export interface CreateAppModuleOptions {
@@ -30,6 +32,7 @@ export interface CreateAppModuleOptions {
   readonly lobbyOptions?: LobbyModuleOptions;
   readonly moderationOptions?: ModerationModuleOptions;
   readonly adminOptions?: AdminModuleOptions;
+  readonly ratingsOptions?: RatingsModuleOptions;
   readonly observabilityOptions?: ObservabilityModuleOptions;
 }
 
@@ -59,6 +62,18 @@ export class AppModule {
           ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
         }),
         AuditModule,
+        AuthModule.register(options.authOptions),
+        UsersModule,
+        RatingsModule.register({
+          ...options.ratingsOptions,
+          runtimeConfig: {
+            ...options.ratingsOptions?.runtimeConfig,
+            ...(sharedNowFn !== undefined &&
+            options.ratingsOptions?.runtimeConfig?.nowFn === undefined
+              ? { nowFn: sharedNowFn }
+              : {}),
+          },
+        }),
         AdminModule.register({
           ...options.adminOptions,
           runtimeConfig: {
@@ -66,8 +81,6 @@ export class AppModule {
             ...(sharedNowFn !== undefined ? { nowFn: sharedNowFn } : {}),
           },
         }),
-        AuthModule.register(options.authOptions),
-        UsersModule,
         LobbyModule.register({
           ...options.lobbyOptions,
           runtimeConfig: {
@@ -76,6 +89,7 @@ export class AppModule {
             ...(sharedSessionSecret !== undefined ? { sessionSecret: sharedSessionSecret } : {}),
           },
         }),
+        SocialModule,
         MatchmakingModule,
         ModerationModule.register({
           ...options.moderationOptions,

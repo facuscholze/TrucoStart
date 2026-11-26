@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AR_STANDARD_V1 } from '@truco/engine';
+import { AR_STANDARD_V1, chooseBotAction } from '@truco/engine';
 import type { Action, PlayerView } from '@truco/engine';
 import type { RoomProvisionSpec } from '@truco/shared';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -126,6 +126,49 @@ describe('M6 — bots como asientos del game-server y modo práctica', () => {
     expect(['game.cardPlayed', 'game.callMade']).toContain(botAction.type);
   }, 20_000);
 
+  it('publica el resultado de práctica para progresión sin emitir un inicio competitivo', async () => {
+    const bus = new InMemoryMatchLifecycleBus();
+    const port = await startPracticeServer(bus);
+    await server!.provisionRoom(buildSpec(ROOM_ID, '1v1', true));
+
+    const human = createClient(port, 0, 'c6');
+    clients.push(human);
+    await human.connectToPort(port);
+    human.send('table.join', { roomId: ROOM_ID });
+    await human.waitFor((env) => env.type === 'game.started', 'game.started práctica');
+
+    let ended = false;
+    for (let step = 0; step < 180 && !ended; step++) {
+      const next = await human.waitFor(
+        (env) =>
+          env.type === 'game.ended' ||
+          (env.type === 'game.turn' &&
+            (env.payload['view'] as unknown as PlayerView).hand.activeSeat === human.seat),
+        `turno humano o fin ${step}`,
+        10_000,
+      );
+      if (next.type === 'game.ended') {
+        ended = true;
+        break;
+      }
+      const view = next.payload['view'] as unknown as PlayerView;
+      expect(view.legalActions.length).toBeGreaterThan(0);
+      sendEngineAction(human, ROOM_ID, chooseBotAction(view));
+    }
+    expect(ended).toBe(true);
+
+    const completionDeadline = Date.now() + 5_000;
+    let completed = bus.getPublishedEvents().filter((event) => event.kind === 'match.completed');
+    while (completed.length === 0 && Date.now() < completionDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      completed = bus.getPublishedEvents().filter((event) => event.kind === 'match.completed');
+    }
+    expect(bus.getPublishedEvents().some((event) => event.kind === 'match.started')).toBe(false);
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ roomId: ROOM_ID, practice: true, hasBots: true });
+    expect(completed[0]?.players).toHaveLength(1);
+  }, 30_000);
+
   it('juega una partida 1v1 completa: el bot reemplaza al humano que se cae', async () => {
     const bus = new InMemoryMatchLifecycleBus();
     const port = await startPracticeServer(bus, { replaceDisconnectedWithBot: true });
@@ -148,8 +191,10 @@ describe('M6 — bots como asientos del game-server y modo práctica', () => {
       if (!ended) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     expect(ended).toBe(true);
-    // La partida de práctica no genera partidas competitivas.
-    expect(bus.getPublishedEvents().filter((e) => e.kind === 'match.completed')).toHaveLength(0);
+    // Si todos los asientos terminaron en manos de bots, no hay resultado humano que persistir.
+    expect(
+      bus.getPublishedEvents().filter((event) => event.kind === 'match.completed'),
+    ).toHaveLength(0);
   }, 60_000);
 
   it('arma 2v2 con compañero bot y dos rivales bot', async () => {

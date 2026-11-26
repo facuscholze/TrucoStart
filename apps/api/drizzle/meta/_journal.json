@@ -92,6 +92,13 @@
       "when": 1795696429450,
       "tag": "0012_m10a_notification_types",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795711043763,
+      "tag": "0013_m10a_tournament_teams",
+      "breakpoints": true
     }
   ]
 }

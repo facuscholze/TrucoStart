@@ -266,9 +266,12 @@ export function LobbyScreen({
         </div>
       </header>
 
-      {actionError && (
-        <Toast message={actionError} tone="danger" onDismiss={() => setActionError(null)} />
-      )}
+      {/* Reserva de altura del aviso: cuando aparece no empuja el contenido de abajo. */}
+      <div className="min-h-[3.25rem]" aria-live="polite">
+        {actionError && (
+          <Toast message={actionError} tone="danger" onDismiss={() => setActionError(null)} />
+        )}
+      </div>
 
       {/* P2 del UX audit: primero lo que lleva a jugar con personas. */}
       <section aria-labelledby="lobby-humans-heading" className="space-y-3">

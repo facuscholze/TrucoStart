@@ -2,6 +2,7 @@ import type { AuthUserSummary, MatchmakingQueueStatusResponse } from '@truco/sha
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from '../src/components/AppShell.js';
+import { RouteFallback } from '../src/components/RouteFallback.js';
 import { HomeScreen } from '../src/features/home/HomeScreen.js';
 import { LobbyScreen } from '../src/features/lobby/LobbyScreen.js';
 import {
@@ -198,6 +199,92 @@ describe('Tanda UX — espera por rival humano y ofrecimiento de práctica', () 
     const tableItem = await screen.findByText(/Tano del Paño/);
     expect(tableItem).toBeTruthy();
     expect(screen.getByText(/3 mesa|1 mesa\(s\) abierta\(s\) con humanos/i)).toBeTruthy();
+  });
+
+  it('la barra inferior avisa que se desplaza y retira la pista al llegar al final', () => {
+    const scrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get: () => 537,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 360,
+    });
+
+    try {
+      render(
+        <AppShell activeSection="home" currentUser={CURRENT_USER} onNavigate={() => undefined}>
+          <p>Contenido</p>
+        </AppShell>,
+      );
+
+      const bottomNav = screen.getAllByRole('navigation', { name: /navegación principal/i })[1]!;
+      const hint = screen.getByText(/Deslizá la barra o usá Tab/i);
+      expect(hint).toBeTruthy();
+      expect(screen.getByTestId('bottom-nav-more-right')).toBeTruthy();
+      expect(bottomNav.getAttribute('aria-describedby')).toBe('bottom-nav-more-hint');
+
+      // Al desplazar la barra hasta el final, la señal desaparece y el aviso se retira.
+      Object.defineProperty(bottomNav, 'scrollLeft', { configurable: true, value: 177 });
+      fireEvent.scroll(bottomNav);
+      expect(screen.queryByText(/Deslizá la barra o usá Tab/i)).toBeNull();
+      expect(screen.queryByTestId('bottom-nav-more-right')).toBeNull();
+    } finally {
+      if (scrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', scrollWidth);
+      if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+    }
+  });
+
+  it('el fallback del lobby reserva la altura para que el pie no salte al cargar el chunk', () => {
+    const { container, unmount } = render(<RouteFallback reserveLobbyContent />);
+    const fallback = container.firstElementChild!;
+    expect(fallback.getAttribute('role')).toBe('status');
+    expect(fallback.className).toContain('min-h-[104rem]');
+    expect(fallback.className).toContain('tablet:min-h-[62rem]');
+    unmount();
+
+    // Las demás rutas no reservan esa altura: no se infla el alto de la página sin motivo.
+    const { container: plain } = render(<RouteFallback />);
+    expect(plain.firstElementChild!.className).not.toContain('min-h-[104rem]');
+  });
+
+  it('la barra inferior no se vuelve a centrar sola cuando la sesión agrega destinos', () => {
+    const scrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get: () => 537,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 360,
+    });
+
+    try {
+      const { rerender } = render(
+        <AppShell activeSection="social" currentUser={null} onNavigate={() => undefined}>
+          <p>Contenido</p>
+        </AppShell>,
+      );
+      const bottomNav = screen.getAllByRole('navigation', { name: /navegación principal/i })[1]!;
+      // La persona ya miró el final de la barra.
+      Object.defineProperty(bottomNav, 'scrollLeft', { configurable: true, value: 177 });
+      fireEvent.scroll(bottomNav);
+      expect(screen.queryByTestId('bottom-nav-more-right')).toBeNull();
+
+      // Llega la sesión: se agregan destinos, pero no se arrastra la barra de vuelta.
+      rerender(
+        <AppShell activeSection="social" currentUser={CURRENT_USER} onNavigate={() => undefined}>
+          <p>Contenido</p>
+        </AppShell>,
+      );
+      expect(bottomNav.scrollLeft).toBe(177);
+    } finally {
+      if (scrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', scrollWidth);
+      if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+    }
   });
 
   it('el encabezado conserva todos los destinos y el control de sonido con nombre accesible', () => {

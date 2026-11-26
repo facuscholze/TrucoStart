@@ -19,4 +19,11 @@ export default [
     files: ['scripts/**/*.{js,mjs,ts}', 'apps/*/scripts/**/*.{js,mjs,ts}'],
     rules: { 'no-console': 'off' },
   },
+  {
+    // Scripts de medición: el código de `page.evaluate` corre en el navegador.
+    files: ['apps/web/scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { document: 'readonly', window: 'readonly', PerformanceObserver: 'readonly' },
+    },
+  },
 ];

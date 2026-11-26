@@ -18,6 +18,8 @@ export const screenMessagesEsAr = {
     offlineBadge: 'Sin conexión · Modo local activo',
     guestTag: 'Invitado',
     loadingSection: 'Cargando esta sección…',
+    moreDestinationsHint:
+      'Hay más secciones a la derecha. Deslizá la barra o usá Tab para recorrerlas todas.',
     soundOnLabel: 'Sonido activo',
     soundOffLabel: 'Silenciado',
   },

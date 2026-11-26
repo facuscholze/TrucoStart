@@ -395,6 +395,7 @@ export function TournamentDetailScreen({
             matches={detail.matches}
             format={tournament.format}
             currentUserId={currentUserId}
+            teams={detail.teams}
           />
         </div>
       </section>
@@ -446,25 +447,29 @@ export function TournamentDetailScreen({
         </section>
       ) : null}
 
-      <section aria-labelledby="tournament-participants">
-        <h2 id="tournament-participants" className="font-display text-base text-gold">
-          Participantes ({detail.participants.length})
-        </h2>
-        <ul className="mt-2 space-y-1">
-          {detail.participants.map((participant) => (
-            <li
-              key={participant.userId}
-              className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm"
-            >
-              <span className="min-w-0 break-words text-white">{participant.nickname}</span>
-              <span className="text-xs text-white/60">
-                {PARTICIPANT_STATUS_LABELS_ES_AR[participant.status] ?? participant.status}
-                {participant.seed ? ` · #${participant.seed}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      {/* Un torneo por equipos no tiene participantes sueltos: la lista de equipos de
+          arriba es la que cuenta. Mostrar "Participantes (0)" es un cartel vacío. */}
+      {detail.participants.length > 0 ? (
+        <section aria-labelledby="tournament-participants">
+          <h2 id="tournament-participants" className="font-display text-base text-gold">
+            Participantes ({detail.participants.length})
+          </h2>
+          <ul className="mt-2 space-y-1">
+            {detail.participants.map((participant) => (
+              <li
+                key={participant.userId}
+                className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm"
+              >
+                <span className="min-w-0 break-words text-white">{participant.nickname}</span>
+                <span className="text-xs text-white/60">
+                  {PARTICIPANT_STATUS_LABELS_ES_AR[participant.status] ?? participant.status}
+                  {participant.seed ? ` · #${participant.seed}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

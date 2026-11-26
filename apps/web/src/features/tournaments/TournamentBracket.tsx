@@ -1,14 +1,15 @@
-import type { TournamentFormat, TournamentMatchView } from '@truco/shared';
+import type { TournamentFormat, TournamentMatchView, TournamentTeamView } from '@truco/shared';
 import { describeMatch, groupBracket, roundLabel } from './tournament-bracket.js';
 
 /**
  * Cuadro de torneo (M10a).
  *
- * En 360 px el cuadro no cabe de costado, así que **cada ronda es una lista vertical**
- * dentro de un contenedor con scroll horizontal por sección: se lee de arriba abajo y se
- * desplaza de ronda en ronda. No se usan flechas ni líneas entre cruces —que a ese
- * ancho se vuelven ilegibles—; la relación se explica con el texto del rival ("espera
- * al ganador de…") y con los encabezados de ronda.
+ * En 360 px el cuadro no cabe de costado: las rondas se apilan **una debajo de la otra**
+ * (primera ronda, después la segunda) en vez de pedir un desplazamiento horizontal, que
+ * dejaba la ronda siguiente cortada al borde y parecía un layout roto. A partir de `sm`
+ * las rondas vuelven a ir en fila. No se usan flechas ni líneas entre cruces —a ese ancho
+ * se vuelven ilegibles—; la relación se explica con el texto del rival ("espera al
+ * ganador de…") y con los encabezados de ronda.
  *
  * Accesibilidad: el cuadro es una lista anidada (`ul`/`li`) con encabezados reales, cada
  * cruce es un `article` con un nombre accesible completo, y el estado nunca depende sólo
@@ -18,12 +19,20 @@ export function TournamentBracket({
   matches,
   format,
   currentUserId,
+  teams = [],
 }: {
   readonly matches: readonly TournamentMatchView[];
   readonly format: TournamentFormat;
   readonly currentUserId: string | null;
+  /** Equipos del torneo: en 2v2 el lado es un equipo y el cruce propio se marca igual. */
+  readonly teams?: readonly TournamentTeamView[];
 }) {
   const sections = groupBracket(matches, format);
+  const myTeamIds = new Set(
+    teams
+      .filter((team) => team.members.some((member) => member.userId === currentUserId))
+      .map((team) => team.id),
+  );
 
   if (sections.length === 0) {
     return (
@@ -43,16 +52,23 @@ export function TournamentBracket({
           {/* Scroll horizontal sólo si hace falta; el foco y el lector de pantalla
               recorren la lista completa igual. */}
           <div className="-mx-1 overflow-x-auto px-1 pb-2">
-            <ul className="flex min-w-full gap-3">
+            <ul className="flex min-w-full flex-col gap-4 sm:flex-row sm:gap-3">
               {section.rounds.map((round) => (
-                <li key={round.round} className="min-w-[15rem] flex-1 space-y-2">
+                <li
+                  key={round.round}
+                  className="w-full space-y-2 sm:w-auto sm:min-w-[15rem] sm:flex-1"
+                >
                   <h4 className="text-xs font-semibold tracking-wide text-white/60 uppercase">
                     {roundLabel(section.bracket, round.round)}
                   </h4>
                   <ul className="space-y-2">
                     {round.matches.map((match) => (
                       <li key={match.id}>
-                        <MatchCard match={match} currentUserId={currentUserId} />
+                        <MatchCard
+                          match={match}
+                          currentUserId={currentUserId}
+                          myTeamIds={myTeamIds}
+                        />
                       </li>
                     ))}
                   </ul>
@@ -69,13 +85,18 @@ export function TournamentBracket({
 function MatchCard({
   match,
   currentUserId,
+  myTeamIds,
 }: {
   readonly match: TournamentMatchView;
   readonly currentUserId: string | null;
+  readonly myTeamIds: ReadonlySet<string>;
 }) {
   const isMine =
     currentUserId !== null &&
-    (match.homeUserId === currentUserId || match.awayUserId === currentUserId);
+    (match.homeUserId === currentUserId ||
+      match.awayUserId === currentUserId ||
+      (match.homeTeamId !== null && myTeamIds.has(match.homeTeamId)) ||
+      (match.awayTeamId !== null && myTeamIds.has(match.awayTeamId)));
   const finished = match.status === 'COMPLETED' || match.status === 'FORFEITED';
 
   return (

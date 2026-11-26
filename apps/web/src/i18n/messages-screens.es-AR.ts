@@ -14,6 +14,7 @@ export const screenMessagesEsAr = {
     profile: 'Perfil',
     social: 'Amigos',
     progression: 'Progreso',
+    tournaments: 'Torneos',
     auth: 'Cuenta',
     offlineBadge: 'Sin conexión · Modo local activo',
     guestTag: 'Invitado',

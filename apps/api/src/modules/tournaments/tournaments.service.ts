@@ -493,6 +493,8 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
       mode: row.mode,
       rulesetCode: row.rulesetCode as TournamentSummary['rulesetCode'],
       targetScore: row.targetScore,
+      florEnabled: row.florEnabled,
+      turnTimeoutMs: row.turnTimeoutMs,
       capacity: row.capacity,
       registeredCount: participants.filter(
         (participant) => participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN',
@@ -1533,18 +1535,26 @@ function buildStandings(
   });
 
   const hasBracket = matches.length > 0;
-  return ordered.map((participant, index) => ({
-    position: index + 1,
-    userId: participant.userId,
-    nickname: name(participant.userId),
-    seed: participant.seed,
-    eliminationRound: lastLossRound.get(participant.userId) ?? null,
-    tiebreakNote: !hasBracket
+  return ordered.map((participant, index) => {
+    const lossRound = lastLossRound.get(participant.userId) ?? null;
+    // Nunca se dice que alguien "cayó" si todavía no perdió: en un cuadro en juego la
+    // tabla muestra quién sigue en carrera, no una eliminación inventada.
+    const tiebreakNote = !hasBracket
       ? 'Inscripción'
       : participant.userId === championUserId
         ? 'Campeón'
         : participant.userId === runnerUpUserId
           ? 'Subcampeón'
-          : `Cayó en la ronda ${lastLossRound.get(participant.userId) ?? '—'}`,
-  }));
+          : lossRound !== null
+            ? `Cayó en la ronda ${lossRound}`
+            : 'Sigue en carrera';
+    return {
+      position: index + 1,
+      userId: participant.userId,
+      nickname: name(participant.userId),
+      seed: participant.seed,
+      eliminationRound: lossRound,
+      tiebreakNote,
+    };
+  });
 }

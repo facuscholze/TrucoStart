@@ -495,6 +495,51 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(participants.filter((p) => p.status === 'CHECKED_IN')).toHaveLength(1);
   }, 60_000);
 
+  it('la tabla no inventa eliminaciones: quien sigue en carrera lo dice', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(4);
+    const tournament = await service.create(organizer.principal, createInput, { ip: '10.0.0.9' });
+    for (const player of players) {
+      await service.register(player.principal, tournament.id);
+      await service.checkIn(player.principal, tournament.id);
+    }
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    const detail = await service.detail(organizer.id, tournament.id);
+    // Nadie jugó todavía: la tabla no puede decir que alguien quedó afuera.
+    expect(detail.standings).toHaveLength(4);
+    for (const standing of detail.standings) {
+      expect(standing.tiebreakNote).not.toMatch(/Cayó/);
+      expect(standing.eliminationRound).toBeNull();
+    }
+
+    // Tras jugar la primera semifinal, el perdedor sí figura como eliminado.
+    const [firstMatch] = (await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(
+        and(
+          eq(tournamentMatchesTable.tournamentId, tournament.id),
+          eq(tournamentMatchesTable.round, 1),
+        ),
+      )
+      .limit(1))!;
+    const loser = firstMatch!.awayUserId!;
+    const winner = firstMatch!.homeUserId!;
+    await service.completeMatchByGame({
+      tournamentMatchId: firstMatch!.id,
+      matchId: await seedGameMatch(tournament.id, firstMatch!.id),
+      winnerUserId: winner,
+      now: new Date(clockMs),
+    });
+
+    const after = await service.detail(organizer.id, tournament.id);
+    const loserStanding = after.standings.find((standing) => standing.userId === loser)!;
+    expect(loserStanding.tiebreakNote).toContain('Cayó en la ronda 1');
+    expect(loserStanding.eliminationRound).toBe(1);
+  }, 60_000);
+
   it('un torneo privado no se puede leer sin participar', async () => {
     const organizer = (await seedUsers(1))[0]!;
     const stranger = (await seedUsers(1))[0]!;

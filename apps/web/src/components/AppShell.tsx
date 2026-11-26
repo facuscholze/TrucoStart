@@ -9,7 +9,16 @@ import {
 } from '../lib/preferences.js';
 
 export type NavSection =
-  'home' | 'lobby' | 'ranking' | 'learn' | 'scorer' | 'profile' | 'social' | 'progression' | 'auth';
+  | 'home'
+  | 'lobby'
+  | 'ranking'
+  | 'learn'
+  | 'scorer'
+  | 'profile'
+  | 'social'
+  | 'progression'
+  | 'tournaments'
+  | 'auth';
 
 /**
  * Enlaces legales del pie. El orden coincide con `legalDocumentOrder` para que el
@@ -117,6 +126,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
     ...(currentUser
       ? [
           { id: 'social' as const, label: messagesEsAr.nav.social, path: '/amigos' },
+          { id: 'tournaments' as const, label: messagesEsAr.nav.tournaments, path: '/torneos' },
           { id: 'progression' as const, label: messagesEsAr.nav.progression, path: '/progreso' },
         ]
       : []),

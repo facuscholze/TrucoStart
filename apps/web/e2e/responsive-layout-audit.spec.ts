@@ -11,6 +11,7 @@ const ROUTES = [
   '/anotador',
   '/amigos',
   '/progreso',
+  '/torneos',
   '/perfil',
   '/legal',
 ] as const;

@@ -123,6 +123,9 @@ export const TournamentSummarySchema = z
     mode: GameModeSchema,
     rulesetCode: RulesetCodeSchema,
     targetScore: z.number().int(),
+    /** El torneo define sus reglas: puntos, flor y reloj no los hereda del lobby. */
+    florEnabled: z.boolean(),
+    turnTimeoutMs: z.number().int(),
     capacity: z.number().int(),
     registeredCount: z.number().int(),
     checkedInCount: z.number().int(),

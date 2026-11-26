@@ -58,6 +58,10 @@ import type {
   PlayerRatingResponse,
   ProgressionSummary,
   ProgressionMissionClaimResponse,
+  CreateTournamentRequest,
+  TournamentDetailResponse,
+  TournamentListResponse,
+  TournamentSummary,
   ProgressionCosmeticRedeemResponse,
 } from '@truco/shared';
 
@@ -528,6 +532,74 @@ export async function markProgressionNotificationReadRequest(
     `/v1/me/progression/notifications/${encodeURIComponent(notificationId)}/read`,
     { method: 'POST' },
   );
+}
+
+export async function listTournamentsRequest(
+  query: {
+    readonly status?: readonly string[];
+    readonly limit?: number;
+    readonly cursor?: string | null;
+  } = {},
+): Promise<TournamentListResponse> {
+  const qs = new URLSearchParams();
+  for (const status of query.status ?? []) qs.append('status', status);
+  if (query.limit !== undefined) qs.set('limit', String(query.limit));
+  if (query.cursor) qs.set('cursor', query.cursor);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return requestJson<TournamentListResponse>(`/v1/tournaments${suffix}`, { method: 'GET' });
+}
+
+export async function getTournamentDetailRequest(id: string): Promise<TournamentDetailResponse> {
+  return requestJson<TournamentDetailResponse>(`/v1/tournaments/${encodeURIComponent(id)}`, {
+    method: 'GET',
+  });
+}
+
+export async function createTournamentRequest(body: CreateTournamentRequest): Promise<{
+  tournament: TournamentSummary;
+}> {
+  return requestJson<{ tournament: TournamentSummary }>('/v1/tournaments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function registerForTournamentRequest(id: string): Promise<{ participants: number }> {
+  return requestJson<{ participants: number }>(
+    `/v1/tournaments/${encodeURIComponent(id)}/register`,
+    { method: 'POST' },
+  );
+}
+
+export async function withdrawFromTournamentRequest(id: string): Promise<{ withdrawn: true }> {
+  return requestJson<{ withdrawn: true }>(`/v1/tournaments/${encodeURIComponent(id)}/withdraw`, {
+    method: 'POST',
+  });
+}
+
+export async function checkInTournamentRequest(id: string): Promise<{ checkedIn: true }> {
+  return requestJson<{ checkedIn: true }>(`/v1/tournaments/${encodeURIComponent(id)}/check-in`, {
+    method: 'POST',
+  });
+}
+
+export async function resolveTournamentJoinCodeRequest(joinCode: string): Promise<{
+  tournamentId: string;
+}> {
+  return requestJson<{ tournamentId: string }>('/v1/tournaments/join-by-code', {
+    method: 'POST',
+    body: JSON.stringify({ joinCode }),
+  });
+}
+
+export async function getMyNextTournamentMatchRequest(): Promise<{
+  match: TournamentDetailResponse['myNextMatch'];
+  tournament: TournamentSummary | null;
+}> {
+  return requestJson<{
+    match: TournamentDetailResponse['myNextMatch'];
+    tournament: TournamentSummary | null;
+  }>('/v1/tournaments/my-next-match', { method: 'GET' });
 }
 
 export async function getTableDetailRequest(tableId: string): Promise<TableDetailResponse> {

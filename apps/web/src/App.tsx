@@ -68,6 +68,16 @@ const AuthScreenLazy = lazy(() =>
 const LegalScreenLazy = lazy(() =>
   import('./features/legal/LegalScreen.js').then((m) => ({ default: m.LegalScreen })),
 );
+const TournamentsScreenLazy = lazy(() =>
+  import('./features/tournaments/TournamentsScreen.js').then((m) => ({
+    default: m.TournamentsScreen,
+  })),
+);
+const TournamentDetailScreenLazy = lazy(() =>
+  import('./features/tournaments/TournamentDetailScreen.js').then((m) => ({
+    default: m.TournamentDetailScreen,
+  })),
+);
 
 type ParsedAppRoute =
   | { kind: 'dev-mesa' }
@@ -78,6 +88,8 @@ type ParsedAppRoute =
   | { kind: 'profile' }
   | { kind: 'social' }
   | { kind: 'progression' }
+  | { kind: 'tournaments' }
+  | { kind: 'tournament-detail'; tournamentId: string }
   | { kind: 'player-profile'; userId: string }
   | { kind: 'learn' }
   | { kind: 'scorer' }
@@ -125,6 +137,15 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
 
   if (pathname === '/progreso') {
     return { kind: 'progression' };
+  }
+
+  if (pathname === '/torneos') {
+    return { kind: 'tournaments' };
+  }
+
+  const torneoMatch = /^\/torneos\/([a-zA-Z0-9-]{8,64})$/.exec(pathname);
+  if (torneoMatch?.[1]) {
+    return { kind: 'tournament-detail', tournamentId: torneoMatch[1] };
   }
 
   if (pathname === '/perfil') {
@@ -327,11 +348,13 @@ export function App() {
               ? 'profile'
               : route.kind === 'social'
                 ? 'social'
-                : route.kind === 'progression'
-                  ? 'progression'
-                  : route.kind === 'auth'
-                    ? 'auth'
-                    : 'home';
+                : route.kind === 'tournaments' || route.kind === 'tournament-detail'
+                  ? 'tournaments'
+                  : route.kind === 'progression'
+                    ? 'progression'
+                    : route.kind === 'auth'
+                      ? 'auth'
+                      : 'home';
 
   return (
     <SocialRealtimeProvider enabled={currentUser !== null}>
@@ -368,6 +391,18 @@ export function App() {
 
           {route.kind === 'progression' && (
             <ProgressionScreenLazy currentUser={currentUser} onNavigate={navigate} />
+          )}
+
+          {route.kind === 'tournaments' && (
+            <TournamentsScreenLazy onOpenTournament={(id) => navigate(`/torneos/${id}`)} />
+          )}
+
+          {route.kind === 'tournament-detail' && (
+            <TournamentDetailScreenLazy
+              tournamentId={route.tournamentId}
+              currentUserId={currentUser?.id ?? null}
+              onNavigate={navigate}
+            />
           )}
 
           {route.kind === 'social' && (

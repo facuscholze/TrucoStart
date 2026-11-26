@@ -12,6 +12,8 @@ export * from './network/cidr.js';
 export * from './progression/progression.schema.js';
 export * from './ratings/ratings.schema.js';
 export * from './social/social.schema.js';
+export * from './tournaments/bracket.js';
+export * from './tournaments/tournament.schema.js';
 export * from './observability/logging.js';
 export * from './observability/metrics.js';
 export * from './observability/security-headers.js';

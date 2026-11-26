@@ -23,6 +23,10 @@ import {
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
 import { RatingsModule, type RatingsModuleOptions } from './modules/ratings/ratings.module.js';
 import { SocialModule } from './modules/social/social.module.js';
+import {
+  TournamentsModule,
+  type TournamentsModuleOptions,
+} from './modules/tournaments/tournaments.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 export interface CreateAppModuleOptions {
@@ -34,6 +38,7 @@ export interface CreateAppModuleOptions {
   readonly adminOptions?: AdminModuleOptions;
   readonly ratingsOptions?: RatingsModuleOptions;
   readonly observabilityOptions?: ObservabilityModuleOptions;
+  readonly tournamentsOptions?: TournamentsModuleOptions;
 }
 
 @Module({})
@@ -91,6 +96,16 @@ export class AppModule {
         }),
         SocialModule,
         MatchmakingModule,
+        TournamentsModule.register({
+          ...options.tournamentsOptions,
+          runtimeConfig: {
+            ...options.tournamentsOptions?.runtimeConfig,
+            ...(sharedNowFn !== undefined &&
+            options.tournamentsOptions?.runtimeConfig?.nowFn === undefined
+              ? { nowFn: sharedNowFn }
+              : {}),
+          },
+        }),
         ModerationModule.register({
           ...options.moderationOptions,
           runtimeConfig: {

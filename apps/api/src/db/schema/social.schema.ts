@@ -5,6 +5,7 @@ import type {
 } from '@truco/shared';
 import { desc, sql } from 'drizzle-orm';
 import {
+  check,
   index,
   jsonb,
   pgTable,
@@ -122,6 +123,17 @@ export const socialNotificationsTable = pgTable(
     readAt: timestamp('read_at', { withTimezone: true }),
   },
   (t) => [
+    // El tipo se acota en la base, no sólo en el contrato: un valor nuevo se agrega acá
+    // con su migración (M10a sumó los dos de torneos).
+    check(
+      'social_notifications_type_check',
+      sql`${t.type} IN (
+        'FRIEND_REQUEST', 'FRIEND_REQUEST_ACCEPTED', 'FRIEND_REQUEST_REJECTED',
+        'TABLE_INVITATION', 'TABLE_INVITATION_ACCEPTED', 'TABLE_INVITATION_DECLINED',
+        'CHALLENGE', 'CHALLENGE_ACCEPTED', 'CHALLENGE_DECLINED',
+        'TOURNAMENT_ROUND_STARTED', 'TOURNAMENT_MATCH_READY'
+      )`,
+    ),
     uniqueIndex('social_notifications_reference_type_uniq')
       .on(t.userId, t.type, t.referenceId)
       .where(sql`${t.referenceId} IS NOT NULL`),

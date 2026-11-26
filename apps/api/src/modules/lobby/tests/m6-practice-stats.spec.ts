@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MatchCompletedLifecycleEvent, MatchStartedLifecycleEvent } from '@truco/shared';
 import type { AppDatabase } from '../../../db/database.provider.js';
+import { MatchCompletionBridge } from '../ports/match-completion-bridge.js';
 import { MatchPersistenceService } from '../match-persistence.service.js';
 
 /** La práctica conserva su progreso simbólico, pero nunca se procesa como rating competitivo. */
@@ -35,6 +36,8 @@ function buildService() {
     consumer as never,
     ratingsService as never,
     progressionService as never,
+    // En esta prueba nadie ocupa el puente de torneos: no hay cruce que cerrar.
+    new MatchCompletionBridge(),
   );
   return {
     service,

@@ -103,6 +103,10 @@ export const SocialNotificationTypeSchema = z.enum([
   'CHALLENGE',
   'CHALLENGE_ACCEPTED',
   'CHALLENGE_DECLINED',
+  /** M10a: el torneo arrancó y hay cuadro. */
+  'TOURNAMENT_ROUND_STARTED',
+  /** M10a: el cruce del jugador tiene a los dos rivales y su sala. */
+  'TOURNAMENT_MATCH_READY',
 ]);
 export type SocialNotificationType = z.infer<typeof SocialNotificationTypeSchema>;
 

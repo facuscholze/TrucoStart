@@ -550,3 +550,100 @@ El cursor de `/v1/admin/reports` es el `createdAt` ISO-8601 de la última fila r
 Claim y resolución usan compare-and-swap de versión; si el reporte dejó de estar abierto/en revisión o la versión cambió, responden `409 CONFLICT` (`REPORT_VERSION_CONFLICT`) y el panel debe volver a cargar el detalle. Resolver requiere `outcome: RESOLVED_ACTIONED` o `RESOLVED_DISMISSED`, más `note` de 10–500 caracteres. Las acciones y notas se escriben en `audit_logs`. `RESOLVED_ACTIONED` registra que la revisión concluyó con acción, pero la imposición de una sanción sigue siendo una operación administrativa separada.
 
 El replay administrativo requiere un motivo (`reason`) de 10–500 caracteres, sólo permite partidas terminadas y deja una entrada de auditoría por acceso. El replay incluye eventos ordenados y un resumen reconstruido; el endpoint responde `409 CONFLICT` si la partida sigue en curso.
+
+---
+
+## 10. Torneos — M10a
+
+Los torneos no manejan dinero: la entrada es libre y los premios son cosméticos o monedas virtuales simbólicas con el mismo libro mayor `wallet_transactions` de M9c. Los cruces se juegan en salas aprovisionadas por el flujo existente, con el `RuleSet` y el puntaje que define el torneo, siempre entre personas y nunca contra bots. Por decisión registrada en ADR-030, **los cruces de torneo no cuentan para el rating competitivo**.
+
+### Rutas del jugador
+
+Todas requieren `truco_access`.
+
+| Método | Ruta                             | Código OK | Descripción                                                                   |
+| ------ | -------------------------------- | --------- | ----------------------------------------------------------------------------- |
+| `GET`  | `/v1/tournaments`                | `200`     | Listado paginado y filtrable por estado.                                      |
+| `GET`  | `/v1/tournaments/mine`           | `200`     | Torneos donde el jugador está inscripto, ordenados por cierre de inscripción. |
+| `GET`  | `/v1/tournaments/my-next-match`  | `200`     | Cruce pendiente más urgente y su torneo, para “mi próxima partida”.           |
+| `GET`  | `/v1/tournaments/:id`            | `200`     | Detalle con participantes, cuadro, posiciones y qué puede hacer el jugador.   |
+| `POST` | `/v1/tournaments`                | `201`     | Crea un torneo. Oficial sólo para el equipo; privado, para cualquier jugador. |
+| `POST` | `/v1/tournaments/join-by-code`   | `200`     | Resuelve un código de invitación a `tournamentId`.                            |
+| `POST` | `/v1/tournaments/:id/register`   | `201`     | Inscribe al jugador mientras la inscripción esté abierta y haya cupo.         |
+| `POST` | `/v1/tournaments/:id/unregister` | `200`     | Da de baja al jugador antes del cierre de inscripción.                        |
+| `POST` | `/v1/tournaments/:id/check-in`   | `200`     | Confirma presencia dentro de la ventana de check-in.                          |
+
+`GET /v1/tournaments` admite `status` (uno o varios), `limit` (1–50, default 20) y `cursor`. El cursor es opaco. Un torneo privado sólo aparece en el listado del organizador, de sus participantes y del staff; para cualquier otro jugador responde `404 NOT_FOUND` con `details.reason = "TOURNAMENT_NOT_VISIBLE"`, igual que si no existiera.
+
+`GET /v1/tournaments/:id` devuelve además `canRegister`, `canCheckIn` y `registrationClosedReason`, que son la única fuente de verdad para decidir qué botones mostrar. La pantalla no deduce el estado por su cuenta: si `canRegister` es `false`, el motivo ya viene explicado.
+
+### Ciclo de vida
+
+`DRAFT` → `REGISTRATION` → `CHECK_IN` → `IN_PROGRESS` → `FINISHED`, con `CANCELLED` alcanzable desde cualquier estado no terminado. Las ventanas se fijan al crear (`registrationMinutes`, `checkInMinutes`) y se guardan como instantes absolutos: el cliente no puede moverlas después. Un barrido del servidor avanza los estados vencidos, arma el cuadro con quienes hicieron check-in y elimina por incomparecencia a quien no se presentó.
+
+Inscribirse dos veces responde `409 CONFLICT`. Superar el cupo también: el control es transaccional, así que dos inserciones simultáneas no sobrepasan el máximo. La baja sólo se acepta mientras el torneo siga en `REGISTRATION` y el plazo no haya vencido; una vez que empieza el check-in ya no se puede abandonar por la API (quien no va a jugar simplemente no se presenta). Volver a inscribirse después de una baja reactiva la misma fila, así que el par `(torneo, jugador)` sigue siendo único.
+
+### Cuerpo de creación
+
+```json
+{
+  "name": "Copa de Otoño",
+  "format": "SINGLE_ELIMINATION",
+  "visibility": "PRIVATE",
+  "capacity": 8,
+  "rules": {
+    "mode": "1v1",
+    "rulesetCode": "ar-corto-15-flor-v1",
+    "targetScore": 15,
+    "florEnabled": true,
+    "turnTimeoutMs": 25000
+  },
+  "registrationMinutes": 1440,
+  "checkInMinutes": 15,
+  "noShowMinutes": 10,
+  "prizes": [{ "position": 1, "coins": 100, "cosmeticId": null }],
+  "official": false
+}
+```
+
+`capacity` va de 2 a 64. Con cupos que no son potencia de 2 se reparten byes a las mejores siembras. `prizes` admite hasta 8 posiciones y sólo monedas simbólicas o cosméticos existentes. `official: true` responde `403 FORBIDDEN` si quien llama no es del equipo.
+
+### Cuadro, siembra y avance
+
+La siembra usa el rating Glicko-2 vigente de cada participante; quien no tiene rating va al final. La llave se arma con byes repartidos para que nadie juegue dos veces antes de que todos hayan jugado una. El avance es automático al terminar la partida y es idempotente por `matchId`: procesar dos veces el mismo resultado no duplica el avance. En eliminación doble, la final se juega a partido único —no hay _bracket reset_—, decisión registrada en ADR-029.
+
+Los cruces tienen estados `SCHEDULED`, `READY`, `IN_PROGRESS`, `COMPLETED` y `FORFEITED`. Un cruce pasa a `READY` cuando ambos jugadores están definidos y hay sala aprovisionada; `roomId` lleva a `/mesa/:roomId`. Pasado `deadlineAt` sin que ambos se presenten, el cruce se cierra por incomparecencia con `forfeitReason`.
+
+Desempate de posiciones, en orden: campeón, subcampeón, y después quien cayó en una ronda más avanzada; a igual ronda, mejor siembra. Quien todavía no perdió figura como “sigue en carrera”, nunca como eliminado.
+
+### Premios
+
+Los premios se pagan una sola vez por torneo y posición. Cada asiento del libro mayor usa `kind = "MISSION_REWARD"`, `referenceType = "tournament"`, `referenceId` del torneo e `idempotencyKey = "tournament:<id>:prize:<posición>"`. Reintentar el pago no acredita de nuevo; la tabla `tournament_awards` tiene un único por `(tournament, position)`. No existe entrada paga ni reintegro: si el torneo se cancela, no se paga nada.
+
+### Acciones administrativas
+
+Sesión `truco_admin_access`, permiso `tournaments:manage`, y auditoría con estado anterior y posterior.
+
+| Método | Ruta                                         | Cuerpo                                                  | Resultado                                                |
+| ------ | -------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------- |
+| `GET`  | `/v1/admin/tournaments`                      | —                                                       | Listado con los privados de cualquier jugador.           |
+| `POST` | `/v1/admin/tournaments`                      | Cuerpo de creación + `reason`                           | Crea el torneo como oficial y audita el motivo.          |
+| `POST` | `/v1/admin/tournaments/:id/detail`           | —                                                       | Cuadro completo para staff. La lectura se audita.        |
+| `POST` | `/v1/admin/tournaments/:id/cancel`           | `{ "reason": "10–500 caracteres" }`                     | Cancela; los premios no se pagan.                        |
+| `POST` | `/v1/admin/tournaments/:id/advance`          | `{ "reason": "..." }`                                   | Empuja la ronda y cierra si ya terminó.                  |
+| `POST` | `/v1/admin/tournaments/:id/resolve-incident` | `{ "matchId", "winnerUserId": uuid \| null, "reason" }` | Define el ganador a mano, o cierra el cruce sin ganador. |
+
+El detalle de staff incluye los torneos privados aunque el operador no participe, pero no expone el código de invitación: el código sigue siendo del organizador. `resolve-incident` acepta `winnerUserId: null` para cerrar un cruce que no se jugó, y responde `409 CONFLICT` (`MATCH_ALREADY_RESOLVED`) si el cruce ya estaba cerrado.
+
+### Errores esperables
+
+| Situación                       | Respuesta                                                    |
+| ------------------------------- | ------------------------------------------------------------ |
+| Inscripción cerrada             | `409 CONFLICT`, `details.reason = "REGISTRATION_CLOSED"`     |
+| Cupo lleno                      | `409 CONFLICT`, `details.reason = "TOURNAMENT_FULL"`         |
+| Ya inscripto                    | `409 CONFLICT`, `details.reason = "ALREADY_REGISTERED"`      |
+| Check-in fuera de ventana       | `409 CONFLICT`, `details.reason = "CHECK_IN_CLOSED"`         |
+| Torneo privado ajeno            | `404 NOT_FOUND`, `details.reason = "TOURNAMENT_NOT_VISIBLE"` |
+| Tope de torneos por cuenta o IP | `429 RATE_LIMITED`                                           |
+
+Los límites de creación por cuenta e IP son configurables; cada creación consume la ventana correspondiente antes de validar el cuerpo del torneo.

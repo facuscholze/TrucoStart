@@ -157,6 +157,239 @@ jobs:
                 echo "Reglas DOCKER-USER válidas (sintaxis)."
             '
 
+  # El torneo real (M10a) se juega entero en CI: llave, inscripción, check-in, dos
+  # semifinales y final en la mesa. Corre el mismo stack E2E que las auditorías, con
+  # PostgreSQL y Redis de servicio, para que la llave avance con el resultado real de
+  # una partida y no sólo con tests de servicio.
+  tournament-e2e:
+    name: Tournament E2E (4 jugadores)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: truco_test
+          POSTGRES_PASSWORD: truco_test_password
+          POSTGRES_DB: truco_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U truco_test -d truco_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      APP_NAME: 'Mesa de Truco'
+      DATABASE_URL: postgresql://truco_test:truco_test_password@localhost:5432/truco_test
+      REDIS_URL: redis://localhost:6379
+      TRUCO_REQUIRE_REAL_SERVICES: '1'
+      SESSION_SECRET: ci_test_session_secret_at_least_32_characters_long
+      SEED_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      ADMIN_TOTP_ENCRYPTION_KEY: ci_test_admin_totp_key_at_least_32_chars_long
+      REFRESH_TOKEN_TTL: '2592000'
+      COOKIE_DOMAIN: localhost
+      CORS_ORIGINS: http://localhost:5173,http://localhost:5174
+      EMAIL_PROVIDER: console
+      CAPTCHA_PROVIDER: disabled
+      TURN_TIMEOUT_MS: '30000'
+      RECONNECT_GRACE_MS: '45000'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # El stack E2E importa los `dist` de game-server y shared desde la API.
+      - name: Build workspace packages and apps
+        run: pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @truco/web exec playwright install --with-deps chromium
+
+      # El torneo se juega turno a turno por dos clientes por cruce: tarda minutos, no
+      # segundos. La salida se guarda para publicarla como anotación si falla.
+      - name: Tournament E2E (llave, semifinales y final)
+        run: |
+          set -o pipefail
+          pnpm --filter @truco/web exec playwright test e2e/m10a-tournament.spec.ts \
+            2>&1 | tee /tmp/tournament.log
+
+      - name: Publish tournament failure details
+        if: failure()
+        run: |
+          message=$(tail -80 /tmp/tournament.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Tournament E2E failed::${message}"
+          exit 1
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-tournament-report
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # Accesibilidad y diseño responsive dejan de depender de una corrida local.
+  # Corre el stack E2E real (API + game-server + preview) con PostgreSQL y Redis
+  # de servicio, igual que `quality-and-tests`, y audita WCAG 2.2 A/AA con axe en
+  # 360 y 1200 px, más overflow horizontal en los puntos de quiebre.
+  playwright-audits:
+    name: Playwright (a11y 360/1200 + responsive)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: truco_test
+          POSTGRES_PASSWORD: truco_test_password
+          POSTGRES_DB: truco_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U truco_test -d truco_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      APP_NAME: 'Mesa de Truco'
+      DATABASE_URL: postgresql://truco_test:truco_test_password@localhost:5432/truco_test
+      REDIS_URL: redis://localhost:6379
+      TRUCO_REQUIRE_REAL_SERVICES: '1'
+      SESSION_SECRET: ci_test_session_secret_at_least_32_characters_long
+      SEED_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      ADMIN_TOTP_ENCRYPTION_KEY: ci_test_admin_totp_key_at_least_32_chars_long
+      REFRESH_TOKEN_TTL: '2592000'
+      COOKIE_DOMAIN: localhost
+      CORS_ORIGINS: http://localhost:5173,http://localhost:5174
+      EMAIL_PROVIDER: console
+      CAPTCHA_PROVIDER: disabled
+      TURN_TIMEOUT_MS: '30000'
+      RECONNECT_GRACE_MS: '45000'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # El stack E2E importa los `dist` de game-server y shared desde la API.
+      - name: Build workspace packages and apps
+        run: pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @truco/web exec playwright install --with-deps chromium
+
+      # Los specs arrancan API y preview con `webServer` del config de Playwright.
+      # La salida se captura y, si el paso falla, se publica como anotación del
+      # check-run: los logs del job no son legibles desde todas partes, las
+      # anotaciones sí. Sin esto, un fallo sólo dice "exit code 1".
+      - name: Accessibility audit (WCAG 2.2 A/AA, 360 and 1200)
+        run: |
+          set -o pipefail
+          pnpm --filter @truco/web audit:a11y 2>&1 | tee /tmp/a11y.log
+        # En fallo, publica el final del log como anotación (escapando saltos de línea).
+        continue-on-error: false
+
+      - name: Publish a11y failure details
+        if: failure()
+        run: |
+          message=$(tail -80 /tmp/a11y.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Accessibility audit failed::${message}"
+          exit 1
+
+      - name: Responsive overflow audit (breakpoints)
+        run: |
+          set -o pipefail
+          pnpm --filter @truco/web audit:responsive 2>&1 | tee /tmp/responsive.log
+
+      - name: Publish responsive failure details
+        if: failure()
+        run: |
+          message=$(tail -80 /tmp/responsive.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Responsive audit failed::${message}"
+          exit 1
+
+      # El stack E2E imprime el motivo real de un arranque fallido; sin esto se
+      # pierde y sólo queda "Process from config.webServer was not able to start".
+      - name: Publish E2E stack logs on failure
+        if: failure()
+        run: |
+          for f in /tmp/a11y.log /tmp/responsive.log; do
+            if [ -f "$f" ]; then
+              echo "===== $f ====="
+              grep -iE 'error|fatal|webserver|exit' "$f" | tail -20 || true
+            fi
+          done
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-audits-report
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          retention-days: 3
+          if-no-files-found: ignore
+
   backup-restore:
     name: Respaldo y restauración de PostgreSQL
     runs-on: ubuntu-latest

@@ -11,6 +11,9 @@ import {
   type CompetitiveReviewListResponse,
   type CompetitiveReviewStatus,
   type ProgressionConfig,
+  type TournamentDetailResponse,
+  type TournamentListResponse,
+  type TournamentStatus,
 } from '@truco/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { AuditView } from './components/AuditView.js';
@@ -20,6 +23,7 @@ import { ProgressionConfigView } from './components/ProgressionConfigView.js';
 import { LoginView } from './components/LoginView.js';
 import { ReportDetailView } from './components/ReportDetailView.js';
 import { ReportsView } from './components/ReportsView.js';
+import { TournamentsView } from './components/TournamentsView.js';
 import { UserDetailPanel, UsersView } from './components/UsersView.js';
 import { Button, StatusPill } from './components/primitives.js';
 import { AdminApiError, httpAdminClient, type AdminClient, type ReportFilters } from './lib/api.js';
@@ -32,6 +36,7 @@ type View =
   | { readonly name: 'user'; readonly userId: string }
   | { readonly name: 'competitive-reviews'; readonly status?: CompetitiveReviewStatus }
   | { readonly name: 'progression' }
+  | { readonly name: 'tournaments'; readonly status?: TournamentStatus | undefined }
   | { readonly name: 'audit' };
 
 const NAV: ReadonlyArray<{
@@ -43,13 +48,15 @@ const NAV: ReadonlyArray<{
     | 'users:read'
     | 'audit:read'
     | 'competitive:review'
-    | 'gamification:configure';
+    | 'gamification:configure'
+    | 'tournaments:manage';
 }> = [
   { key: 'dashboard', label: 'Dashboard', permission: 'dashboard:read' },
   { key: 'reports', label: 'Reportes', permission: 'reports:read' },
   { key: 'users', label: 'Usuarios', permission: 'users:read' },
   { key: 'competitive-reviews', label: 'Fair play', permission: 'competitive:review' },
   { key: 'progression', label: 'Gamificación', permission: 'gamification:configure' },
+  { key: 'tournaments', label: 'Torneos', permission: 'tournaments:manage' },
   { key: 'audit', label: 'Auditoría', permission: 'audit:read' },
 ];
 
@@ -95,6 +102,8 @@ export function AdminApp({
   const [competitiveReviewList, setCompetitiveReviewList] =
     useState<CompetitiveReviewListResponse | null>(null);
   const [progressionConfig, setProgressionConfig] = useState<ProgressionConfig | null>(null);
+  const [tournamentList, setTournamentList] = useState<TournamentListResponse | null>(null);
+  const [tournamentDetail, setTournamentDetail] = useState<TournamentDetailResponse | null>(null);
 
   useEffect(() => {
     if (!demoMode) {
@@ -174,6 +183,10 @@ export function AdminApp({
           const config = await activeClient.progressionConfig();
           if (cancelled) return;
           setProgressionConfig(config);
+        } else if (view.name === 'tournaments') {
+          const list = await activeClient.listTournaments({ status: view.status });
+          if (cancelled) return;
+          setTournamentList(list);
         } else {
           const audit = await activeClient.listAudit({});
           if (cancelled) return;
@@ -283,7 +296,9 @@ export function AdminApp({
                             ? { name: 'competitive-reviews', status: 'OPEN' }
                             : item.key === 'progression'
                               ? { name: 'progression' }
-                              : { name: item.key as 'dashboard' | 'audit' },
+                              : item.key === 'tournaments'
+                                ? { name: 'tournaments' }
+                                : { name: item.key as 'dashboard' | 'audit' },
                     )
                   }
                   className={`rounded-lg px-3 py-1.5 text-left text-sm font-semibold transition ${
@@ -496,6 +511,79 @@ export function AdminApp({
                     result.reversed
                       ? `Se agregó la compensación ${result.transactionId}; ningún asiento se borró.`
                       : 'El crédito ya tenía una compensación; no se creó otro asiento.',
+                  );
+                })
+              }
+            />
+          )}
+
+          {view.name === 'tournaments' && tournamentList && (
+            <TournamentsView
+              data={tournamentList}
+              filters={{ status: view.status }}
+              detail={tournamentDetail}
+              busy={busy}
+              onFilterChange={(status) => {
+                setTournamentDetail(null);
+                navigate({ name: 'tournaments', status });
+              }}
+              onOpen={(tournamentId) =>
+                void withBusy(async () => {
+                  setTournamentDetail(await activeClient.tournamentDetail(tournamentId));
+                })
+              }
+              onClose={() => setTournamentDetail(null)}
+              onCancel={(tournamentId, reason) =>
+                void withBusy(async () => {
+                  await activeClient.cancelTournament(tournamentId, { reason });
+                  setTournamentList(await activeClient.listTournaments({ status: view.status }));
+                  setTournamentDetail(
+                    await activeClient.tournamentDetail(tournamentId).catch(() => null),
+                  );
+                  setNotice('Torneo cancelado; el motivo quedó en la auditoría.');
+                })
+              }
+              onAdvance={(tournamentId, reason) =>
+                void withBusy(async () => {
+                  await activeClient.advanceTournament(tournamentId, { reason });
+                  setTournamentDetail(await activeClient.tournamentDetail(tournamentId));
+                  setNotice('Ronda empujada; el cuadro se recalculó y quedó auditado.');
+                })
+              }
+              onResolveIncident={(tournamentId, input) =>
+                void withBusy(async () => {
+                  await activeClient.resolveTournamentIncident(tournamentId, input);
+                  setTournamentDetail(await activeClient.tournamentDetail(tournamentId));
+                  setTournamentList(await activeClient.listTournaments({ status: view.status }));
+                  setNotice('Incidencia resuelta con el estado anterior y el posterior auditados.');
+                })
+              }
+              onCreate={(input) =>
+                void withBusy(async () => {
+                  // El panel crea por la ruta de staff; `official` lo decide el servidor
+                  // según quién llama, no el cliente.
+                  const { tournament } = await activeClient.createTournament({
+                    name: input.name,
+                    format: input.format,
+                    visibility: input.visibility,
+                    capacity: input.capacity,
+                    rules: {
+                      mode: input.mode,
+                      rulesetCode: 'ar-corto-15-flor-v1',
+                      targetScore: input.targetScore,
+                      florEnabled: true,
+                      turnTimeoutMs: 25_000,
+                    },
+                    registrationMinutes: 30,
+                    checkInMinutes: 15,
+                    noShowMinutes: 10,
+                    prizes: [],
+                    official: input.visibility === 'OFFICIAL',
+                    reason: input.reason,
+                  });
+                  setTournamentList(await activeClient.listTournaments({ status: view.status }));
+                  setNotice(
+                    `Torneo "${tournament.name}" creado. El motivo informado quedó en la auditoría.`,
                   );
                 })
               }

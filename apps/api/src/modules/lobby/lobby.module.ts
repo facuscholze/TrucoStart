@@ -25,6 +25,7 @@ import { LobbyRepository } from './lobby.repository.js';
 import { LobbyService } from './lobby.service.js';
 import { LobbyRealtimeGateway } from './lobby-realtime.gateway.js';
 import { MatchPersistenceService } from './match-persistence.service.js';
+import { MatchCompletionBridge } from './ports/match-completion-bridge.js';
 import {
   GAME_ROOM_PROVISIONER,
   type GameRoomProvisioner,
@@ -74,6 +75,9 @@ export class LobbyModule {
     return {
       module: LobbyModule,
       global: true,
+      // Torneos depende de este módulo (aprovisiona la sala de cada cruce) y no al revés:
+      // el aviso de "partida terminada" viaja por `MatchCompletionBridge`, que el módulo
+      // de torneos ocupa al arrancar. Así no hay ciclo de módulos.
       imports: [ProgressionModule],
       controllers: [LobbyController],
       providers: [
@@ -121,6 +125,7 @@ export class LobbyModule {
           },
         },
         PresenceStoreShutdownHook,
+        MatchCompletionBridge,
         LobbyRepository,
         LobbyRealtimeGateway,
         MatchPersistenceService,
@@ -132,6 +137,7 @@ export class LobbyModule {
         MATCH_LIFECYCLE_CONSUMER,
         MATCHMAKING_STORE,
         USER_PRESENCE_STORE,
+        MatchCompletionBridge,
         LobbyRepository,
         LobbyRealtimeGateway,
         MatchPersistenceService,

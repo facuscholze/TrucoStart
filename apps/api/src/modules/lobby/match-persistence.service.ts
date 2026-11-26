@@ -34,6 +34,7 @@ import {
 } from './ports/match-lifecycle-consumer.js';
 import { ProgressionService } from '../progression/progression.service.js';
 import { RatingsService } from '../ratings/ratings.service.js';
+import { MatchCompletionBridge } from './ports/match-completion-bridge.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -47,6 +48,9 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
     @Inject(MATCH_LIFECYCLE_CONSUMER) private readonly consumer: MatchLifecycleConsumer,
     @Inject(RatingsService) private readonly ratingsService: RatingsService,
     @Inject(ProgressionService) private readonly progressionService: ProgressionService,
+    // Puente hacia torneos: el lobby no importa ese módulo (torneos ya importa el lobby
+    // para aprovisionar cada cruce), así que la dependencia va por una interfaz.
+    @Inject(MatchCompletionBridge) private readonly matchCompletion: MatchCompletionBridge,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -455,6 +459,27 @@ export class MatchPersistenceService implements OnApplicationBootstrap, OnApplic
     // Relee la partida persistida: un retry de BullMQ completa recompensas tras cualquier fallo
     // posterior al commit, sin volver a otorgarlas gracias a progression_xp_entries.idempotency_key.
     await this.progressionService.processCompletedMatch(event.matchId);
+
+    // Un cruce de torneo se cierra con el resultado real de la mesa, y con eso avanza la
+    // llave. El trabajo es idempotente por `matchId`, así que un reintento del consumidor
+    // no duplica el avance ni vuelve a pagar premios. Si el resultado no pertenece a un
+    // torneo, el servicio no hace nada.
+    if (committed?.tableId) {
+      await this.matchCompletion
+        .complete({
+          roomId: committed.tableId,
+          matchId: event.matchId,
+          winnerTeam: event.winnerTeam,
+          endedAt: new Date(event.endedAtMs),
+        })
+        .catch((error: unknown) => {
+          // No se pierde el resultado: el cruce queda como está y el barrido o el panel
+          // lo resuelven. Se registra para que el fallo no pase inadvertido.
+          process.stderr.write(
+            `No se pudo cerrar el cruce de torneo de la sala ${committed.tableId}: ${String(error)}\n`,
+          );
+        });
+    }
 
     await this.realtimeGateway.refreshSocialPresence(
       event.players.map((player) => player.userId).filter((userId) => UUID_REGEX.test(userId)),

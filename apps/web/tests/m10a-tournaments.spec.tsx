@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
   listTournamentsRequest: vi.fn(),
   getTournamentDetailRequest: vi.fn(),
   registerForTournamentRequest: vi.fn(),
-  withdrawFromTournamentRequest: vi.fn(),
+  unregisterFromTournamentRequest: vi.fn(),
   checkInTournamentRequest: vi.fn(),
   resolveTournamentJoinCodeRequest: vi.fn(),
 }));

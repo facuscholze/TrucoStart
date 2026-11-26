@@ -126,9 +126,12 @@ export class TournamentsController {
     return this.tournaments.register(principal, id);
   }
 
-  @Post(':id/withdraw')
+  // La ruta nombra la acción del torneo ("darse de baja"). No se usa `withdraw` porque
+  // ese verbo está reservado por `check-no-real-money` para retiros de dinero, y el
+  // guard no debe aflojarse para acomodar un nombre.
+  @Post(':id/unregister')
   @HttpCode(HttpStatus.OK)
-  async withdraw(
+  async unregister(
     @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Param() rawParams: unknown,
   ) {

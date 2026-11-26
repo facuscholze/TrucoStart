@@ -571,8 +571,8 @@ export async function registerForTournamentRequest(id: string): Promise<{ partic
   );
 }
 
-export async function withdrawFromTournamentRequest(id: string): Promise<{ withdrawn: true }> {
-  return requestJson<{ withdrawn: true }>(`/v1/tournaments/${encodeURIComponent(id)}/withdraw`, {
+export async function unregisterFromTournamentRequest(id: string): Promise<{ withdrawn: true }> {
+  return requestJson<{ withdrawn: true }>(`/v1/tournaments/${encodeURIComponent(id)}/unregister`, {
     method: 'POST',
   });
 }

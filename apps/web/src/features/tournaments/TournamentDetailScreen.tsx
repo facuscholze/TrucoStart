@@ -4,7 +4,7 @@ import {
   checkInTournamentRequest,
   getTournamentDetailRequest,
   registerForTournamentRequest,
-  withdrawFromTournamentRequest,
+  unregisterFromTournamentRequest,
 } from '../../lib/api-client.js';
 import { TournamentBracket } from './TournamentBracket.js';
 import {
@@ -209,7 +209,7 @@ export function TournamentDetailScreen({
             disabled={busy}
             onClick={() =>
               run(
-                () => withdrawFromTournamentRequest(tournament.id),
+                () => unregisterFromTournamentRequest(tournament.id),
                 'Te dimos de baja del torneo.',
               )
             }

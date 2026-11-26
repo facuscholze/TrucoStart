@@ -1,20 +1,24 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Inject,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import {
   AdminAdvanceTournamentRequestSchema,
   AdminCancelTournamentRequestSchema,
+  AdminCreateTournamentRequestSchema,
   AdminResolveTournamentIncidentRequestSchema,
-  CreateTournamentRequestSchema,
   TournamentDetailResponseSchema,
+  TournamentListQuerySchema,
+  TournamentListResponseSchema,
 } from '@truco/shared';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -47,9 +51,12 @@ export class AdminTournamentsController {
     @Body() rawBody: unknown,
     @Req() request: FastifyRequest,
   ) {
-    const body = parseWithZod(CreateTournamentRequestSchema, rawBody);
+    const { reason, ...body } = parseWithZod(AdminCreateTournamentRequestSchema, rawBody);
     const meta = extractClientMeta(request);
-    const tournament = await this.tournaments.createAsStaff(principal, body, { ip: meta.ip });
+    const tournament = await this.tournaments.createAsStaff(principal, body, {
+      ip: meta.ip,
+      reason,
+    });
     return { tournament };
   }
 
@@ -101,6 +108,14 @@ export class AdminTournamentsController {
     return { resolved: true };
   }
 
+  /** Listado del panel: incluye torneos privados de terceros. */
+  @Get()
+  @RequirePermission('tournaments:manage')
+  async list(@Query() rawQuery: unknown) {
+    const query = parseWithZod(TournamentListQuerySchema, rawQuery);
+    return TournamentListResponseSchema.parse(await this.tournaments.listForStaff(query));
+  }
+
   /** Lectura del cuadro completo para el panel, incluido lo que el jugador no ve. */
   @Post(':id/detail')
   @HttpCode(HttpStatus.OK)
@@ -109,7 +124,7 @@ export class AdminTournamentsController {
     const { id } = parseWithZod(IdParamSchema, rawParams);
     void TournamentDetailResponseSchema;
     return TournamentDetailResponseSchema.parse(
-      await this.tournaments.detail(principal.userId, id),
+      await this.tournaments.detail(principal.userId, id, { asStaff: true }),
     );
   }
 }

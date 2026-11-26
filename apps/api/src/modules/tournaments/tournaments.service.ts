@@ -119,7 +119,7 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
   async create(
     principal: AuthenticatedPrincipal,
     body: CreateInput,
-    meta: { readonly ip: string },
+    meta: { readonly ip: string; readonly reason?: string | undefined },
   ): Promise<TournamentSummary> {
     await this.consumeLimit(
       `tournaments:create:account:${principal.userId}`,
@@ -247,6 +247,9 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
         targetScore: created.targetScore,
         prizes: body.prizes.map((prize) => ({ position: prize.position, coins: prize.coins })),
       },
+      // La creación de staff siempre trae motivo; la de un jugador no lleva (no hay
+      // decisión administrativa que justificar) y se registra igual quién la hizo.
+      ...(meta.reason !== undefined ? { reason: meta.reason } : {}),
       ip: meta.ip,
       now,
     });
@@ -261,7 +264,7 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
   async createAsStaff(
     principal: AdminPrincipal,
     body: CreateInput,
-    meta: { readonly ip: string },
+    meta: { readonly ip: string; readonly reason?: string | undefined },
   ): Promise<TournamentSummary> {
     const asPlayer = {
       userId: principal.userId,
@@ -312,7 +315,36 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     };
   }
 
-  async detail(viewerUserId: string, tournamentId: string): Promise<TournamentDetailResponse> {
+  /**
+   * Listado del panel. El staff ve también los torneos privados de terceros: sin eso
+   * no podría revisar un cuadro que ya está en juego ni resolver una incidencia.
+   */
+  async listForStaff(query: {
+    readonly status: readonly string[];
+    readonly limit: number;
+    readonly cursor: string | null;
+  }): Promise<TournamentListResponse> {
+    const cursor = decodeCursor(query.cursor);
+    const rows = await this.repository.listForStaff({
+      statuses: query.status,
+      limit: query.limit + 1,
+      cursor,
+    });
+    const page = rows.slice(0, query.limit);
+    // El resumen se arma desde el punto de vista del staff: no hay "vos" en esta vista.
+    const items = await Promise.all(page.map((row) => this.toSummary(row, row.createdBy)));
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
+    };
+  }
+
+  async detail(
+    viewerUserId: string,
+    tournamentId: string,
+    options: { readonly asStaff?: boolean } = {},
+  ): Promise<TournamentDetailResponse> {
     const row = await this.requireTournament(tournamentId);
     const [participants, matches, prizes] = await Promise.all([
       this.repository.listParticipants(tournamentId),
@@ -325,7 +357,14 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     );
     const isOrganizer = row.createdBy === viewerUserId;
     // Un torneo privado no se puede leer de paso: hay que tener el código o participar.
-    if (row.visibility === 'PRIVATE' && !isParticipant && !isOrganizer) {
+    // El staff es la excepción explícita: necesita ver el cuadro para resolver
+    // incidencias, y ese acceso queda en la auditoría del panel.
+    if (
+      row.visibility === 'PRIVATE' &&
+      !isParticipant &&
+      !isOrganizer &&
+      options.asStaff !== true
+    ) {
       throw new DomainApiException(404, 'NOT_FOUND', 'No encontramos ese torneo.', {
         reason: 'TOURNAMENT_NOT_VISIBLE',
       });

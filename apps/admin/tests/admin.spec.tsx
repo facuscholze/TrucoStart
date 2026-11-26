@@ -10,10 +10,31 @@ import { LoginView } from '../src/components/LoginView.js';
 import { ReportDetailView } from '../src/components/ReportDetailView.js';
 import { ReportsView } from '../src/components/ReportsView.js';
 import { ProgressionConfigView } from '../src/components/ProgressionConfigView.js';
+import { TournamentsView } from '../src/components/TournamentsView.js';
 import { UserDetailPanel, UsersView } from '../src/components/UsersView.js';
 import { createDemoClient } from '../src/lib/demo.js';
 
 const NOW = Date.UTC(2026, 10, 13, 15, 30, 0);
+
+/** Montaje sin estado propio: alcanza para verificar lo que se renderiza. */
+function renderTournaments(overrides: Partial<Parameters<typeof TournamentsView>[0]> = {}): string {
+  return renderToStaticMarkup(
+    <TournamentsView
+      data={{ items: [], nextCursor: null }}
+      filters={{}}
+      detail={null}
+      busy={false}
+      onFilterChange={() => undefined}
+      onOpen={() => undefined}
+      onClose={() => undefined}
+      onCancel={() => undefined}
+      onAdvance={() => undefined}
+      onResolveIncident={() => undefined}
+      onCreate={() => undefined}
+      {...overrides}
+    />,
+  );
+}
 
 async function demoData() {
   const client = createDemoClient();
@@ -355,4 +376,35 @@ describe('@truco/admin · datos demo fuera de producción', () => {
       timeout: 180_000,
     });
   }, 200_000);
+});
+
+describe('@truco/admin · torneos M10a', () => {
+  it('el listado muestra estado, cupo y el premio marcado como simbólico', async () => {
+    const tournaments = await createDemoClient().listTournaments({});
+    const html = renderTournaments({ data: tournaments });
+
+    expect(html).toContain('Copa de Otoño');
+    expect(html).toContain('En juego');
+    expect(html).toContain('16/16 con check-in');
+    expect(html).toContain('simbólico, sin valor económico');
+    // El torneo privado de un tercero también aparece: el panel no filtra por visibilidad.
+    expect(html).toContain('Torneo del barrio');
+    expect(html).toContain('Privado');
+  });
+
+  it('deja claro que los torneos no tocan el rating ni el dinero real', () => {
+    const html = renderTournaments();
+    expect(html).toContain('no cuentan para el ranking');
+    expect(html).toContain('Nadie paga para entrar');
+    // Nada de promesas de dinero: la regla 13 también aplica al panel.
+    expect(html).not.toMatch(/gan[aá] (dinero|plata|efectivo)/i);
+    expect(html).not.toMatch(/premios? en (dinero|efectivo)/i);
+  });
+
+  it('las acciones destructivas piden motivo antes de habilitarse', () => {
+    const html = renderTournaments();
+    // Sin detalle abierto no hay formularios de cancelación a medio llenar.
+    expect(html).not.toContain('Cancelar torneo');
+    expect(html).toContain('Crear torneo oficial');
+  });
 });

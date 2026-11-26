@@ -557,6 +557,70 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(playerView.tournament.joinCode).toBeNull();
   }, 60_000);
 
+  it('el panel ve los torneos privados, pero el jugador ajeno no', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const stranger = (await seedUsers(1))[0]!;
+    const tournament = await service.create(organizer.principal, createInput, { ip: '10.0.0.3' });
+
+    // El listado del staff no filtra por visibilidad: incluye el privado de un tercero.
+    const staffList = await service.listForStaff({ status: [], limit: 20, cursor: null });
+    expect(staffList.items.map((item) => item.id)).toContain(tournament.id);
+
+    // El listado del jugador sí lo esconde.
+    const playerList = await service.list(stranger.id, { status: [], limit: 20, cursor: null });
+    expect(playerList.items.map((item) => item.id)).not.toContain(tournament.id);
+
+    // Y el detalle del staff no cae en el 404 de visibilidad, que sí aplica al jugador.
+    await expect(service.detail(stranger.id, tournament.id)).rejects.toMatchObject({ status: 404 });
+    const staffDetail = await service.detail(stranger.id, tournament.id, { asStaff: true });
+    expect(staffDetail.tournament.id).toBe(tournament.id);
+    // Aunque lea el torneo, el código de invitación no se le muestra: sigue siendo del organizador.
+    expect(staffDetail.tournament.joinCode).toBeNull();
+  }, 60_000);
+
+  it('la creación de staff guarda el motivo en la auditoría', async () => {
+    const admin = (await seedUsers(1))[0]!;
+    const tournament = await service.createAsStaff(
+      {
+        userId: admin.id,
+        nickname: admin.principal.nickname,
+        role: 'ADMIN',
+        sessionId: admin.principal.sessionId,
+        email: null,
+        permissions: [],
+      },
+      { ...createInput, official: true },
+      { ip: '10.0.0.4', reason: 'Copa oficial de apertura de temporada' },
+    );
+
+    const [created] = await db
+      .select({ action: auditLogsTable.action, reason: auditLogsTable.reason })
+      .from(auditLogsTable)
+      .where(
+        and(
+          eq(auditLogsTable.entityId, tournament.id),
+          eq(auditLogsTable.action, 'tournaments.created'),
+        ),
+      );
+    expect(created?.reason).toBe('Copa oficial de apertura de temporada');
+
+    // Un torneo privado de un jugador no inventa un motivo que nadie informó.
+    const player = (await seedUsers(1))[0]!;
+    const privateTournament = await service.create(player.principal, createInput, {
+      ip: '10.0.0.5',
+    });
+    const [privateCreated] = await db
+      .select({ reason: auditLogsTable.reason })
+      .from(auditLogsTable)
+      .where(
+        and(
+          eq(auditLogsTable.entityId, privateTournament.id),
+          eq(auditLogsTable.action, 'tournaments.created'),
+        ),
+      );
+    expect(privateCreated?.reason ?? null).toBeNull();
+  }, 60_000);
+
   it('no se puede crear un torneo oficial sin ser del equipo', async () => {
     const player = (await seedUsers(1))[0]!;
     await expect(

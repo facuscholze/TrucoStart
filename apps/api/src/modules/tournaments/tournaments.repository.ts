@@ -196,6 +196,36 @@ export class TournamentsRepository {
       .limit(input.limit);
   }
 
+  /**
+   * Listado para el panel: ve todos los torneos, incluidos los privados de otros
+   * jugadores. Sólo lo usa el controlador de staff, detrás de `tournaments:manage`.
+   */
+  async listForStaff(input: {
+    readonly statuses: readonly string[];
+    readonly limit: number;
+    readonly cursor?: { readonly createdAt: Date; readonly id: string } | null;
+  }): Promise<TournamentRow[]> {
+    const statusFilter =
+      input.statuses.length > 0
+        ? inArray(tournamentsTable.status, input.statuses as never[])
+        : undefined;
+    const cursorFilter = input.cursor
+      ? or(
+          lt(tournamentsTable.createdAt, input.cursor.createdAt),
+          and(
+            eq(tournamentsTable.createdAt, input.cursor.createdAt),
+            lt(tournamentsTable.id, input.cursor.id),
+          ),
+        )
+      : undefined;
+    return this.db
+      .select()
+      .from(tournamentsTable)
+      .where(and(statusFilter, cursorFilter))
+      .orderBy(desc(tournamentsTable.createdAt), desc(tournamentsTable.id))
+      .limit(input.limit);
+  }
+
   async countActivePrivateByCreator(tx: AppTransaction, creatorId: string): Promise<number> {
     const [row] = await tx
       .select({ count: sql<number>`COUNT(*)::int` })

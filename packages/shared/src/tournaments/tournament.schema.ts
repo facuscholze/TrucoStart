@@ -144,6 +144,19 @@ export const TournamentSummarySchema = z
   .strict();
 export type TournamentSummary = z.infer<typeof TournamentSummarySchema>;
 
+/** Filtros del listado, compartidos por el jugador y el panel. */
+export const TournamentListQuerySchema = z
+  .object({
+    status: z
+      .union([TournamentStatusSchema, z.array(TournamentStatusSchema)])
+      .optional()
+      .transform((value) => (value === undefined ? [] : Array.isArray(value) ? value : [value])),
+    limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+    cursor: z.string().max(200).optional().nullable().default(null),
+  })
+  .strict();
+export type TournamentListQuery = z.infer<typeof TournamentListQuerySchema>;
+
 export const TournamentListResponseSchema = z
   .object({
     items: z.array(TournamentSummarySchema),
@@ -256,6 +269,12 @@ export const AdminResolveTournamentIncidentRequestSchema = z
 export type AdminResolveTournamentIncidentRequest = z.infer<
   typeof AdminResolveTournamentIncidentRequestSchema
 >;
+
+/** Creación de staff: el mismo cuerpo del torneo más el motivo de la decisión. */
+export const AdminCreateTournamentRequestSchema = CreateTournamentRequestSchema.extend({
+  reason: z.string().trim().min(10).max(500),
+}).strict();
+export type AdminCreateTournamentRequest = z.infer<typeof AdminCreateTournamentRequestSchema>;
 
 export const AdminCancelTournamentRequestSchema = z
   .object({ reason: z.string().trim().min(10).max(500) })

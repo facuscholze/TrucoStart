@@ -12,6 +12,8 @@ import {
   type CompetitiveReviewListResponse,
   type ProgressionConfig,
   type ProgressionConfigUpdateRequest,
+  type TournamentListResponse,
+  type TournamentSummary,
 } from '@truco/shared';
 import type { AdminClient } from './api.js';
 
@@ -424,5 +426,80 @@ export function createDemoClient(): AdminClient {
       transactionId,
       reversed: true,
     }),
+    listTournaments: async () => DEMO_TOURNAMENTS,
+    tournamentDetail: async () => {
+      throw new Error('Los datos de ejemplo no incluyen un cuadro completo.');
+    },
+    createTournament: async () => ({ tournament: DEMO_TOURNAMENTS.items[0]! }),
+    cancelTournament: async () => ({ cancelled: true }),
+    advanceTournament: async () => ({ advanced: true }),
+    resolveTournamentIncident: async () => ({ resolved: true }),
   };
 }
+
+/**
+ * Torneo de ejemplo para las capturas del panel. Refleja los dos estados que
+ * importan en la práctica: uno en juego con cuadro armado y otro por arrancar.
+ */
+const DEMO_TOURNAMENTS: TournamentListResponse = {
+  nextCursor: null,
+  items: [
+    {
+      id: '019a7e40-0000-7000-8000-00000000b001',
+      name: 'Copa de Otoño',
+      format: 'SINGLE_ELIMINATION',
+      visibility: 'OFFICIAL',
+      status: 'IN_PROGRESS',
+      mode: '1v1',
+      rulesetCode: 'ar-corto-15-flor-v1',
+      targetScore: 15,
+      florEnabled: true,
+      turnTimeoutMs: 25_000,
+      capacity: 16,
+      registeredCount: 16,
+      checkedInCount: 16,
+      joinCode: null,
+      registrationClosesAt: iso(-120),
+      checkInClosesAt: iso(-90),
+      startsAt: iso(-80),
+      finishedAt: null,
+      cancelledReason: null,
+      createdByNickname: 'MartaModera',
+      isParticipant: false,
+      isOrganizer: true,
+      prizes: [
+        {
+          position: 1,
+          coins: 300,
+          cosmeticId: null,
+          cosmeticName: null,
+        },
+      ],
+    } satisfies TournamentSummary,
+    {
+      id: '019a7e40-0000-7000-8000-00000000b002',
+      name: 'Torneo del barrio',
+      format: 'DOUBLE_ELIMINATION',
+      visibility: 'PRIVATE',
+      status: 'CHECK_IN',
+      mode: '2v2',
+      rulesetCode: 'ar-corto-15-flor-v1',
+      targetScore: 15,
+      florEnabled: true,
+      turnTimeoutMs: 25_000,
+      capacity: 8,
+      registeredCount: 6,
+      checkedInCount: 4,
+      joinCode: null,
+      registrationClosesAt: iso(-10),
+      checkInClosesAt: iso(5),
+      startsAt: null,
+      finishedAt: null,
+      cancelledReason: null,
+      createdByNickname: 'TanoOrganiza',
+      isParticipant: false,
+      isOrganizer: false,
+      prizes: [],
+    } satisfies TournamentSummary,
+  ],
+} satisfies TournamentListResponse;

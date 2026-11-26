@@ -1,4 +1,4 @@
-import { type Browser, chromium, expect, type Page, test } from '@playwright/test';
+import { type Browser, chromium, expect, type Locator, type Page, test } from '@playwright/test';
 
 const BASE_URL = 'http://localhost:4173';
 
@@ -46,6 +46,20 @@ async function isResultModalOpen(page: Page): Promise<boolean> {
 }
 
 /**
+ * El resultado puede aparecer entre la comprobación del modal y el clic de una jugada.
+ * En ese único caso, tratamos la acción como terminada y el bucle vuelve a comprobar ambos clientes.
+ */
+async function clickGameAction(page: Page, action: Locator): Promise<boolean> {
+  try {
+    await action.click({ timeout: 3_000 });
+    return true;
+  } catch (error) {
+    if (await isResultModalOpen(page)) return false;
+    throw error;
+  }
+}
+
+/**
  * Ejecuta un paso determinístico en la mesa en vivo (desktop >= 1200px o mobile 360px).
  * Prioriza responder cantos pendientes con "¡Quiero!" y cantar "¡Falta Envido!" para definir rápido,
  * jugando cartas legales o yéndose al mazo cuando corresponde.
@@ -64,51 +78,41 @@ async function stepOneTurn(page: Page, isMobile: boolean): Promise<boolean> {
       const hasPlayableCard = (await playableCard.count()) > 0;
 
       if (callCount > 0 && !hasPlayableCard) {
-        await openTrayBtn.click();
+        if (!(await clickGameAction(page, openTrayBtn))) return false;
         const quieroBtn = page.getByRole('button', { name: /^¡Quiero!/i }).first();
-        if (await quieroBtn.isVisible()) {
-          await quieroBtn.click();
-          return true;
-        }
+        if (await quieroBtn.isVisible()) return clickGameAction(page, quieroBtn);
       }
 
       if (callCount >= 4 && hasPlayableCard) {
-        await openTrayBtn.click();
+        if (!(await clickGameAction(page, openTrayBtn))) return false;
         const faltaBtn = page.getByRole('button', { name: /¡Falta Envido!/i }).first();
-        if (await faltaBtn.isVisible()) {
-          await faltaBtn.click();
-          return true;
-        }
+        if (await faltaBtn.isVisible()) return clickGameAction(page, faltaBtn);
         const closeTray = page.getByRole('button', { name: /Cerrar bandeja de cantos/i });
         if (await closeTray.isVisible()) {
-          await closeTray.click();
+          await clickGameAction(page, closeTray);
         }
       }
     }
   } else {
     const quieroBtn = page.getByRole('button', { name: /^¡Quiero!/i }).first();
     if ((await quieroBtn.isVisible()) && (await quieroBtn.isEnabled())) {
-      await quieroBtn.click();
-      return true;
+      return clickGameAction(page, quieroBtn);
     }
 
     const faltaBtn = page.getByRole('button', { name: /¡Falta Envido!/i }).first();
     if ((await faltaBtn.isVisible()) && (await faltaBtn.isEnabled())) {
-      await faltaBtn.click();
-      return true;
+      return clickGameAction(page, faltaBtn);
     }
   }
 
   const playableCard = page.locator('button:not([disabled]):has(svg[data-card-id])').first();
   if ((await playableCard.count()) > 0 && (await playableCard.isVisible())) {
-    await playableCard.click();
-    return true;
+    return clickGameAction(page, playableCard);
   }
 
   const foldBtn = page.getByRole('button', { name: /Irse al mazo/i });
   if ((await foldBtn.isVisible()) && (await foldBtn.isEnabled())) {
-    await foldBtn.click();
-    return true;
+    return clickGameAction(page, foldBtn);
   }
 
   return false;

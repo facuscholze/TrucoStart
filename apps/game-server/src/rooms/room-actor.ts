@@ -577,7 +577,8 @@ export class RoomActor {
   }
 
   private async startMatchIfAllReady(now: number): Promise<void> {
-    if (this.status === 'IN_GAME' || this.gameState) return;
+    if (this.status === 'IN_GAME' || (this.gameState && this.gameState.status !== 'FINISHED'))
+      return;
     if (!this.seats.every((s) => s.userId !== null && s.ready)) {
       await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
       return;

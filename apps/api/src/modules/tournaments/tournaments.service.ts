@@ -416,13 +416,16 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
 
     const teams = row.mode === '2v2' ? await this.repository.listTeams(row.id) : [];
     const teamNames = new Map(teams.map((team) => [team.id, team.name]));
+    const teamMembers = row.mode === '2v2' ? await this.repository.listTeamMembers(row.id) : [];
+    const myTeamIds = new Set(
+      teamMembers.filter((member) => member.userId === viewerUserId).map((member) => member.teamId),
+    );
     const matchViews = matches.map((match) => this.toMatchView(match, nicknames, teamNames));
     const now = this.now();
     const summary = await this.toSummary(row, viewerUserId, { participants, prizes });
 
     // Equipos del torneo 2v2 con sus integrantes: es lo que ocupa cada lado del cuadro
     // y lo que la pantalla muestra en lugar de una lista de personas sueltas.
-    const teamMembers = row.mode === '2v2' ? await this.repository.listTeamMembers(row.id) : [];
     const teamViews = teams.map((team) => ({
       id: team.id,
       name: team.name,
@@ -442,11 +445,17 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
       participants: participantViews,
       teams: teamViews,
       matches: matchViews,
-      standings: buildStandings(row, participants, matches, nicknames),
+      // La tabla de un torneo por equipos es por EQUIPO: `standingsFor` es la que sabe
+      // cuál es campeón cuando el lado del cuadro es un equipo y no una persona.
+      standings: await this.standingsFor(row),
       myNextMatch:
         matchViews.find(
           (match) =>
-            (match.homeUserId === viewerUserId || match.awayUserId === viewerUserId) &&
+            // En 1v1 el lado es la persona; en 2v2, su equipo.
+            (match.homeUserId === viewerUserId ||
+              match.awayUserId === viewerUserId ||
+              (match.homeTeamId !== null && myTeamIds.has(match.homeTeamId)) ||
+              (match.awayTeamId !== null && myTeamIds.has(match.awayTeamId))) &&
             match.status !== 'COMPLETED' &&
             match.status !== 'FORFEITED',
         ) ?? null,
@@ -549,9 +558,23 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
     // hasta su propio plazo, que es el que se evalúa abajo.
     if (row.status === 'DRAFT') return 'El torneo todavía no abrió la inscripción.';
     if (row.registrationClosesAt.getTime() <= now.getTime()) return 'La inscripción ya cerró.';
-    const active = participants.filter(
-      (participant) => participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN',
-    ).length;
+    // En equipos el cupo es de equipos: contar personas diría "completo" con la mitad
+    // de los equipos anotados.
+    const active =
+      row.mode === '2v2'
+        ? new Set(
+            participants
+              .filter(
+                (participant) =>
+                  participant.teamId !== null &&
+                  (participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN'),
+              )
+              .map((participant) => participant.teamId),
+          ).size
+        : participants.filter(
+            (participant) =>
+              participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN',
+          ).length;
     if (active >= row.capacity) return 'El torneo está completo.';
     return null;
   }
@@ -586,11 +609,34 @@ export class TournamentsService implements OnApplicationBootstrap, OnApplication
       florEnabled: row.florEnabled,
       turnTimeoutMs: row.turnTimeoutMs,
       capacity: row.capacity,
-      registeredCount: participants.filter(
-        (participant) => participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN',
-      ).length,
-      checkedInCount: participants.filter((participant) => participant.status === 'CHECKED_IN')
-        .length,
+      // El cupo de un torneo por equipos cuenta EQUIPOS, no personas: mostrar 8/4 cuando
+      // hay cuatro equipos de dos era una cifra imposible en pantalla.
+      registeredCount:
+        row.mode === '2v2'
+          ? new Set(
+              participants
+                .filter(
+                  (participant) =>
+                    participant.teamId !== null &&
+                    (participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN'),
+                )
+                .map((participant) => participant.teamId),
+            ).size
+          : participants.filter(
+              (participant) =>
+                participant.status === 'REGISTERED' || participant.status === 'CHECKED_IN',
+            ).length,
+      checkedInCount:
+        row.mode === '2v2'
+          ? new Set(
+              participants
+                .filter(
+                  (participant) =>
+                    participant.teamId !== null && participant.status === 'CHECKED_IN',
+                )
+                .map((participant) => participant.teamId),
+            ).size
+          : participants.filter((participant) => participant.status === 'CHECKED_IN').length,
       // El código es la llave de invitación: sólo lo ve quien organiza.
       joinCode: row.visibility === 'PRIVATE' && isOrganizer ? row.joinCode : null,
       registrationClosesAt: row.registrationClosesAt.toISOString(),

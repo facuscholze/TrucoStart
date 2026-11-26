@@ -717,17 +717,45 @@ export class TournamentsRepository {
     return rows.map((row) => row.tournamentId);
   }
 
+  /**
+   * Cruces pendientes del jugador. Incluye los de 2v2: ahí el lado del cuadro es un
+   * EQUIPO, así que también cuentan los cruces donde juega el equipo del jugador. Sin
+   * esto, un torneo por equipos no mostraba "mi próxima partida" ni el botón de la mesa.
+   */
   async listMatchesForUser(userId: string): Promise<TournamentMatchRow[]> {
+    const teamIds = await this.db
+      .select({ teamId: tournamentParticipantsTable.teamId })
+      .from(tournamentParticipantsTable)
+      .where(
+        and(
+          eq(tournamentParticipantsTable.userId, userId),
+          isNotNull(tournamentParticipantsTable.teamId),
+        ),
+      );
+    const myTeams = teamIds
+      .map((row) => row.teamId)
+      .filter((teamId): teamId is string => teamId !== null);
+    const sides = [
+      or(
+        eq(tournamentMatchesTable.homeUserId, userId),
+        eq(tournamentMatchesTable.awayUserId, userId),
+      )!,
+      ...(myTeams.length > 0
+        ? [
+            or(
+              inArray(tournamentMatchesTable.homeTeamId, myTeams),
+              inArray(tournamentMatchesTable.awayTeamId, myTeams),
+            )!,
+          ]
+        : []),
+    ];
     return this.db
       .select()
       .from(tournamentMatchesTable)
       .where(
         and(
           inArray(tournamentMatchesTable.status, ['SCHEDULED', 'READY', 'IN_PROGRESS']),
-          or(
-            eq(tournamentMatchesTable.homeUserId, userId),
-            eq(tournamentMatchesTable.awayUserId, userId),
-          ),
+          or(...sides),
         ),
       )
       .orderBy(asc(tournamentMatchesTable.deadlineAt));

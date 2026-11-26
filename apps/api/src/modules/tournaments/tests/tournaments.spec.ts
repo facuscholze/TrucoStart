@@ -841,6 +841,14 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
       }
     }
 
+    // "Mi próxima partida" tiene que encontrar el cruce por EQUIPO: en 2v2 el lado del
+    // cuadro no es la persona, así que sin esto la pantalla no ofrece entrar a la mesa.
+    const next = await service.myNextMatch(players[0]!.id);
+    expect(next.match).not.toBeNull();
+    expect(next.match!.roomId).toBeTruthy();
+    const detail2v2 = await service.detail(players[0]!.id, tournament.id);
+    expect(detail2v2.myNextMatch).not.toBeNull();
+
     // Cada cruce listo tiene su mesa con 4 asientos intercalados por equipo.
     const ready = firstRound.filter((match) => match.roomId !== null);
     expect(ready.length).toBeGreaterThan(0);
@@ -902,6 +910,18 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(standings).toHaveLength(4);
     expect(standings[0]!.nickname).toBe('Equipo 1');
     expect(standings[0]!.tiebreakNote).toContain('Campeón');
+
+    // El DETALLE tiene que publicar la misma tabla por equipo: armar la vista con la tabla
+    // de personas dejaba un torneo terminado con todos "Sigue en carrera" y sin campeón.
+    const finishedDetail = await service.detail(players[0]!.id, tournament.id);
+    expect(finishedDetail.standings[0]!.nickname).toBe('Equipo 1');
+    expect(finishedDetail.standings[0]!.tiebreakNote).toContain('Campeón');
+    // Y el campeón son las DOS personas del equipo, no la que esté primera.
+    const winners = finishedDetail.participants
+      .filter((participant) => participant.status === 'WINNER')
+      .map((participant) => participant.userId)
+      .sort();
+    expect(winners).toEqual([players[0]!.id, players[1]!.id].sort());
 
     // Premios: cada integrante del campeón cobra las 100 monedas y los subcampeones 40.
     const awards = await db
@@ -1004,6 +1024,39 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(ready).toHaveLength(1);
     expect(ready[0]!.status).toBe('READY');
   }, 120_000);
+
+  it('el cupo de un torneo 2v2 cuenta equipos: nunca muestra más inscriptos que cupo', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(8);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4, rules: { ...createInput.rules, mode: '2v2' } },
+      { ip: '10.0.0.33' },
+    );
+    for (let team = 0; team < 4; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+    for (const player of players) await service.checkIn(player.principal, tournament.id);
+
+    // 4 equipos de 2 personas sobre un cupo de 4: el resumen dice 4/4, no 8/4.
+    const detail = await service.detail(organizer.id, tournament.id);
+    expect(detail.tournament.registeredCount).toBe(4);
+    expect(detail.tournament.checkedInCount).toBe(4);
+    expect(detail.tournament.registeredCount).toBeLessThanOrEqual(tournament.capacity);
+    // Y el cupo se agota de verdad: un quinto equipo no entra.
+    const extra = await seedUsers(2);
+    await expect(
+      service.registerTeam(extra[0]!.principal, tournament.id, {
+        name: 'Equipo 5',
+        teammateUserIds: [extra[1]!.id],
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(detail.canRegister).toBe(false);
+    expect(detail.registrationClosedReason).toBe('El torneo está completo.');
+  }, 90_000);
 
   it('quien no hace check-in queda fuera sin arrancar una llave de una sola persona', async () => {
     const organizer = (await seedUsers(1))[0]!;

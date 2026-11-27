@@ -21,6 +21,7 @@ export class TournamentWsPlayer {
   socket!: ClientSocket;
   latestView: PlayerView | null = null;
   private readonly transcript: WsEnvelope[] = [];
+  private readonly serverErrors: string[] = [];
   private lastSeq = 0;
 
   constructor(input: { readonly userId: string; readonly nickname: string }) {
@@ -41,6 +42,13 @@ export class TournamentWsPlayer {
       if (typeof parsed.seq === 'number' && parsed.seq > this.lastSeq) this.lastSeq = parsed.seq;
       const view = parsed.payload['view'];
       if (view && typeof view === 'object') this.latestView = view as unknown as PlayerView;
+      // Un rechazo del servidor (acción ilegal, ticket vencido, asiento ocupado) se guarda para
+      // que el test lo muestre como causa en vez de morir con un timeout sin explicación.
+      if (parsed.type === 'error') {
+        this.serverErrors.push(
+          String(parsed.payload['message'] ?? parsed.payload['code'] ?? 'error sin detalle'),
+        );
+      }
     });
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
@@ -60,6 +68,11 @@ export class TournamentWsPlayer {
 
   send(type: string, payload: Record<string, unknown>): void {
     this.socket.emit('envelope', { eventId: randomUUID(), ts: Date.now(), type, payload });
+  }
+
+  /** Errores que el game-server devolvió a este asiento durante la partida. */
+  errors(): readonly string[] {
+    return this.serverErrors;
   }
 
   ended(): boolean {

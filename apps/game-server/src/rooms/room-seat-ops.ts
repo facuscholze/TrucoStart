@@ -1,20 +1,22 @@
 import type { RuleSet } from '@truco/engine';
-import type {
-  ErrorCode,
-  GameMode,
-  PracticeConfig,
-  RulesetCode,
-  TableStatus,
-  TableVisibility,
-  WsAuthTicketClaims,
+import {
+  seatsForMode,
+  teamForSeat,
+  type ErrorCode,
+  type GameMode,
+  type PracticeConfig,
+  type RulesetCode,
+  type TableStatus,
+  type TableVisibility,
+  type WsAuthTicketClaims,
 } from '@truco/shared';
 import type { PersistedRoomSnapshot, PersistedSeatBinding } from '../store/game-store.interface.js';
 import { buildBotSeats } from './bot-seats.js';
 
-export function createEmptySeatBinding(seat: number): PersistedSeatBinding {
+export function createEmptySeatBinding(seat: number, team = seat % 2): PersistedSeatBinding {
   return {
     seat,
-    team: seat % 2,
+    team,
     userId: null,
     nickname: null,
     sessionId: null,
@@ -36,10 +38,12 @@ export function buildEmptyRoomSnapshot(params: {
   readonly nowMs: number;
   readonly practice?: PracticeConfig | undefined;
 }): PersistedRoomSnapshot {
-  const numSeats = params.mode === '2v2' ? 4 : 2;
+  const numSeats = seatsForMode(params.mode);
   const seats = params.practice
     ? buildBotSeats({ mode: params.mode, difficulty: params.practice.difficulty })
-    : Array.from({ length: numSeats }, (_, idx) => createEmptySeatBinding(idx));
+    : Array.from({ length: numSeats }, (_, idx) =>
+        createEmptySeatBinding(idx, teamForSeat(params.mode, idx)),
+      );
   return {
     roomId: params.roomId,
     status: 'WAITING',

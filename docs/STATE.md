@@ -1,6 +1,7 @@
 # Estado del Proyecto ("Mesa de Truco")
 
 - **Última actualización:** 2026-11-26
+- **Truco de 6 (M10b, entrega 1):** se suma el modo `3v3` de punta a punta —motor con tres equipos, mesas de seis asientos, emparejamiento casual de 6, UI y E2E con seis WebSocket— como modo **social**: sin ranking, sin torneos y sin ligas (ADR-033), con las estadísticas del perfil registrando el modo. Detalle en el apartado M10b al final del documento.
 - **Tanda de pulido UX (2026-11-26):** sobre la base M0–M9c se implementaron las mejoras 1, 2, 3, 6, 7 y 9 de `docs/UX_AUDIT_M0-M9C.md` (acción principal móvil y práctica diferida por umbral, señal de continuidad en la barra inferior, encabezado de escritorio en una sola fila, notificaciones y metadatos del ranking legibles en 360 px, y revisión de casos admin con contexto fijo e identificadores legibles). Las mejoras 5 y 8 quedaron diferidas con criterio de medición con jugadores reales en `docs/BACKLOG.md`. Cierre medido con `pnpm --filter @truco/web measure:ux` (CLS por ruta y ancho, filas de encabezado, pista de la barra), axe WCAG 2.2 A/AA sin hallazgos y auditoría responsive sin overflow. Detalle en ADR-028 y `docs/CHANGELOG.md`. **Etapa 3 no iniciada.**
 - **Etapa activa:** Etapa 3 — Competitividad, módulo **M10a (torneos)**. La Etapa 2 quedó cerrada y el detalle histórico de M9a/M9b/M9c sigue al final del documento.
 - **Módulo actual:** M9c implementado en esta rama. Los CI anotados en los apartados M9a/M9b/M9c corresponden a sus tandas históricas y no certifican el conjunto de commits de esta auditoría; para el cierre, consultar en el reporte el CI del SHA final empujado. El gate de tests falla si falta PostgreSQL o Redis y la ruta DB no permite fallback a PGlite. M8a–M8d siguen cerrados en código con dependencias de infraestructura real pendientes. El detalle de M9a/M9b/M9c se registra al final de este documento. _(M8b: índices, caché de lobby, límites por usuario/IP, workflow `perf.yml`, benchmarks en sandbox y `docs/PERF.md`.)_
@@ -538,7 +539,54 @@ Además, en el panel: el cliente mandaba `content-type: application/json` en POS
 ### Lo que queda fuera de alcance (explícito)
 
 - Swiss: documentado como interfaz, no implementado.
-- M10b (ligas, truco de 6) y espectadores: no iniciados por pedido explícito.
+- M10b entrega 2 (ligas) y espectadores: fuera de M10a por pedido explícito. El truco de 6 se entregó en M10b entrega 1 (apartado siguiente).
 - _Bracket reset_ en eliminación doble: decisión registrada en ADR-029.
 - Torneos en el ranking competitivo: decisión registrada en ADR-030.
 - Revisión legal: los documentos siguen siendo borradores; el aviso visible no se presenta como aprobado.
+
+---
+
+## M10b — Truco de 6 (Etapa 3, entrega 1: `3v3`)
+
+**Estado:** implementado en la rama activa. El SHA final y su CI se anotan en el reporte de cierre.
+
+### Alcance entregado
+
+| Criterio pedido                         | Implementación                                                                                                                                                                                                  | Evidencia                                                                                                    |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Nuevo `GameMode` `3v3` de punta a punta | `GameModeSchema` amplía el enum; `SEATS_BY_MODE`/`TEAMS_BY_MODE` con 6 asientos y 3 equipos en `@truco/shared`. Ninguna capa compara `mode === '2v2'` para deducir geometría.                                   | `packages/shared/tests/game-mode.spec.ts` (15) y `apps/api/.../m10b-six-seat.spec.ts` (9)                    |
+| Motor con tres equipos                  | Asientos `0,1,2,0,1,2`: compañeros 0–3, 1–4 y 2–5, y turnos que alternan los tres equipos. `resolveRespondingTeam` con `teamResponderMode` (`NEXT_IN_TURN` por omisión, `HIGHEST_SCORE` configurable).          | `packages/truco-engine/tests/six-seat-teams.spec.ts` (16), `view.spec.ts` (+6), simulación de 1 000 partidas |
+| Envido y flor con tres equipos          | El envido se resuelve entre los tres equipos; el empate va al equipo más cercano al mano. La flor la contesta el primero en orden desde quien cantó.                                                            | `six-seat-teams.spec.ts`; `docs/RULES.md` §13.4                                                              |
+| Mesas, asientos y emparejamiento        | Crear mesa `3v3` siembra seis asientos con equipos alternados; `join`/`join-by-code` aceptan `preferredSeat` 0–5; la cola casual arma grupos de 6 con `teamForSeat`. La cola competitiva rechaza `3v3`.         | `m10b-six-seat.spec.ts` (siete joins, `TABLE_FULL`, matchmaking de 6, `COMPETITIVE_MODE_NOT_ALLOWED`)        |
+| Social, fuera del ranking               | `COMPETITIVE_MODES`/`CompetitiveModeSchema` sólo 1v1 y 2v2: `/v1/rankings?mode=3v3` responde 400. Torneos y ligas tampoco ofrecen el modo (`TournamentMode`).                                                   | `m10b-six-seat.spec.ts`; ADR-033                                                                             |
+| Estadísticas del perfil                 | `byMode` siempre publica las tres claves y suma la partida jugada; el perfil filtra el historial por `3v3` y `GET /v1/users/:id/ratings` sigue con dos perfiles.                                                | `m10b-six-seat.spec.ts`; `apps/web/tests/m10b-match-result.spec.tsx`                                         |
+| Web: mesa, lobby, inicio y práctica     | La mesa dibuja seis asientos (compañero arriba, rival a la izquierda y los otros dos en la tira extra), tanteador de tres equipos y cartel de fin con una columna por equipo. Lobby y práctica ofrecen el modo. | Capturas `docs/screenshots/m10b-mesa-seis-*.png`; `mesa-view-and-prod-guard.spec.tsx` (5)                    |
+| Partida real de seis                    | E2E: seis invitados, mesa privada `3v3` a 15, seis WebSocket jugando la partida completa y la mesa del dueño en un navegador de 390 px verificando asientos, tanteador y resultado leído de la API.             | `apps/web/e2e/m10b-six-seat.spec.ts` (paso propio `six-seat-e2e` en CI)                                      |
+| OpenAPI y documentación                 | `docs/openapi.v1.json` con `3v3` en mesas, historial y `byMode`, en paridad exacta con el endpoint vivo; `RULES.md` §13, ADR-033.                                                                               | `users-authz-and-privacy.spec.ts` (paridad)                                                                  |
+
+### Lo que el E2E y la auditoría visual encontraron
+
+0. **El actor de sala guardaba un solo socket por asiento.** Con dos conexiones del mismo jugador (la mesa en el navegador y un cliente de juego, o dos pestañas) el segundo `join` reemplazaba al primero y ese cliente dejaba de recibir eventos sin desconectarse: la mesa se le congelaba. Ahora cada asiento tiene un conjunto de sockets; el E2E del truco de 6 lo destapó y `apps/game-server/tests/multi-socket-seat.spec.ts` lo fija (falla contra el código anterior).
+1. **El paño de la mesa no podía encogerse.** `Table` usaba `flex: 1 1 600px` sin `minWidth: 0`: en la mesa de seis el documento medía 385 px en una pantalla de 360. Corregido en `packages/ui`, junto con la fila de bazas que no envolvía las cartas.
+2. **El tanteador recortaba el nombre del equipo** en el anotador angosto del panel lateral ("Nosotr…"). Pasa a etiquetas cortas con el nombre completo en el `aria-label`.
+3. **El historial de la mesa no era enfocable** con teclado (lista con scroll propio). Ahora es `tabIndex=0` con foco visible.
+4. **El E2E de seis no podía terminar:** cinco asientos jugaban por WebSocket y el sexto miraba la mesa. Ahora juegan los seis y el navegador del dueño valida lo que hay que ver (asientos, tanteador y resultado) sin necesidad de jugar.
+
+> Nota sobre la práctica: una mesa de práctica o con bots **no** entra al historial ni a las estadísticas (filtro `isPractice = false` / `hasBots = false` en el repositorio de usuarios). Por eso el E2E de la mesa de seis usa seis personas reales y no bots: es la única forma de verificar que la partida de seis queda registrada en la API.
+
+5. **Con tres equipos el cartel de resultado resumía la mesa a "nosotros contra ellos"**, mostrando un rival arbitrario. Ahora lleva el tanteador completo.
+
+### Verificación
+
+- API: **208 pruebas | 8 omitidas**; `m10b-six-seat.spec.ts` 9, paridad OpenAPI 3.
+- shared **172** (15 nuevas de geometría), web **79** (8 nuevas de la mesa de seis), admin 18, game-server **44 | 3** (2 nuevas de sockets por asiento), engine 54 y slow 7 (incluye 1 000 partidas de tres equipos).
+- E2E corridos en local contra el stack real (PGlite): mesa de seis **1/1 en 8,5 s**, multicliente y práctica **4/4 en 2,7 min**, torneo 2v2 **2/2 en 4,7 min**.
+- `pnpm lint`, `typecheck`, `format:check`, `build`, `check-no-real-money` en verde.
+- axe WCAG 2.2 A/AA sin hallazgos nuevos en las tres escenas de la mesa de seis a 360 y 1200 px, y sin overflow horizontal.
+- E2E de la mesa de seis en CI (PostgreSQL 16 + Redis 7 reales).
+
+### Fuera de alcance (explícito)
+
+- Ligas y espectadores: entrega 2 de M10b.
+- Torneos de seis: el modo es social por ADR-033; los torneos siguen siendo 1v1 y 2v2.
+- Ranking y rating de `3v3`.

@@ -235,7 +235,7 @@ export const OPENAPI_M7_SCHEMAS: Record<string, unknown> = {
     ],
     properties: {
       matchId: { type: 'string', format: 'uuid' },
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       rulesetCode: { type: 'string' },
       startedAt: { type: 'string', format: 'date-time' },
       endedAt: { type: ['string', 'null'], format: 'date-time' },

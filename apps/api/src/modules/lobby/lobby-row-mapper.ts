@@ -1,11 +1,14 @@
-import type {
-  PersistedTableStatus,
-  PublicLobbySeatSummary,
-  PublicLobbyTableSummary,
-  RulesetCode,
-  TableDetailResponse,
-  TableParticipantSeat,
-  TableVisibility,
+import {
+  seatsForMode,
+  teamForSeat,
+  type GameMode,
+  type PersistedTableStatus,
+  type PublicLobbySeatSummary,
+  type PublicLobbyTableSummary,
+  type RulesetCode,
+  type TableDetailResponse,
+  type TableParticipantSeat,
+  type TableVisibility,
 } from '@truco/shared';
 import type { tableSeatsTable, tablesTable } from '../../db/schema/index.js';
 
@@ -17,8 +20,9 @@ export interface TableAggregate {
   readonly activeSeats: readonly TableSeatRow[];
 }
 
-export function maxSeatsForMode(mode: '1v1' | '2v2'): 2 | 4 {
-  return mode === '1v1' ? 2 : 4;
+/** Asientos por modo, resueltos en `@truco/shared` para no repetir la tabla en cada capa. */
+export function maxSeatsForMode(mode: GameMode): number {
+  return seatsForMode(mode);
 }
 
 function resolveOwnerNickname(agg: TableAggregate): string {
@@ -34,7 +38,7 @@ export function toPublicTableSummary(agg: TableAggregate): PublicLobbyTableSumma
     const occupied = bySeat.get(i);
     seats.push({
       seat: i,
-      team: i % 2,
+      team: teamForSeat(agg.row.mode, i),
       occupied: Boolean(occupied),
       nickname: occupied ? occupied.nickname : null,
     });
@@ -78,7 +82,7 @@ export function toTableDetailResponse(
     }
     seats.push({
       seat: i,
-      team: i % 2,
+      team: teamForSeat(agg.row.mode, i),
       occupied: Boolean(occupied),
       nickname: occupied ? occupied.nickname : null,
       isOwner: Boolean(occupied && occupied.userId === agg.row.ownerId),

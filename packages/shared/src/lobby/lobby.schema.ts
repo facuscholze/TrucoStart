@@ -84,7 +84,8 @@ export const JoinByCodeRequestSchema = z
   .object({
     code: JoinCodeSchema.optional(),
     inviteToken: z.string().trim().min(16).max(1024).optional(),
-    preferredSeat: z.number().int().min(0).max(3).optional(),
+    // Hasta 5: la mesa más grande es el truco de 6 (3v3) con seis asientos.
+    preferredSeat: z.number().int().min(0).max(5).optional(),
   })
   .strict()
   .refine((val) => Boolean(val.code) || Boolean(val.inviteToken), {
@@ -94,7 +95,8 @@ export type JoinByCodeRequest = z.infer<typeof JoinByCodeRequestSchema>;
 
 export const JoinPublicTableRequestSchema = z
   .object({
-    preferredSeat: z.number().int().min(0).max(3).optional(),
+    /** Hasta 5: la mesa más grande es el truco de 6 (3v3). */
+    preferredSeat: z.number().int().min(0).max(5).optional(),
   })
   .strict();
 export type JoinPublicTableRequest = z.infer<typeof JoinPublicTableRequestSchema>;

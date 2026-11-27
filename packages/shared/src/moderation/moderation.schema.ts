@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GameModeSchema } from '../ws/client-events.schema.js';
 
 /** Motivos de reporte habilitados en la mesa, el resultado y el perfil. */
 export const ReportReasonCodeSchema = z.enum([
@@ -275,7 +276,7 @@ export const AdminUserDetailSchema = AdminUserListItemSchema.extend({
   recentMatches: z.array(
     z.object({
       matchId: z.string().uuid(),
-      mode: z.enum(['1v1', '2v2']),
+      mode: GameModeSchema,
       outcome: z.enum(['WIN', 'LOSS', 'DRAW', 'ABANDONED']),
       endedAt: z.string().nullable(),
     }),
@@ -389,7 +390,7 @@ export type AdminReplayEvent = z.infer<typeof AdminReplayEventSchema>;
 
 export const AdminMatchReplaySchema = z.object({
   matchId: z.string().uuid(),
-  mode: z.enum(['1v1', '2v2']),
+  mode: GameModeSchema,
   rulesetCode: z.string(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),

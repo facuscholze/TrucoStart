@@ -14,7 +14,8 @@ export interface QueuedPlayerEntry {
   readonly ratingDeviation?: number;
   readonly blockedOpponentIds?: readonly string[];
   /** Sólo se fija tras un emparejamiento competitivo 2v2. */
-  readonly team?: 0 | 1;
+  /** Equipo asignado al emparejar; en 3v3 puede ser 0, 1 o 2. */
+  readonly team?: number;
 }
 
 export interface CompetitiveMatchingOptions {

@@ -43,7 +43,7 @@ export const OPENAPI_M9A_SCHEMAS: Record<string, unknown> = {
     ],
     properties: {
       matchId: { type: 'string', format: 'uuid' },
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       rulesetCode: { type: 'string' },
       hasBots: { type: 'boolean' },
       seedCommitment: { type: 'string' },

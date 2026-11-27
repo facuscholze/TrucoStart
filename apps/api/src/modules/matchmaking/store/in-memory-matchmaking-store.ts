@@ -5,6 +5,7 @@ import type {
   QueuedPlayerEntry,
   UserQueueLookup,
 } from './matchmaking-store.interface.js';
+import { teamForSeat } from '@truco/shared';
 import { findCompetitiveMatch } from './competitive-matching.js';
 
 function bucketKey(mode: string, rulesetCode: string, competitive = false): string {
@@ -97,7 +98,11 @@ export class InMemoryMatchmakingStore implements MatchmakingStore {
       }
       return {
         kind: 'MATCHED',
-        players: matched.map((m) => structuredClone(m)),
+        players: matched.map((m, index) => ({
+          ...structuredClone(m),
+          // Con 3 equipos (truco de 6) el equipo sale del modo; con 2, el reparto alternado.
+          team: teamForSeat(entry.mode, index),
+        })),
       };
     }
 

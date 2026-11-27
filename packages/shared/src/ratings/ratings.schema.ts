@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GameModeSchema } from '../ws/client-events.schema.js';
+import { CompetitiveModeSchema } from '../lobby/game-mode.js';
 
 export const RankingPeriodSchema = z.enum(['GLOBAL', 'WEEKLY', 'MONTHLY']);
 export type RankingPeriod = z.infer<typeof RankingPeriodSchema>;
@@ -10,7 +10,8 @@ export type RatingDivision = z.infer<typeof RatingDivisionSchema>;
 export const LeaderboardQuerySchema = z
   .object({
     period: RankingPeriodSchema.optional().default('GLOBAL'),
-    mode: GameModeSchema.optional().default('1v1'),
+    // Sólo modos competitivos: el 3v3 no tiene ranking (ADR-033).
+    mode: CompetitiveModeSchema.optional().default('1v1'),
     cursor: z
       .string()
       .regex(/^\d{1,7}$/)
@@ -36,7 +37,7 @@ export type LeaderboardEntry = z.infer<typeof LeaderboardEntrySchema>;
 
 export const LeaderboardResponseSchema = z.object({
   period: RankingPeriodSchema,
-  mode: GameModeSchema,
+  mode: CompetitiveModeSchema,
   season: z.object({
     id: z.string().uuid(),
     label: z.string(),
@@ -56,7 +57,8 @@ export const PlayerRatingProfileSchema = z.object({
   seasonId: z.string().uuid(),
   seasonLabel: z.string(),
   seasonEndsAt: z.string().datetime(),
-  mode: GameModeSchema,
+  /** Perfiles de rating: sólo modos competitivos (1v1 y 2v2). */
+  mode: CompetitiveModeSchema,
   rating: z.number().finite().nonnegative(),
   deviation: z.number().finite().min(30).max(350),
   division: RatingDivisionSchema,

@@ -288,6 +288,16 @@ describe('M3 Resource Authorization (User A vs User B), Privacy, Export, Deletio
           envido: { resolved: 0, won: 0, winRate: 0 },
           truco: { resolved: 0, won: 0, winRate: 0 },
         },
+        '3v3': {
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          abandons: 0,
+          winRate: 0,
+          currentStreak: 0,
+          envido: { resolved: 0, won: 0, winRate: 0 },
+          truco: { resolved: 0, won: 0, winRate: 0 },
+        },
       },
     });
 

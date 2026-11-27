@@ -6,6 +6,8 @@ import {
   type MatchmakingQueueStatusResponse,
   MatchmakingQueueStatusResponseSchema,
   type RulesetCode,
+  isCompetitiveMode,
+  seatsForMode,
 } from '@truco/shared';
 import { DomainApiException } from '../../common/api-exception.js';
 import type { AuthenticatedPrincipal } from '../auth/guards/session-auth.guard.js';
@@ -43,9 +45,20 @@ export class MatchmakingService {
       );
     }
 
+    // El truco de 6 es social: no tiene cola competitiva (ADR-033). Se rechaza antes de
+    // encolar para que el jugador no quede esperando una partida que nunca se puntúa.
+    if (body.competitive && !isCompetitiveMode(body.mode)) {
+      throw new DomainApiException(
+        400,
+        'VALIDATION_ERROR',
+        'El truco de 6 (3v3) es un modo social y no tiene cola competitiva.',
+        { reason: 'COMPETITIVE_MODE_NOT_ALLOWED', mode: body.mode },
+      );
+    }
+
     const nowMs = this.config.nowFn();
     const expiresAtMs = nowMs + this.config.matchmakingTimeoutMs;
-    const quota = body.mode === '1v1' ? 2 : 4;
+    const quota = seatsForMode(body.mode);
 
     const competitiveProfile = body.competitive
       ? await this.ratingsService.getCompetitiveMatchmakingProfile(principal.userId, body.mode)

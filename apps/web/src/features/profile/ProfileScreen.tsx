@@ -1,5 +1,6 @@
 import type {
   AuthUserSummary,
+  GameMode,
   MeResponse,
   MatchOutcome,
   PrivacyVisibility,
@@ -472,9 +473,7 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
                     setDraftHistoryFilters((previous) => ({
                       ...previous,
                       mode:
-                        event.target.value === ''
-                          ? undefined
-                          : (event.target.value as '1v1' | '2v2'),
+                        event.target.value === '' ? undefined : (event.target.value as GameMode),
                     }))
                   }
                   className="min-h-[40px] w-full rounded-lg border border-ivory/20 bg-surface px-2 text-xs text-ivory"
@@ -482,6 +481,7 @@ export function ProfileScreen({ currentUser, onSessionChanged, onNavigate }: Pro
                   <option value="">{messagesEsAr.profile.historyFilterAllModes}</option>
                   <option value="1v1">1 vs 1</option>
                   <option value="2v2">2 vs 2</option>
+                  <option value="3v3">3 vs 3</option>
                 </select>
               </label>
               <label className="space-y-1 text-[11px] text-muted">

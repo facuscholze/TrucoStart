@@ -1,4 +1,4 @@
-import { LOBBY_WS_NAMESPACE, type PublicLobbyTableSummary } from '@truco/shared';
+import { LOBBY_WS_NAMESPACE, type GameMode, type PublicLobbyTableSummary } from '@truco/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { io as createSocketIoClient, type Socket } from 'socket.io-client';
 import {
@@ -12,7 +12,7 @@ export type LobbyWsStatus = 'connecting' | 'connected' | 'reconnecting' | 'offli
 export interface MatchedNotification {
   tableId: string;
   roomId: string;
-  mode: '1v1' | '2v2';
+  mode: GameMode;
   rulesetCode: string;
   seat: number;
   team: number;

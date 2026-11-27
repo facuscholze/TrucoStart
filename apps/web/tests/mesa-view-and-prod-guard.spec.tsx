@@ -234,3 +234,118 @@ describe('M5a GameTableView — Pure viewFor projection, legal-only CallTray, Re
     expect(totalGzipBytes).toBeLessThan(200 * 1024);
   });
 });
+
+describe('M10b mesa de seis — tres equipos en pantalla', () => {
+  const SIX_SERVER_VIEW: ServerPlayerView = {
+    ...SAMPLE_SERVER_VIEW,
+    seats: [0, 1, 2, 3, 4, 5].map((seat) => ({
+      seat,
+      team: seat % 3,
+      remainingCardCount: 3,
+      folded: false,
+    })),
+    scoresByTeam: { '0': 12, '1': 9, '2': 7 },
+  };
+
+  const renderSixSeatTable = (overrides: Partial<ServerPlayerView> = {}) =>
+    render(
+      <GameTableView
+        roomId="room-test-six"
+        joinCode="T6S3V3"
+        connectionStatus="connected"
+        tableStatus="IN_GAME"
+        seats={[0, 1, 2, 3, 4, 5].map((seat) => ({
+          seat,
+          team: seat % 3,
+          userId: `u-${seat}`,
+          nickname: `Jugador ${seat}`,
+          ready: true,
+          isBot: false,
+          connected: true,
+        }))}
+        myUserId="u-0"
+        view={{ ...SIX_SERVER_VIEW, ...overrides }}
+        seedCommitment={'a'.repeat(64)}
+        turnDeadlineMs={1_800_000_015_000}
+        isTurnWarning={false}
+        peerGraceDeadlinesBySeat={new Map()}
+        speechBubblesBySeat={new Map()}
+        eventFeed={['Mano #2']}
+        matchEnded={null}
+        toastMessage={null}
+        defaultCallTrayOpen={false}
+        nowMsOverride={1_800_000_000_000}
+        onMarkReady={() => undefined}
+        onPlayCard={() => undefined}
+        onCallBid={() => undefined}
+        onRespondCall={() => undefined}
+        onFoldHand={() => undefined}
+        onSendSignal={() => undefined}
+        onSendQuickChat={() => undefined}
+        onRequestRematch={() => undefined}
+        onLeaveTable={() => undefined}
+      />,
+    );
+
+  it('muestra el distintivo del truco de 6 y una columna de tanteador por equipo', () => {
+    renderSixSeatTable();
+    expect(screen.getAllByText(/Truco de 6 · 3 equipos/i).length).toBeGreaterThan(0);
+    // Tres equipos con sus puntajes, no un duelo "nosotros contra ellos".
+    const tanteador = screen.getByLabelText(/Nos\. 12.*Ellos 2 9.*Ellos 3 7/);
+    expect(tanteador.textContent).toContain('12');
+    expect(tanteador.textContent).toContain('7');
+  });
+
+  it('no muestra el distintivo cuando la mesa tiene dos equipos', () => {
+    render(
+      <GameTableView
+        roomId="room-test-duel"
+        joinCode="K7P4M2"
+        connectionStatus="connected"
+        tableStatus="IN_GAME"
+        seats={[
+          {
+            seat: 0,
+            team: 0,
+            userId: 'u-0',
+            nickname: 'FacuCordoba',
+            ready: true,
+            isBot: false,
+            connected: true,
+          },
+          {
+            seat: 1,
+            team: 1,
+            userId: 'u-1',
+            nickname: 'LuciaDelSur',
+            ready: true,
+            isBot: false,
+            connected: true,
+          },
+        ]}
+        myUserId="u-0"
+        view={SAMPLE_SERVER_VIEW}
+        seedCommitment={'a'.repeat(64)}
+        turnDeadlineMs={null}
+        isTurnWarning={false}
+        peerGraceDeadlinesBySeat={new Map()}
+        speechBubblesBySeat={new Map()}
+        eventFeed={[]}
+        matchEnded={null}
+        toastMessage={null}
+        defaultCallTrayOpen={false}
+        nowMsOverride={1_800_000_000_000}
+        onMarkReady={() => undefined}
+        onPlayCard={() => undefined}
+        onCallBid={() => undefined}
+        onRespondCall={() => undefined}
+        onFoldHand={() => undefined}
+        onSendSignal={() => undefined}
+        onSendQuickChat={() => undefined}
+        onRequestRematch={() => undefined}
+        onLeaveTable={() => undefined}
+      />,
+    );
+    expect(screen.queryByText(/Truco de 6 · 3 equipos/i)).toBeNull();
+  });
+});

@@ -294,13 +294,23 @@ export function useLiveGameRoom({
               const scores = (p['scoresByTeam'] as Record<string, number>) ?? {};
               setView((latestView) => {
                 const myTeam = latestView?.myTeam ?? 0;
-                const otherTeam = myTeam === 0 ? 1 : 0;
                 const target = latestView?.ruleset.targetScore ?? 30;
+                // En el truco de 6 hay dos rivales: el resumen lleva el tanteador completo de
+                // los tres equipos y cuál es el mío, en vez de inventar un "ellos" único.
+                const teamScores = Object.fromEntries(
+                  Object.entries(scores).map(([team, score]) => [team, Number(score)]),
+                );
+                const otherTeam = Object.keys(scores)
+                  .map(Number)
+                  .filter((team) => team !== myTeam)
+                  .sort((a, b) => a - b)[0];
                 setMatchEnded({
                   matchId: String(p['matchId'] ?? ''),
                   winnerTeam: Number(p['winnerTeam'] ?? 0),
                   usScore: Number(scores[String(myTeam)] ?? 0),
                   themScore: Number(scores[String(otherTeam)] ?? 0),
+                  teamScores,
+                  myTeam,
                   targetScore: target,
                   reason: String(p['reason'] ?? 'TARGET_SCORE_REACHED'),
                   seedCommitment: String(p['seedCommitment'] ?? ''),

@@ -8,7 +8,9 @@ import {
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
+  COMPETITIVE_MODES,
   CompetitiveReviewListResponseSchema,
+  isCompetitiveMode,
   LeaderboardResponseSchema,
   PlayerRatingResponseSchema,
   type GameMode,
@@ -53,7 +55,7 @@ import {
 import { RATING_RUNTIME_CONFIG, type RatingRuntimeConfig } from './ratings.config.js';
 import { UsersRepository } from '../users/users.repository.js';
 
-const GAME_MODES = ['1v1', '2v2'] as const satisfies readonly GameMode[];
+const GAME_MODES = COMPETITIVE_MODES;
 type ReviewSignal =
   'REPEATED_OPPONENTS' | 'SHORT_MATCH' | 'COORDINATED_ABANDONS' | 'NEW_ACCOUNT_FEEDING';
 
@@ -244,6 +246,9 @@ export class RatingsService implements OnApplicationBootstrap, OnApplicationShut
         .for('update')
         .limit(1);
       if (!match || !match.isCompetitive || !match.endedAt) return false;
+      // El truco de 6 (3v3) queda fuera del ranking aunque llegue marcado como competitivo
+      // (ADR-033): el marcador de "competitivo" lo puede fijar el cliente al crear la mesa.
+      if (!isCompetitiveMode(match.mode)) return false;
 
       const [existingJob] = await tx
         .select({ matchId: ratingJobsTable.matchId })

@@ -24,6 +24,18 @@ const PUBLIC_ROUTES = [
 ] as const;
 const AUTHENTICATED_ROUTES = ['/lobby', '/progreso', '/perfil', '/amigos'] as const;
 
+/**
+ * La mesa de 6 (`3v3`) sólo existe en la mesa de desarrollo: el motor de bots corre en el
+ * navegador, así que se audita sin base de datos. Es el único lugar donde se pueden ver los
+ * seis asientos, el tanteador de tres equipos y la tira extra sin depender de otros cinco
+ * jugadores conectados. Las necesidades del modo se comparan con el 2v2 en la misma corrida.
+ */
+const DEV_SCENES = [
+  { route: '/dev/mesa?mode=3v3&scene=midhand', label: 'mesa-seis' },
+  { route: '/dev/mesa?mode=3v3&scene=calls', label: 'mesa-seis-cantos' },
+  { route: '/dev/mesa?mode=3v3&scene=result', label: 'mesa-seis-resultado' },
+] as const;
+
 test('audita WCAG 2.2 A/AA en rutas públicas, estados autenticados y mesa de práctica', async () => {
   test.setTimeout(240_000);
   let browser: Browser | undefined;
@@ -196,6 +208,17 @@ test('audita WCAG 2.2 A/AA en rutas públicas, estados autenticados y mesa de pr
       await page.getByTestId('practice-hint-button').click();
       await page.getByTestId('practice-hint-text').waitFor({ timeout: 20_000 });
       await analyzeCurrentPage('mesa-practica-con-pista');
+
+      // Truco de 6: escenas de la mesa de desarrollo (seis asientos y tres equipos).
+      if (process.env['E2E_DEV_MESA'] === '1') {
+        for (const scene of DEV_SCENES) {
+          await page.goto(`${BASE_URL}${scene.route}`, { waitUntil: 'domcontentloaded' });
+          await page
+            .getByRole('region', { name: /Mesa de truco en vivo/i })
+            .waitFor({ timeout: 60_000 });
+          await analyzeCurrentPage(scene.label);
+        }
+      }
 
       await context.close();
     }

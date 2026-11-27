@@ -76,6 +76,8 @@ export interface ServerPlayerView {
   readonly mySeat: number;
   readonly myTeam: number;
   readonly seats: readonly ServerPublicSeat[];
+  /** Los equipos de la mesa, en orden de asiento. Con 3 equipos (3v3) hay tres entradas. */
+  readonly teams?: readonly number[];
   readonly scoresByTeam: Readonly<Record<string, number>>;
   readonly winnerTeam: number | null;
   readonly abandonedBySeat: number | null;
@@ -233,21 +235,49 @@ export interface RelativeSeatLayout {
   readonly topSeat: number;
   readonly leftSeat: number | null;
   readonly rightSeat: number | null;
+  /**
+   * Asientos que no entran en la mesa de 4 posiciones. Sólo el truco de 6 (3v3) los usa: se
+   * dibujan en una tira extra debajo de la mesa, con su equipo y su turno bien visibles.
+   */
+  readonly extraSeats: readonly number[];
 }
 
+/**
+ * Posiciones de la mesa relativas a mi asiento, con el orden de turnos (antihorario) a la vista.
+ *
+ * - 2 asientos (1v1): yo abajo, el rival arriba.
+ * - 4 asientos (2v2): yo abajo, el de mi izquierda... es decir el siguiente en el orden de
+ *   turnos a mi derecha, el compañero arriba y el otro rival a la izquierda.
+ * - 6 asientos (3v3): yo abajo, el compañero arriba y los dos rivales a los costados (el que
+ *   juega después de mí a la derecha). Los dos asientos que sobran van a la tira inferior.
+ */
 export function resolveRelativeSeats(mySeat: number, totalSeats: number): RelativeSeatLayout {
-  if (totalSeats === 4) {
+  const total = Math.max(2, totalSeats);
+  const at = (offset: number) => (mySeat + offset) % total;
+
+  if (total >= 6) {
     return {
       bottomSeat: mySeat,
-      rightSeat: (mySeat + 1) % 4,
-      topSeat: (mySeat + 2) % 4,
-      leftSeat: (mySeat + 3) % 4,
+      rightSeat: at(1),
+      topSeat: at(3),
+      leftSeat: at(5),
+      extraSeats: [at(2), at(4)],
+    };
+  }
+  if (total === 4) {
+    return {
+      bottomSeat: mySeat,
+      rightSeat: at(1),
+      topSeat: at(2),
+      leftSeat: at(3),
+      extraSeats: [],
     };
   }
   return {
     bottomSeat: mySeat,
-    topSeat: (mySeat + 1) % Math.max(2, totalSeats),
+    topSeat: at(1),
     leftSeat: null,
     rightSeat: null,
+    extraSeats: [],
   };
 }

@@ -4,6 +4,31 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ---
 
+## [Unreleased] — 2026-11-26 (M10b, entrega 1: truco de 6 `3v3`)
+
+### Agregado
+
+- **Modo `3v3` (truco de 6):** tres equipos de dos en seis asientos alternados `0,1,2,0,1,2`, con compañeros enfrentados. Motor, contrato compartido, game-server, API, web y admin de punta a punta.
+- `packages/shared/src/lobby/game-mode.ts` es la única fuente de la geometría de las mesas (`seatsForMode`, `teamCountForMode`, `teamForSeat`) y de la separación entre modos sociales y competitivos (`COMPETITIVE_MODES`, `TOURNAMENT_MODES`).
+- `resolveRespondingTeam` en el motor: con dos rivales responde el más cercano en orden de turnos (`NEXT_IN_TURN`, omisión) o el de mayor puntaje (`HIGHEST_SCORE`), configurable por `RuleSet`.
+- Mesa de seis en la web: seis asientos con tira extra, tanteador de tres equipos y cartel de fin con una columna por equipo. Lobby, inicio y práctica ofrecen el modo; el perfil filtra el historial por `3v3`.
+- `apps/web/e2e/m10b-six-seat.spec.ts`: partida real de seis por WebSocket con la mesa del dueño en un navegador de 390 px, como paso propio del CI.
+- `docs/RULES.md` §13, ADR-033 y apartado M10b en `docs/STATE.md`.
+
+### Corregido (encontrado por el E2E y la auditoría visual)
+
+- **Un asiento con dos conexiones quedaba mudo:** el actor de sala guardaba un solo socket por asiento, así que un segundo `join` del mismo jugador (dos pestañas, o la mesa en el navegador junto a un cliente de juego) dejaba al primero sin eventos sin desconectarlo. Ahora cada asiento tiene un conjunto de sockets y sólo el último que se va dispara la desconexión (`multi-socket-seat.spec.ts`).
+- El paño de la mesa no podía encogerse (`flex: 1 1 600px` sin `minWidth: 0`): el documento desbordaba a 385 px en una pantalla de 360. La fila de bazas ahora también envuelve las cartas.
+- El tanteador de tres equipos recortaba el nombre del equipo en el panel angosto; usa etiquetas cortas con el nombre completo accesible.
+- El historial de la mesa (`ul` con scroll) no era enfocable con teclado.
+
+### Notas de contrato
+
+- El `3v3` es **social**: no puntúa, no tiene torneos ni ligas (ADR-033). `/v1/rankings?mode=3v3` responde `400`; la cola competitiva responde `400 COMPETITIVE_MODE_NOT_ALLOWED`.
+- Las estadísticas del perfil sí registran el modo: `byMode` publica siempre las tres claves.
+
+---
+
 ## [Unreleased] — 2026-11-26 (Tanda de pulido UX sobre M0–M9c)
 
 ### Agregado

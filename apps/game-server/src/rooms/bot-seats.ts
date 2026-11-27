@@ -1,5 +1,5 @@
 import { chooseBotAction, createSeededRng, type PlayerView, viewFor } from '@truco/engine';
-import type { BotDifficulty, GameMode } from '@truco/shared';
+import { seatsForMode, teamForSeat, type BotDifficulty, type GameMode } from '@truco/shared';
 import type { PersistedSeatBinding } from '../store/game-store.interface.js';
 
 /** Identificador sintético de un asiento ocupado por un bot (nunca es una cuenta real). */
@@ -17,9 +17,9 @@ export function botNicknameFor(difficulty: BotDifficulty, seat: number): string 
   return `${BOT_NICKNAMES[difficulty]} ${seat + 1}`;
 }
 
-/** Cantidad de asientos de la mesa según el modo de juego. */
+/** Cantidad de asientos de la mesa según el modo de juego (1v1→2, 2v2→4, 3v3→6). */
 export function seatCountForMode(mode: GameMode): number {
-  return mode === '2v2' ? 4 : 2;
+  return seatsForMode(mode);
 }
 
 /**
@@ -35,7 +35,7 @@ export function buildBotSeats(params: {
   const humanSeat = params.humanSeat ?? 0;
   const seats: PersistedSeatBinding[] = [];
   for (let seat = 0; seat < total; seat++) {
-    const team = seat % 2;
+    const team = teamForSeat(params.mode, seat);
     if (seat === humanSeat) {
       seats.push({
         seat,

@@ -1,4 +1,4 @@
-import type { RulesetCode } from '@truco/shared';
+import type { RulesetCode, TournamentMode } from '@truco/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
 import { type AppDatabase, type AppTransaction, DRIZZLE_DB } from '../../db/database.provider.js';
@@ -29,7 +29,7 @@ export interface TournamentRow {
   readonly format: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION';
   readonly visibility: 'OFFICIAL' | 'PRIVATE';
   readonly status: 'DRAFT' | 'REGISTRATION' | 'CHECK_IN' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
-  readonly mode: '1v1' | '2v2';
+  readonly mode: TournamentMode;
   readonly rulesetId: string;
   readonly rulesetCode: RulesetCode;
   readonly targetScore: number;
@@ -476,7 +476,7 @@ export class TournamentsRepository {
   /** Ratings vigentes de la temporada activa para sembrar el cuadro. */
   async ratingsFor(
     userIds: readonly string[],
-    mode: '1v1' | '2v2',
+    mode: TournamentMode,
     tx?: AppTransaction,
   ): Promise<Map<string, number>> {
     if (userIds.length === 0) return new Map();

@@ -10,6 +10,8 @@ export const designTokens = {
     textMuted: '#C9C2B4',
     accentGold: '#E0B84C',
     accentSky: '#6FB1E0',
+    /** Tercer equipo (truco de 6). Elegido para distinguirse del oro y del celeste en daltonismo. */
+    accentClay: '#D98B5F',
     danger: '#D6523F',
     dangerTextOnSurface: '#FF8F7E',
     success: '#4CB782',
@@ -28,3 +30,14 @@ export const designTokens = {
 } as const;
 
 export type DesignTokens = typeof designTokens;
+
+/** Paleta de equipos por índice. Con 3 equipos (truco de 6) se usa el tercer color. */
+export const TEAM_COLORS: readonly string[] = [
+  designTokens.colors.accentGold,
+  designTokens.colors.accentSky,
+  designTokens.colors.accentClay,
+];
+
+export function teamColor(team: number): string {
+  return TEAM_COLORS[Math.abs(team) % TEAM_COLORS.length]!;
+}

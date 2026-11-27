@@ -1,4 +1,4 @@
-import { designTokens } from '../tokens/theme.js';
+import { designTokens, teamColor } from '../tokens/theme.js';
 
 export interface AvatarProps {
   readonly nickname: string;
@@ -25,8 +25,7 @@ export function Avatar({
   connected,
   connectionLabel,
 }: AvatarProps) {
-  const isTeamZero = team % 2 === 0;
-  const ringColor = isTeamZero ? designTokens.colors.accentGold : designTokens.colors.accentSky;
+  const ringColor = teamColor(team);
   const initials = getInitials(nickname);
 
   return (

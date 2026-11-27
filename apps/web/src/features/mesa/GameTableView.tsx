@@ -16,6 +16,7 @@ import {
   QuickChat,
   ScoreBoard,
   type SpanishCardId,
+  TeamScoreBoard,
   Table,
   Toast,
 } from '@truco/ui';
@@ -164,6 +165,24 @@ export function GameTableView({
   const targetScore = view?.ruleset.targetScore ?? 30;
   const usScore = view ? Number(view.scoresByTeam[String(myTeam)] ?? 0) : 0;
   const themScore = view ? Number(view.scoresByTeam[String(otherTeam)] ?? 0) : 0;
+  // Truco de 6: la mesa tiene tres equipos y el tanteador de duelo no alcanza. Se arma una
+  // entrada por equipo, con el mío primero y los rivales por orden de asiento.
+  const teamScores = view
+    ? [
+        ...(view.teams ??
+          view.seats.map((s) => s.team).filter((team, idx, all) => all.indexOf(team) === idx)),
+      ]
+        .sort((a, b) => (a === myTeam ? -1 : b === myTeam ? 1 : a - b))
+        .map((team) => ({
+          team,
+          label:
+            team === myTeam
+              ? messagesEsAr.mesa.usLabelShort
+              : `${messagesEsAr.mesa.themLabelShort} ${team + 1}`,
+          score: Number(view.scoresByTeam[String(team)] ?? 0),
+        }))
+    : [];
+  const hasThreeTeams = teamScores.length > 2;
 
   const groupedCalls = groupServerLegalActions(view?.legalActions ?? []);
   const handCards = view ? projectHandCardsFromView(view, groupedCalls.playableCardIds) : [];
@@ -223,7 +242,7 @@ export function GameTableView({
           ? { onOpenProfile: () => onOpenPlayerProfile(profileUserId) }
           : {})}
         nickname={nickname}
-        team={info?.team ?? seatIdx % 2}
+        team={info?.team ?? pubSeat?.team ?? seatIdx % 2}
         isSelf={seatIdx === mySeatIndex}
         isMano={view?.hand.manoSeat === seatIdx}
         isActiveTurn={isActiveTurn}
@@ -275,14 +294,29 @@ export function GameTableView({
   const topBar = (
     <div className="flex items-center justify-between gap-2 flex-wrap">
       <div className="flex items-center gap-2 flex-wrap">
-        <ScoreBoard
-          compact
-          usLabel={messagesEsAr.mesa.usLabel}
-          themLabel={messagesEsAr.mesa.themLabel}
-          usScore={usScore}
-          themScore={themScore}
-          targetScore={targetScore}
-        />
+        {hasThreeTeams ? (
+          <span
+            className="flex flex-wrap items-center justify-center gap-x-1.5 text-xs font-bold tabular-nums text-ivory"
+            aria-label={teamScores.map((t) => `${t.label} ${t.score}`).join(', ')}
+          >
+            {teamScores.map((team, index) => (
+              <span key={`score-${team.team}`} className="whitespace-nowrap">
+                {index > 0 && <span aria-hidden="true"> · </span>}
+                {`${team.label} ${team.score}`}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <ScoreBoard
+            compact
+            usLabel={messagesEsAr.mesa.usLabel}
+            themLabel={messagesEsAr.mesa.themLabel}
+            usScore={usScore}
+            themScore={themScore}
+            targetScore={targetScore}
+          />
+        )}
+        {hasThreeTeams && <Badge variant="neutral">{messagesEsAr.mesa.threeTeamModeBadge}</Badge>}
         {view && (
           <Badge variant="gold">{messagesEsAr.mesa.handCounter(view.hand.handNumber)}</Badge>
         )}
@@ -447,8 +481,21 @@ export function GameTableView({
     </div>
   );
 
+  const extraSeatsStrip =
+    relSeats.extraSeats.length > 0 ? (
+      <div
+        className="flex items-center justify-center gap-2 flex-wrap"
+        aria-label={messagesEsAr.mesa.extraSeatsAria}
+      >
+        {relSeats.extraSeats.map((seatIdx) => (
+          <div key={`extra-${seatIdx}`}>{renderSeatSlot(seatIdx, true)}</div>
+        ))}
+      </div>
+    ) : null;
+
   const bottomArea = (
     <div className="space-y-2.5">
+      {extraSeatsStrip}
       {groupedCalls.pendingResponses.length > 0 && !callTrayOpen && (
         <div className="flex flex-wrap items-center justify-center gap-2">
           {groupedCalls.pendingResponses.map((resp) => {
@@ -507,13 +554,17 @@ export function GameTableView({
         <h2 className="font-display text-base font-bold text-gold">
           {messagesEsAr.mesa.sidePanelScoreTitle}
         </h2>
-        <ScoreBoard
-          usLabel={messagesEsAr.mesa.usLabel}
-          themLabel={messagesEsAr.mesa.themLabel}
-          usScore={usScore}
-          themScore={themScore}
-          targetScore={targetScore}
-        />
+        {hasThreeTeams ? (
+          <TeamScoreBoard entries={teamScores} targetScore={targetScore} />
+        ) : (
+          <ScoreBoard
+            usLabel={messagesEsAr.mesa.usLabel}
+            themLabel={messagesEsAr.mesa.themLabel}
+            usScore={usScore}
+            themScore={themScore}
+            targetScore={targetScore}
+          />
+        )}
       </div>
 
       <CallTray
@@ -531,7 +582,13 @@ export function GameTableView({
         {eventFeed.length === 0 ? (
           <p className="text-xs text-muted">{messagesEsAr.mesa.sidePanelEmptyFeed}</p>
         ) : (
-          <ul className="space-y-1 text-xs text-ivory/90 max-h-40 overflow-y-auto">
+          // `tabIndex={0}`: la lista tiene scroll propio y, sin foco, quien navega con teclado
+          // no puede leer el historial completo (axe: scrollable-region-focusable).
+          <ul
+            tabIndex={0}
+            aria-label={messagesEsAr.mesa.sidePanelFeedTitle}
+            className="space-y-1 text-xs text-ivory/90 max-h-40 overflow-y-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
+          >
             {eventFeed.slice(-8).map((line, idx) => (
               <li key={idx} className="border-b border-ivory/10 pb-1">
                 {line}

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { SpanishRank, SpanishSuit } from '../cards/deck-catalog.js';
-import { designTokens } from '../tokens/theme.js';
+import { designTokens, teamColor } from '../tokens/theme.js';
 import { Badge } from './Badge.js';
 import { Card } from './Card.js';
 
@@ -84,6 +84,11 @@ export function Table({
           aria-label={tableAriaLabel}
           style={{
             flex: '1 1 600px',
+            // Sin `minWidth: 0` el paño no puede encogerse por debajo de su contenido mínimo:
+            // con tres equipos el tanteador y la tira de asientos suman más que la pantalla y
+            // el documento entero desborda a 360 px.
+            minWidth: 0,
+            maxWidth: '100%',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
@@ -164,7 +169,15 @@ export function Table({
                           {round.statusLabel && <Badge variant="gold">{round.statusLabel}</Badge>}
                         </div>
 
-                        <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'flex-end' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            justifyContent: 'center',
+                            gap: '0.35rem',
+                            alignItems: 'flex-end',
+                          }}
+                        >
                           {round.plays.map((p) => (
                             <div
                               key={`${round.roundIndex}-${p.seat}`}
@@ -180,10 +193,7 @@ export function Table({
                                 style={{
                                   fontSize: '0.64rem',
                                   fontWeight: 600,
-                                  color:
-                                    p.team % 2 === 0
-                                      ? designTokens.colors.accentGold
-                                      : designTokens.colors.accentSky,
+                                  color: teamColor(p.team),
                                 }}
                               >
                                 {p.playerNickname}

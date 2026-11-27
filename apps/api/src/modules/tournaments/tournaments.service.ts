@@ -9,6 +9,7 @@ import {
   type TournamentFormat,
   type TournamentListResponse,
   type TournamentMatchView,
+  type TournamentMode,
   type TournamentParticipantView,
   type TournamentPrizeView,
   type TournamentStanding,
@@ -2298,7 +2299,7 @@ export interface CreateInput {
   readonly visibility: 'OFFICIAL' | 'PRIVATE';
   readonly capacity: number;
   readonly rules: {
-    readonly mode: '1v1' | '2v2';
+    readonly mode: TournamentMode;
     readonly rulesetCode: string;
     readonly targetScore: number;
     readonly florEnabled: boolean;

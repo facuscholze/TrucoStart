@@ -1,4 +1,4 @@
-import { Badge, CallButton, Modal, ScoreBoard } from '@truco/ui';
+import { Badge, CallButton, Modal, ScoreBoard, TeamScoreBoard } from '@truco/ui';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
 import { ReportButton } from '../moderation/ReportButton.js';
 import type { ReportTarget } from '../moderation/ReportDialog.js';
@@ -8,6 +8,12 @@ export interface MatchEndedSummary {
   readonly winnerTeam: number;
   readonly usScore: number;
   readonly themScore: number;
+  /**
+   * Tanteador completo por equipo. En el truco de 6 hay tres equipos: con este mapa el modal
+   * muestra una columna por equipo en vez de resumir la mesa a "nosotros contra ellos".
+   */
+  readonly teamScores?: Readonly<Record<string, number>>;
+  readonly myTeam?: number;
   readonly targetScore: number;
   readonly reason: string;
   readonly seedCommitment: string;
@@ -39,6 +45,21 @@ export function MatchResultModal({
 }: MatchResultModalProps) {
   if (!summary) return null;
   const didWeWin = summary.winnerTeam === myTeam;
+  // Tres equipos en mesa: el tanteador de duelo no representa el resultado.
+  const threeTeams = Object.keys(summary.teamScores ?? {}).length > 2;
+  const teamEntries = threeTeams
+    ? Object.keys(summary.teamScores ?? {})
+        .map((team) => Number(team))
+        .sort((a, b) => (a === myTeam ? -1 : b === myTeam ? 1 : a - b))
+        .map((team) => ({
+          team,
+          label:
+            team === myTeam
+              ? messagesEsAr.mesa.usLabel
+              : `${messagesEsAr.mesa.themLabel} ${team + 1}`,
+          score: Number(summary.teamScores?.[String(team)] ?? 0),
+        }))
+    : [];
   const title = didWeWin ? messagesEsAr.result.modalTitleWin : messagesEsAr.result.modalTitleLoss;
   const reasonText =
     messagesEsAr.result.reasonLabels[summary.reason] ?? messagesEsAr.result.unknownReason;
@@ -66,22 +87,31 @@ export function MatchResultModal({
           data-testid="match-result-header"
         >
           <Badge variant={didWeWin ? 'success' : 'gold'}>
-            {messagesEsAr.result.finalScoreSummary(
-              summary.usScore,
-              summary.themScore,
-              summary.targetScore,
-            )}
+            {threeTeams
+              ? messagesEsAr.result.finalScoreSummaryThreeTeams(
+                  teamEntries.map((entry) => `${entry.label} ${entry.score}`).join(' · '),
+                  summary.targetScore,
+                )
+              : messagesEsAr.result.finalScoreSummary(
+                  summary.usScore,
+                  summary.themScore,
+                  summary.targetScore,
+                )}
           </Badge>
           <span className="text-xs text-muted">{reasonText}</span>
         </div>
 
-        <ScoreBoard
-          usLabel={messagesEsAr.mesa.usLabel}
-          themLabel={messagesEsAr.mesa.themLabel}
-          usScore={summary.usScore}
-          themScore={summary.themScore}
-          targetScore={summary.targetScore}
-        />
+        {threeTeams ? (
+          <TeamScoreBoard entries={teamEntries} targetScore={summary.targetScore} />
+        ) : (
+          <ScoreBoard
+            usLabel={messagesEsAr.mesa.usLabel}
+            themLabel={messagesEsAr.mesa.themLabel}
+            usScore={summary.usScore}
+            themScore={summary.themScore}
+            targetScore={summary.targetScore}
+          />
+        )}
 
         <div className="rounded-xl bg-surface p-3 border border-ivory/15 space-y-1.5 text-xs">
           <div className="font-bold text-gold">{messagesEsAr.result.fairPlayHeading}</div>

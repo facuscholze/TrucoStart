@@ -4,11 +4,10 @@ import {
   evaluateHandWinnerFromRounds,
   evaluateRound,
   findFirstActiveSeatFrom,
-  findNextOpposingTeam,
   findNextTurnSeatInRound,
-  selectActiveResponderSeat,
   shuffleDeckWithPrngState,
 } from './rounds.js';
+import { resolveRespondingSeat, resolveRespondingTeam } from './team-responder.js';
 import type { RuleSet } from './rulesets.js';
 import type {
   CompletedRound,
@@ -179,13 +178,15 @@ export function resumeAfterSecondaryTrack(state: GameState, events: DomainEvent[
       state.scoresByTeam,
     );
     if (resumedTruco.ok) {
-      const responderTeam = findNextOpposingTeam(
+      const responderTeam = resolveRespondingTeam(
         suspended.seat,
         suspended.team,
         state.seats,
         state.hand.foldedSeats,
+        state.scoresByTeam,
+        state.ruleset.teamResponderMode,
       );
-      const activeSeat = selectActiveResponderSeat(
+      const activeSeat = resolveRespondingSeat(
         suspended.seat,
         responderTeam,
         state.hand.manoSeat,

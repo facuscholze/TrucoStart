@@ -27,9 +27,17 @@ export const messagesEsAr = {
   },
   mesa: {
     liveTableAria: 'Mesa de truco en vivo',
+    extraSeatsAria: 'Otros asientos de la mesa de seis',
+    threeTeamModeBadge: 'Truco de 6 · 3 equipos',
     handCounter: (handNumber: number) => `Mano #${handNumber}`,
     usLabel: 'Nosotros',
     themLabel: 'Ellos',
+    /**
+     * Etiquetas del tanteador de tres equipos. El anotador del panel lateral es angosto y el
+     * nombre largo no entra: gana el color y el número, con el nombre completo en el tooltip.
+     */
+    usLabelShort: 'Nos.',
+    themLabelShort: 'Ellos',
     selfBadge: 'Vos',
     botBadge: 'Bot',
     teammateBadge: 'Compañero',
@@ -122,6 +130,8 @@ export const messagesEsAr = {
     modalTitleLoss: 'Se nos escapó esta vuelta',
     finalScoreSummary: (us: number, them: number, target: number) =>
       `Resultado final a ${target}: Nosotros ${us} · Ellos ${them}`,
+    finalScoreSummaryThreeTeams: (scores: string, target: number) =>
+      `Resultado final a ${target}: ${scores}`,
     reasonLabels: {
       TARGET_SCORE: 'Partida definida por alcanzar el puntaje objetivo.',
       TARGET_SCORE_REACHED: 'Partida definida por alcanzar el puntaje objetivo.',
@@ -212,6 +222,7 @@ export const messagesEsAr = {
       'Mesa local contra bots determinísticos del motor · Excluida del build de producción',
     mode1v1: '1 vs 1',
     mode2v2: '2 vs 2',
+    mode3v3: '3 vs 3 (Truco de 6)',
     ruleset15: 'A 15 sin Flor',
     ruleset30Flor: 'A 30 con Flor',
     sceneMidhand: 'Escena: mitad de mano',

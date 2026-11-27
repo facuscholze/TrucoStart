@@ -236,11 +236,13 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @truco/web exec playwright install --with-deps chromium
 
-      # Los dos torneos se juegan de punta a punta contra la API, el game-server y la base
-      # reales: el 1v1 con dos navegadores por cruce y el 2v2 con los cuatro asientos por
-      # WebSocket (cuatro pestañas por cruce se pasaban del tiempo del job). Tarda minutos,
-      # no segundos: la salida se guarda para publicarla como anotación si falla.
+      # Los dos torneos y la mesa de 6 se juegan de punta a punta contra la API, el
+      # game-server y la base reales: el 1v1 con dos navegadores por cruce, el 2v2 con los
+      # cuatro asientos por WebSocket (cuatro pestañas por cruce se pasaban del tiempo del
+      # job) y el 3v3 con cinco asientos por WebSocket y el sexto en la mesa del navegador.
+      # Tarda minutos, no segundos: la salida se guarda para publicarla si falla.
       - name: Tournament E2E (llave, partidas y campeón en 1v1 y 2v2)
+        id: tournament-e2e
         run: |
           set -o pipefail
           pnpm --filter @truco/web exec playwright test \
@@ -248,8 +250,25 @@ jobs:
             e2e/m10a-tournament-2v2.spec.ts \
             2>&1 | tee /tmp/tournament.log
 
+      # El truco de 6 corre aparte: si un torneo se cae, la mesa de seis se sigue viendo
+      # en su propio paso y viceversa.
+      - name: Six-seat E2E (mesa 3v3 real con cinco WebSocket y un navegador)
+        id: six-seat-e2e
+        run: |
+          set -o pipefail
+          pnpm --filter @truco/web exec playwright test \
+            e2e/m10b-six-seat.spec.ts \
+            2>&1 | tee /tmp/six-seat.log
+
+      - name: Publish six-seat failure details
+        if: steps.six-seat-e2e.outcome == 'failure'
+        run: |
+          message=$(tail -80 /tmp/six-seat.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Six-seat E2E failed::${message}"
+          exit 1
+
       - name: Publish tournament failure details
-        if: failure()
+        if: steps.tournament-e2e.outcome == 'failure'
         run: |
           message=$(tail -80 /tmp/tournament.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Tournament E2E failed::${message}"

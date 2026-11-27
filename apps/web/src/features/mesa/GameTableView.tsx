@@ -311,6 +311,7 @@ export function GameTableView({
             targetScore={targetScore}
           />
         )}
+        {hasThreeTeams && <Badge variant="neutral">{messagesEsAr.mesa.threeTeamModeBadge}</Badge>}
         {view && (
           <Badge variant="gold">{messagesEsAr.mesa.handCounter(view.hand.handNumber)}</Badge>
         )}

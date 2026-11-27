@@ -7,7 +7,8 @@ Este documento especifica las reglas formales del Truco Argentino implementadas 
 ## 1. Arquitectura General y Soporte Nativo de $N$ Asientos
 
 - **Mazo español de 40 cartas**: 4 palos (`espadas`, `bastos`, `oros`, `copas`) con valores `1, 2, 3, 4, 5, 6, 7, 10, 11, 12` (sin `8`, `9` ni comodines).
-- **$N$ asientos y $K$ equipos**: el motor soporta nativamente entre `2` y `13` asientos contiguos (`0 .. N-1`) repartidos equitativamente en $K \ge 2$ equipos intercalados (`seat % K === team`). En el MVP del lobby se habilitan mesas **1v1** (`N = 2`) y **2v2** (`N = 4`); las simulaciones verifican también **3v3** (`N = 6`).
+- **$N$ asientos y $K$ equipos**: el motor soporta nativamente entre `2` y `13` asientos contiguos (`0 .. N-1`) repartidos equitativamente en $K \ge 2$ equipos. El lobby habilita **1v1** (`N = 2`, $K = 2$), **2v2** (`N = 4`, $K = 2$) y **3v3** (`N = 6`, $K = 3$); las variantes de 6 asientos están detalladas en el § 13.
+  La geometría de cada modo (asientos, cantidad de equipos y equipo de cada asiento) vive en un solo lugar, `@truco/shared` (`SEATS_BY_MODE`, `teamCountForMode`, `teamForSeat`); API, game-server y web la consumen de ahí. Con `team = seat % K` el compañero queda **enfrentado** (0–3, 1–4, 2–5 en el 3v3) y el orden de turnos alterna los tres equipos.
 - **Sentido de giro y mano**: el reparto y el orden de turno avanzan en sentido antihorario (`(seat + 1) % N`). En la Mano #1 es mano el asiento `0`; al iniciar cada mano siguiente, `manoSeat` rota a `(manoSeat + 1) % N`.
 - **Distancia a la mano (`seatHandOrder`)**: para cualquier desempate posicional en $N$ asientos se emplea el orden relativo respecto al jugador mano de la mano actual:
   $$\text{orden}(s) = (s - \text{manoSeat} + N) \bmod N$$
@@ -249,5 +250,90 @@ Dos casos distintos, y la diferencia importa:
 - El campeón son **todas las personas del equipo**: cada integrante queda `WINNER` y cobra
   su premio por el libro mayor (una fila de `tournament_awards` por persona, con
   `team_id`), con el único `(torneo, posición, persona)` que hace idempotente el reintento.
+
+---
+
+## 13. Truco de 6 (`3v3`): tres equipos de dos
+
+El MASTER_PROMPT deja abiertas dos variantes de seis jugadores: **tres equipos de dos** o **dos
+equipos de tres**. Se implementa la primera y el motor acepta ambas; la decisión de producto está
+en el ADR-033. Esta sección fija lo que la variante elegida significa en la práctica.
+
+### 13.1 Por qué tres equipos de dos
+
+- **El compañero sigue siendo uno.** Enseñar el 2v2 y saltar al "2 de 3" cambia la unidad de
+  juego (el equipo de tres) y con ella las señas, el reparto y la lectura de la mesa. Con tres
+  equipos de dos, todo lo aprendido en 2v2 se traslada: uno cuida a un compañero, como siempre.
+- **La mesa alterna equipos.** Con `team = seat % 3`, el orden de turnos es `0, 1, 2, 0, 1, 2`:
+  nunca juegan dos compañeros seguidos, y el reparto de cartas queda equilibrado entre los tres.
+- **El motor ya lo soportaba.** La validación de asientos (`2..13`, equipos de igual tamaño) y el
+  simulador con `numTeams` existían desde M1; lo que faltaba era el lobby, la mesa web y las
+  reglas de "quién contesta" con más de dos equipos.
+
+### 13.2 Reparto de asientos y equipos
+
+| Modo | Asientos | Equipos | Compañeros    | Rivales de cada asiento |
+| ---- | -------- | ------- | ------------- | ----------------------- |
+| 1v1  | 2        | 2       | —             | 1                       |
+| 2v2  | 4        | 2       | 0–2, 1–3      | 2                       |
+| 3v3  | 6        | 3       | 0–3, 1–4, 2–5 | 4                       |
+
+El asiento es siempre `0..N-1`, `team = seat % 3` y la mesa se sienta por orden de llegada (o por
+`preferredSeat` cuando el jugador lo pide). La mano rota `(manoSeat + 1) % 6`.
+
+### 13.3 Quién contesta un canto (`teamResponderMode`)
+
+En el 2v2 el rival es uno solo y no hay nada que decidir. Con tres equipos, el canto de un equipo
+involucra a **dos** rivales, así que el RuleSet lo define:
+
+- **`NEXT_IN_TURN`** (por defecto): contesta el equipo del **primer asiento activo** que sigue al
+  cantor en el sentido de turnos. Es el criterio más conservador, el mismo que ya usaba el motor
+  (`findNextOpposingTeam`) y con dos equipos coincide exactamente con el comportamiento previo.
+- **`HIGHEST_SCORE`** _(configurable)_: contesta el rival con **más puntos**; a igualdad, el más
+  cercano al cantor. Sirve para clubes donde "el que va ganando contesta primero".
+
+El asiento concreto que queda habilitado lo resuelve `responderSelectionMode` (§ 1), con un ajuste
+para el 3v3: en `ANY_TEAM_MEMBER` se elige el **asiento activo del equipo rival más cercano al
+cantor**, no "el primero del arreglo de asientos". Si el equipo elegido ya no tiene asientos
+activos, se saltea y contesta el otro rival; si no queda ninguno, la mano ya se resolvió por
+`FOLD_HAND` (§ 8).
+
+### 13.4 Envido y Flor con tres equipos
+
+- **Envido**: canta el asiento en turno y contesta el rival que define § 13.3. El tanto se compara
+  entre **todos** los asientos activos sin Flor (igual que en 2v2) y el ganador se lleva los puntos
+  para **su** equipo. **Empate de tanto: gana el más cercano a la mano** (`resolveShowdownWinner`
+  con `seatHandOrder`), criterio único para 2, 4 y 6 asientos.
+- **Cadena de cantos**: sigue vetada para el mismo equipo (`ENVIDO_NOT_ALLOWED`); con tres equipos,
+  dos rivales pueden subir el canto antes de que se responda.
+- **Flor**: si varios rivales tienen Flor, contesta **el primero en el orden de turnos desde el
+  cantor** (antes se tomaba el primero del arreglo de asientos, que no es lo mismo con tres
+  equipos). Los que no contestan conservan la contraflor cuando el reparto lo permite.
+
+### 13.5 Truco, rondas y mano
+
+- **Truco/Retruco/Vale Cuatro**: el nivel lo sube quien no cantó el último; la alternancia de
+  equipos es la misma que en 2v2 y el "no quiero" paga al equipo cantor.
+- **Rondas**: juegan los seis asientos; gana la baza el equipo dueño de la carta más alta. Una
+  **parda** entre equipos distintos no adjudica la baza y la abre el mano (o el ganador anterior).
+  Gana la mano quien se lleva **2 de 3** bazas (§ 3) y los empates se resuelven como siempre.
+- **Irse al mazo**: `FOLD_HAND` saca al asiento de la mano; si su equipo queda sin asientos
+  activos, el equipo sale de la mano. Si quedan dos equipos activos, la mano sigue entre ellos con
+  las mismas reglas (nunca se regalan puntos por ausencia).
+
+### 13.6 Señas y privacidad
+
+Las señas siguen siendo un canal **de equipo**: se ven las del propio equipo y de nadie más, con el
+mismo cupo por mano. Con tres equipos hay dos rivales a los que no se les puede filtrar nada, y
+`viewFor` / `projectEventsForSeat` son la única salida: un test property-based recorre trayectorias
+de 6 asientos y verifica que ninguna vista ni ningún evento contiene cartas sin jugar de otro
+asiento ni señas de otro equipo.
+
+### 13.7 Ranking, torneos y ligas
+
+El truco de 6 es **social**: no suma al ranking competitivo (`COMPETITIVE_MODES = ['1v1','2v2']`),
+no admite cola competitiva (se rechaza con `COMPETITIVE_MODE_NOT_ALLOWED`), no tiene torneos
+(`TournamentMode = '1v1' | '2v2'`) ni ligas. El motivo, los detalles y las alternativas están en el
+ADR-033. Las estadísticas del perfil **sí** registran el modo (`byMode['3v3']`).
 
 ---

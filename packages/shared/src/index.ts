@@ -1,5 +1,7 @@
 export * from './auth/auth.schema.js';
 export * from './auth/nickname.js';
+export * from './competition/league.schema.js';
+export * from './competition/standings.js';
 export * from './constants/app.js';
 export * from './env/env.schema.js';
 export * from './errors/error-codes.js';

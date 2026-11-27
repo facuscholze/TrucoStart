@@ -11,6 +11,7 @@ import {
   viewFor,
 } from '@truco/engine';
 import {
+  type GameMode,
   QUICK_CHAT_PHRASES,
   type QuickChatPhraseId,
   type RoomSeatInfo,
@@ -28,6 +29,12 @@ import { messagesEsAr } from '../i18n/messages.es-AR.js';
 
 export type DevMesaScene = 'midhand' | 'calls' | 'reconnecting' | 'result';
 
+const DEV_MODE_LABELS: Readonly<Record<GameMode, string>> = {
+  '1v1': messagesEsAr.devMesa.mode1v1,
+  '2v2': messagesEsAr.devMesa.mode2v2,
+  '3v3': messagesEsAr.devMesa.mode3v3,
+};
+
 const DEV_SEATS_1V1: PlayerSeat[] = [
   { seat: 0, team: 0, playerId: 'dev-human-0' },
   { seat: 1, team: 1, playerId: 'dev-bot-1' },
@@ -40,13 +47,35 @@ const DEV_SEATS_2V2: PlayerSeat[] = [
   { seat: 3, team: 1, playerId: 'dev-bot-3' },
 ];
 
-const DEV_NICKNAMES = ['FacuCordoba', 'Bot Gaucho', 'Compa Sur', 'Bot Malevo'] as const;
+const DEV_SEATS_3V3: PlayerSeat[] = [
+  { seat: 0, team: 0, playerId: 'dev-human-0' },
+  { seat: 1, team: 1, playerId: 'dev-bot-1' },
+  { seat: 2, team: 2, playerId: 'dev-bot-2' },
+  { seat: 3, team: 0, playerId: 'dev-bot-3' },
+  { seat: 4, team: 1, playerId: 'dev-bot-4' },
+  { seat: 5, team: 2, playerId: 'dev-bot-5' },
+];
+
+const DEV_SEATS_BY_MODE: Readonly<Record<GameMode, PlayerSeat[]>> = {
+  '1v1': DEV_SEATS_1V1,
+  '2v2': DEV_SEATS_2V2,
+  '3v3': DEV_SEATS_3V3,
+};
+
+const DEV_NICKNAMES = [
+  'FacuCordoba',
+  'Bot Gaucho',
+  'Compa Sur',
+  'Bot Malevo',
+  'Compa Norte',
+  'Bot Cordobés',
+] as const;
 const DEMO_SEED_COMMITMENT = '8f4b2e91c7d3a05612e4b908f17c3a65d9024e7b81c6a53f20d19e847b6c5a12';
 const DEMO_SEED_REVEAL = '3a79c15e04d28b6f91e3a74c58d02f196b4e8c72a10d5f93e284b761c09d3e4f';
 const FIXED_DEMO_NOW_MS = 1_800_000_000_000;
 
 function buildSceneState(
-  mode: '1v1' | '2v2',
+  mode: GameMode,
   use30Flor: boolean,
   scene: DevMesaScene,
   seed = 20261113,
@@ -56,7 +85,7 @@ function buildSceneState(
   readonly bubbles: Map<number, string>;
 } {
   const ruleset = use30Flor ? AR_STANDARD_V1 : AR_CORTO_15_V1;
-  const players = mode === '2v2' ? DEV_SEATS_2V2 : DEV_SEATS_1V1;
+  const players = DEV_SEATS_BY_MODE[mode];
   let state = createGame(ruleset, players, createSeededRng(seed));
   const feed: string[] = [];
   const bubbles = new Map<number, string>();
@@ -92,22 +121,39 @@ function buildSceneState(
     if (rivalCard && state.hand.activeSeat === rivalSeat) {
       stepWith({ type: 'PLAY_CARD', seat: rivalSeat, cardId: rivalCard.id });
     }
-    if (mode === '2v2') {
-      while (state.status === 'IN_PROGRESS' && state.hand.activeSeat !== 0) {
+    // Con más de un rival hay que dejar pasar a los bots hasta volver a mi turno.
+    if (mode !== '1v1') {
+      let guard = 0;
+      while (state.status === 'IN_PROGRESS' && state.hand.activeSeat !== 0 && guard < 60) {
+        guard += 1;
         stepWith(chooseBotAction(viewFor(state, state.hand.activeSeat)));
       }
     }
     bubbles.set(1, '¡Cantalo si te animás!');
     state = {
       ...state,
-      scoresByTeam: use30Flor ? { 0: 18, 1: 14 } : { 0: 9, 1: 7 },
+      scoresByTeam:
+        mode === '3v3'
+          ? use30Flor
+            ? { 0: 18, 1: 14, 2: 11 }
+            : { 0: 9, 1: 7, 2: 4 }
+          : use30Flor
+            ? { 0: 18, 1: 14 }
+            : { 0: 9, 1: 7 },
     };
   } else if (scene === 'calls') {
     // Escena al inicio de 1.ª baza con mano propia habilitada para Envido, Real Envido, Falta Envido y Truco
     bubbles.set(1, '¡Buenas!');
     state = {
       ...state,
-      scoresByTeam: use30Flor ? { 0: 21, 1: 19 } : { 0: 11, 1: 8 },
+      scoresByTeam:
+        mode === '3v3'
+          ? use30Flor
+            ? { 0: 21, 1: 19, 2: 16 }
+            : { 0: 11, 1: 8, 2: 6 }
+          : use30Flor
+            ? { 0: 21, 1: 19 }
+            : { 0: 11, 1: 8 },
     };
   }
 
@@ -123,14 +169,14 @@ function readInitialSceneFromUrl(): DevMesaScene {
   return 'midhand';
 }
 
-function readInitialModeFromUrl(): '1v1' | '2v2' {
+function readInitialModeFromUrl(): GameMode {
   if (typeof window === 'undefined') return '2v2';
   const raw = new URLSearchParams(window.location.search).get('mode');
-  return raw === '1v1' ? '1v1' : '2v2';
+  return raw === '1v1' || raw === '3v3' ? raw : '2v2';
 }
 
 export default function DevMesaBotPlayground({ onExitHome }: { readonly onExitHome: () => void }) {
-  const [mode, setMode] = useState<'1v1' | '2v2'>(readInitialModeFromUrl);
+  const [mode, setMode] = useState<GameMode>(readInitialModeFromUrl);
   const [use30Flor, setUse30Flor] = useState<boolean>(true);
   const [scene, setScene] = useState<DevMesaScene>(readInitialSceneFromUrl);
   const [seedCounter, setSeedCounter] = useState<number>(20261113);
@@ -222,6 +268,8 @@ export default function DevMesaBotPlayground({ onExitHome }: { readonly onExitHo
           winnerTeam: gameState.winnerTeam ?? 0,
           usScore: gameState.scoresByTeam[0] ?? 0,
           themScore: gameState.scoresByTeam[1] ?? 0,
+          teamScores: gameState.scoresByTeam,
+          myTeam: 0,
           targetScore: gameState.ruleset.targetScore,
           reason: 'TARGET_SCORE_REACHED',
           seedCommitment: DEMO_SEED_COMMITMENT,
@@ -255,10 +303,10 @@ export default function DevMesaBotPlayground({ onExitHome }: { readonly onExitHo
         <div className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
-            onClick={() => setMode((m) => (m === '1v1' ? '2v2' : '1v1'))}
+            onClick={() => setMode((m) => (m === '1v1' ? '2v2' : m === '2v2' ? '3v3' : '1v1'))}
             className="min-h-[44px] px-2.5 rounded-lg bg-surface border border-ivory/20 font-semibold text-ivory"
           >
-            {mode === '1v1' ? messagesEsAr.devMesa.mode1v1 : messagesEsAr.devMesa.mode2v2}
+            {DEV_MODE_LABELS[mode]}
           </button>
           <button
             type="button"

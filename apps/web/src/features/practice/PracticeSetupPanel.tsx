@@ -114,6 +114,12 @@ export function PracticeSetupPanel({
               () => setMode('2v2'),
               '2 vs 2, modo 2 contra 2',
             )}
+            {optionButton(
+              mode === '3v3',
+              '3 vs 3',
+              () => setMode('3v3'),
+              '3 vs 3, truco de 6 con tres equipos de dos',
+            )}
           </div>
         </fieldset>
 

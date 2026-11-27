@@ -1,6 +1,7 @@
 import type {
   TournamentDetailResponse,
   TournamentListResponse,
+  TournamentMode,
   TournamentStatus,
   TournamentSummary,
 } from '@truco/shared';
@@ -78,7 +79,7 @@ export function TournamentsView({
     readonly name: string;
     readonly format: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION';
     readonly visibility: 'OFFICIAL' | 'PRIVATE';
-    readonly mode: '1v1' | '2v2';
+    readonly mode: TournamentMode;
     readonly capacity: number;
     readonly targetScore: number;
     readonly reason: string;
@@ -401,7 +402,7 @@ function CreateTournamentForm({
     readonly name: string;
     readonly format: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION';
     readonly visibility: 'OFFICIAL' | 'PRIVATE';
-    readonly mode: '1v1' | '2v2';
+    readonly mode: TournamentMode;
     readonly capacity: number;
     readonly targetScore: number;
     readonly reason: string;
@@ -412,7 +413,7 @@ function CreateTournamentForm({
     'SINGLE_ELIMINATION',
   );
   const [visibility, setVisibility] = useState<'OFFICIAL' | 'PRIVATE'>('OFFICIAL');
-  const [mode, setMode] = useState<'1v1' | '2v2'>('1v1');
+  const [mode, setMode] = useState<TournamentMode>('1v1');
   const [capacity, setCapacity] = useState(8);
   const [targetScore, setTargetScore] = useState(15);
   const [reason, setReason] = useState('');

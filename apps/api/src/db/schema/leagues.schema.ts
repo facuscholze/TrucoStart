@@ -233,7 +233,10 @@ export const leagueMatchesTable = pgTable(
     roomId: uuid('room_id'),
     deadlineAt: timestamp('deadline_at', { withTimezone: true }),
     reschedulesUsed: integer('reschedules_used').notNull().default(0),
-    /** Quién no se presentó; el cierre de jornada lo llena al definir por ausencia. */
+    /**
+     * Quién no se presentó. En un doble ausente quedan los dos sin marcar (`NULL`) y el motivo
+     * `DOUBLE_NO_SHOW` es el que dice que faltaron los dos.
+     */
     noShowUserId: uuid('no_show_user_id').references(() => usersTable.id, { onDelete: 'set null' }),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
@@ -253,13 +256,21 @@ export const leagueMatchesTable = pgTable(
     ),
     // Nadie juega contra sí mismo: la base lo impide.
     check('league_matches_distinct_players_chk', sql`${t.homeUserId} <> ${t.awayUserId}`),
-    // Una partida terminada de verdad tiene ganador y marcador; una definida sin jugar no.
+    /**
+     * Coherencia del resultado.
+     *
+     * Una partida jugada (`COMPLETED`) tiene ganador y marcador. Una definida sin jugar
+     * (`FORFEITED`) tiene motivo y **puede** no tener ganador: el doble ausente no tiene a nadie
+     * que gane (ADR-035), y ése es justamente el caso que no se puede inventar. Una pendiente no
+     * tiene ganador ni motivo todavía.
+     */
     check(
       'league_matches_result_chk',
       sql`(${t.status} IN ('SCHEDULED','READY','IN_PROGRESS','VOID')
-             AND ${t.winnerUserId} IS NULL)
+             AND ${t.winnerUserId} IS NULL AND ${t.forfeitReason} IS NULL)
           OR (${t.status} = 'COMPLETED'
-             AND ${t.winnerUserId} IS NOT NULL AND ${t.homeScore} IS NOT NULL AND ${t.awayScore} IS NOT NULL)
+             AND ${t.winnerUserId} IS NOT NULL AND ${t.homeScore} IS NOT NULL AND ${t.awayScore} IS NOT NULL
+             AND ${t.forfeitReason} IS NULL)
           OR (${t.status} = 'FORFEITED' AND ${t.forfeitReason} IS NOT NULL)`,
     ),
     // Un mismo par no juega dos veces la misma jornada (una liga no repite el cruce).

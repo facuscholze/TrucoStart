@@ -1,5 +1,5 @@
 {
-  "id": "2a33d0ea-1137-47eb-aa15-335e3bb701d9",
+  "id": "45b241e4-9886-4ba2-86c7-c3c6b741f6d1",
   "prevId": "df3c104f-77a4-4a27-a149-9f7e11a2dd54",
   "version": "7",
   "dialect": "postgresql",
@@ -3994,7 +3994,7 @@
         },
         "league_matches_result_chk": {
           "name": "league_matches_result_chk",
-          "value": "(\"league_matches\".\"status\" IN ('SCHEDULED','READY','IN_PROGRESS','VOID')\n             AND \"league_matches\".\"winner_user_id\" IS NULL)\n          OR (\"league_matches\".\"status\" = 'COMPLETED'\n             AND \"league_matches\".\"winner_user_id\" IS NOT NULL AND \"league_matches\".\"home_score\" IS NOT NULL AND \"league_matches\".\"away_score\" IS NOT NULL)\n          OR (\"league_matches\".\"status\" = 'FORFEITED' AND \"league_matches\".\"forfeit_reason\" IS NOT NULL)"
+          "value": "(\"league_matches\".\"status\" IN ('SCHEDULED','READY','IN_PROGRESS','VOID')\n             AND \"league_matches\".\"winner_user_id\" IS NULL AND \"league_matches\".\"forfeit_reason\" IS NULL)\n          OR (\"league_matches\".\"status\" = 'COMPLETED'\n             AND \"league_matches\".\"winner_user_id\" IS NOT NULL AND \"league_matches\".\"home_score\" IS NOT NULL AND \"league_matches\".\"away_score\" IS NOT NULL\n             AND \"league_matches\".\"forfeit_reason\" IS NULL)\n          OR (\"league_matches\".\"status\" = 'FORFEITED' AND \"league_matches\".\"forfeit_reason\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false

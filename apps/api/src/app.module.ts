@@ -21,6 +21,7 @@ import {
   type ObservabilityModuleOptions,
 } from './modules/observability/observability.module.js';
 import { OpenApiModule } from './modules/openapi/openapi.module.js';
+import { LeaguesModule, type LeaguesModuleOptions } from './modules/leagues/leagues.module.js';
 import { RatingsModule, type RatingsModuleOptions } from './modules/ratings/ratings.module.js';
 import { SocialModule } from './modules/social/social.module.js';
 import {
@@ -39,6 +40,7 @@ export interface CreateAppModuleOptions {
   readonly ratingsOptions?: RatingsModuleOptions;
   readonly observabilityOptions?: ObservabilityModuleOptions;
   readonly tournamentsOptions?: TournamentsModuleOptions;
+  readonly leaguesOptions?: LeaguesModuleOptions;
 }
 
 @Module({})
@@ -96,6 +98,16 @@ export class AppModule {
         }),
         SocialModule,
         MatchmakingModule,
+        LeaguesModule.register({
+          ...options.leaguesOptions,
+          runtimeConfig: {
+            ...options.leaguesOptions?.runtimeConfig,
+            ...(sharedNowFn !== undefined &&
+            options.leaguesOptions?.runtimeConfig?.nowFn === undefined
+              ? { nowFn: sharedNowFn }
+              : {}),
+          },
+        }),
         TournamentsModule.register({
           ...options.tournamentsOptions,
           runtimeConfig: {

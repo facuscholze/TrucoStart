@@ -196,6 +196,20 @@ export class LobbyRepository {
     await this.db.delete(tablesTable).where(eq(tablesTable.id, tableId));
   }
 
+  /**
+   * Mueve el vencimiento de una mesa ya creada.
+   *
+   * Lo usa la reprogramación de ligas: si el plazo de la partida se extiende y la mesa no, la
+   * mesa se cerraría con el plazo viejo y la reprogramación no serviría de nada. No cambia el
+   * estado de la mesa ni sus asientos: sólo cuándo expira.
+   */
+  async extendTableExpiry(tableId: string, expiresAt: Date): Promise<void> {
+    await this.db
+      .update(tablesTable)
+      .set({ expiresAt, updatedAt: new Date() })
+      .where(eq(tablesTable.id, tableId));
+  }
+
   async getTableWithSeats(tableId: string): Promise<TableAggregate | null> {
     const rows = await this.db
       .select()

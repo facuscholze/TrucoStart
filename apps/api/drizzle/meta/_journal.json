@@ -103,8 +103,15 @@
     {
       "idx": 14,
       "version": "7",
-      "when": 1795814026075,
+      "when": 1795814827296,
       "tag": "0014_m10b_leagues",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795814334327,
+      "tag": "0015_m10b_league_notification_types",
       "breakpoints": true
     }
   ]

@@ -121,6 +121,8 @@ export const AdminPermissionSchema = z.enum([
   'gamification:configure',
   /** M10a: torneos oficiales y resolución de incidencias del cuadro. */
   'tournaments:manage',
+  /** M10b: ligas oficiales, cierre de jornada y cierre de temporada. */
+  'leagues:manage',
 ]);
 export type AdminPermission = z.infer<typeof AdminPermissionSchema>;
 
@@ -149,6 +151,7 @@ export const ADMIN_ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPe
       'competitive:review',
       'audit:read',
       'tournaments:manage',
+      'leagues:manage',
     ] as const),
     ADMIN: Object.freeze([
       'dashboard:read',
@@ -166,6 +169,7 @@ export const ADMIN_ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPe
       'admins:manage',
       'gamification:configure',
       'tournaments:manage',
+      'leagues:manage',
     ] as const),
   });
 

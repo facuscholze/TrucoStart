@@ -36,9 +36,10 @@ CREATE TABLE "league_matches" (
 	CONSTRAINT "league_matches_forfeit_chk" CHECK ("league_matches"."forfeit_reason" IS NULL OR "league_matches"."forfeit_reason" IN ('NO_SHOW','DOUBLE_NO_SHOW','ABANDON','RESCHEDULED_EXPIRED','DISQUALIFIED')),
 	CONSTRAINT "league_matches_distinct_players_chk" CHECK ("league_matches"."home_user_id" <> "league_matches"."away_user_id"),
 	CONSTRAINT "league_matches_result_chk" CHECK (("league_matches"."status" IN ('SCHEDULED','READY','IN_PROGRESS','VOID')
-             AND "league_matches"."winner_user_id" IS NULL)
+             AND "league_matches"."winner_user_id" IS NULL AND "league_matches"."forfeit_reason" IS NULL)
           OR ("league_matches"."status" = 'COMPLETED'
-             AND "league_matches"."winner_user_id" IS NOT NULL AND "league_matches"."home_score" IS NOT NULL AND "league_matches"."away_score" IS NOT NULL)
+             AND "league_matches"."winner_user_id" IS NOT NULL AND "league_matches"."home_score" IS NOT NULL AND "league_matches"."away_score" IS NOT NULL
+             AND "league_matches"."forfeit_reason" IS NULL)
           OR ("league_matches"."status" = 'FORFEITED' AND "league_matches"."forfeit_reason" IS NOT NULL))
 );
 --> statement-breakpoint

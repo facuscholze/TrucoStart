@@ -107,6 +107,12 @@ export const SocialNotificationTypeSchema = z.enum([
   'TOURNAMENT_ROUND_STARTED',
   /** M10a: el cruce del jugador tiene a los dos rivales y su sala. */
   'TOURNAMENT_MATCH_READY',
+  /** M10b: la jornada de la liga abrió y sus partidas se pueden jugar. */
+  'LEAGUE_ROUND_OPEN',
+  /** M10b: el jugador tiene una partida de liga pendiente por jugar. */
+  'LEAGUE_MATCH_PENDING',
+  /** M10b: la temporada de la liga cerró con su tabla final. */
+  'LEAGUE_SEASON_FINISHED',
 ]);
 export type SocialNotificationType = z.infer<typeof SocialNotificationTypeSchema>;
 

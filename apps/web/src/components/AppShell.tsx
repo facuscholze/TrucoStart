@@ -18,6 +18,7 @@ export type NavSection =
   | 'social'
   | 'progression'
   | 'tournaments'
+  | 'leagues'
   | 'auth';
 
 /**
@@ -127,6 +128,7 @@ export function AppShell({ activeSection, currentUser, onNavigate, children }: A
       ? [
           { id: 'social' as const, label: messagesEsAr.nav.social, path: '/amigos' },
           { id: 'tournaments' as const, label: messagesEsAr.nav.tournaments, path: '/torneos' },
+          { id: 'leagues' as const, label: messagesEsAr.nav.leagues, path: '/ligas' },
           { id: 'progression' as const, label: messagesEsAr.nav.progression, path: '/progreso' },
         ]
       : []),

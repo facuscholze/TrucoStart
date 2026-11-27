@@ -304,6 +304,7 @@ describe('Tanda UX — espera por rival humano y ofrecimiento de práctica', () 
       'Anotador',
       'Amigos',
       'Torneos',
+      'Ligas',
       'Progreso',
       'Perfil',
     ]);

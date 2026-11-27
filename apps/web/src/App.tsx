@@ -73,6 +73,14 @@ const TournamentsScreenLazy = lazy(() =>
     default: m.TournamentsScreen,
   })),
 );
+const LeaguesScreenLazy = lazy(() =>
+  import('./features/leagues/LeaguesScreen.js').then((m) => ({ default: m.LeaguesScreen })),
+);
+const LeagueDetailScreenLazy = lazy(() =>
+  import('./features/leagues/LeagueDetailScreen.js').then((m) => ({
+    default: m.LeagueDetailScreen,
+  })),
+);
 const TournamentDetailScreenLazy = lazy(() =>
   import('./features/tournaments/TournamentDetailScreen.js').then((m) => ({
     default: m.TournamentDetailScreen,
@@ -90,6 +98,8 @@ type ParsedAppRoute =
   | { kind: 'progression' }
   | { kind: 'tournaments' }
   | { kind: 'tournament-detail'; tournamentId: string }
+  | { kind: 'leagues' }
+  | { kind: 'league-detail'; leagueId: string }
   | { kind: 'player-profile'; userId: string }
   | { kind: 'learn' }
   | { kind: 'scorer' }
@@ -141,6 +151,15 @@ function parseRoute(pathname: string, search: string): ParsedAppRoute {
 
   if (pathname === '/torneos') {
     return { kind: 'tournaments' };
+  }
+
+  if (pathname === '/ligas') {
+    return { kind: 'leagues' };
+  }
+
+  const ligaMatch = /^\/ligas\/([a-zA-Z0-9-]{8,64})$/.exec(pathname);
+  if (ligaMatch?.[1]) {
+    return { kind: 'league-detail', leagueId: ligaMatch[1] };
   }
 
   const torneoMatch = /^\/torneos\/([a-zA-Z0-9-]{8,64})$/.exec(pathname);
@@ -350,11 +369,13 @@ export function App() {
                 ? 'social'
                 : route.kind === 'tournaments' || route.kind === 'tournament-detail'
                   ? 'tournaments'
-                  : route.kind === 'progression'
-                    ? 'progression'
-                    : route.kind === 'auth'
-                      ? 'auth'
-                      : 'home';
+                  : route.kind === 'leagues' || route.kind === 'league-detail'
+                    ? 'leagues'
+                    : route.kind === 'progression'
+                      ? 'progression'
+                      : route.kind === 'auth'
+                        ? 'auth'
+                        : 'home';
 
   return (
     <SocialRealtimeProvider enabled={currentUser !== null}>
@@ -395,6 +416,19 @@ export function App() {
 
           {route.kind === 'tournaments' && (
             <TournamentsScreenLazy onOpenTournament={(id) => navigate(`/torneos/${id}`)} />
+          )}
+
+          {route.kind === 'leagues' && (
+            <LeaguesScreenLazy onOpenLeague={(id) => navigate(`/ligas/${id}`)} />
+          )}
+
+          {route.kind === 'league-detail' && (
+            <LeagueDetailScreenLazy
+              leagueId={route.leagueId}
+              currentUserId={currentUser?.id ?? undefined}
+              onOpenRoom={(roomId) => navigate(`/mesa/${roomId}`)}
+              onBack={() => navigate('/ligas')}
+            />
           )}
 
           {route.kind === 'tournament-detail' && (

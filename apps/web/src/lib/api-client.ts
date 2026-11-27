@@ -64,6 +64,9 @@ import type {
   TournamentListResponse,
   TournamentSummary,
   ProgressionCosmeticRedeemResponse,
+  LeagueDetail,
+  LeagueListResponse,
+  RescheduleLeagueMatchResponse,
 } from '@truco/shared';
 
 export class WebApiError extends Error {
@@ -548,6 +551,53 @@ export async function listTournamentsRequest(
   if (query.cursor) qs.set('cursor', query.cursor);
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return requestJson<TournamentListResponse>(`/v1/tournaments${suffix}`, { method: 'GET' });
+}
+
+// ------------------------------------------------------------------ ligas
+
+export async function listLeaguesRequest(
+  query: {
+    readonly mode?: string;
+    readonly division?: string;
+    readonly status?: readonly string[];
+    readonly limit?: number;
+    readonly cursor?: string | null;
+  } = {},
+): Promise<LeagueListResponse> {
+  const qs = new URLSearchParams();
+  if (query.mode) qs.set('mode', query.mode);
+  if (query.division) qs.set('division', query.division);
+  for (const status of query.status ?? []) qs.append('status', status);
+  if (query.limit !== undefined) qs.set('limit', String(query.limit));
+  if (query.cursor) qs.set('cursor', query.cursor);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return requestJson<LeagueListResponse>(`/v1/leagues${suffix}`, { method: 'GET' });
+}
+
+export async function getLeagueDetailRequest(id: string): Promise<LeagueDetail> {
+  return requestJson<LeagueDetail>(`/v1/leagues/${encodeURIComponent(id)}`, { method: 'GET' });
+}
+
+export async function joinLeagueRequest(id: string): Promise<{ joined: true }> {
+  return requestJson<{ joined: true }>(`/v1/leagues/${encodeURIComponent(id)}/join`, {
+    method: 'POST',
+  });
+}
+
+export async function leaveLeagueRequest(id: string): Promise<{ left: true }> {
+  return requestJson<{ left: true }>(`/v1/leagues/${encodeURIComponent(id)}/leave`, {
+    method: 'POST',
+  });
+}
+
+export async function rescheduleLeagueMatchRequest(
+  matchId: string,
+  reason: string,
+): Promise<RescheduleLeagueMatchResponse> {
+  return requestJson<RescheduleLeagueMatchResponse>(
+    `/v1/leagues/matches/${encodeURIComponent(matchId)}/reschedule`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+  );
 }
 
 export async function getTournamentDetailRequest(id: string): Promise<TournamentDetailResponse> {

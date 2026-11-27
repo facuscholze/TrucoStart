@@ -32,6 +32,12 @@ export const messagesEsAr = {
     handCounter: (handNumber: number) => `Mano #${handNumber}`,
     usLabel: 'Nosotros',
     themLabel: 'Ellos',
+    /**
+     * Etiquetas del tanteador de tres equipos. El anotador del panel lateral es angosto y el
+     * nombre largo no entra: gana el color y el número, con el nombre completo en el tooltip.
+     */
+    usLabelShort: 'Nos.',
+    themLabelShort: 'Ellos',
     selfBadge: 'Vos',
     botBadge: 'Bot',
     teammateBadge: 'Compañero',

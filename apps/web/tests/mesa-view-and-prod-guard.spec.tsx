@@ -291,7 +291,7 @@ describe('M10b mesa de seis — tres equipos en pantalla', () => {
     renderSixSeatTable();
     expect(screen.getAllByText(/Truco de 6 · 3 equipos/i).length).toBeGreaterThan(0);
     // Tres equipos con sus puntajes, no un duelo "nosotros contra ellos".
-    const tanteador = screen.getByLabelText(/Nosotros 12.*Ellos 2 9.*Ellos 3 7/);
+    const tanteador = screen.getByLabelText(/Nos\. 12.*Ellos 2 9.*Ellos 3 7/);
     expect(tanteador.textContent).toContain('12');
     expect(tanteador.textContent).toContain('7');
   });

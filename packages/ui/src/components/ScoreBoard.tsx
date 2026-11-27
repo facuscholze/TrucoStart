@@ -65,14 +65,25 @@ export function TeamScoreBoard({ entries, targetScore, ariaLabel }: TeamScoreBoa
                 fontSize: '0.76rem',
                 fontWeight: 700,
                 color: teamColor(entry.team),
+                // En el truco de 6 la columna del panel lateral es angosta: sin `minWidth: 0`
+                // el nombre del equipo no se recorta ("Nosotr…") y empuja la columna.
+                minWidth: 0,
+                flex: '1 1 auto',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
+              title={entry.label}
             >
               {entry.label}
             </span>
-            <strong style={{ fontSize: '1.1rem', fontVariantNumeric: 'tabular-nums' }}>
+            <strong
+              style={{
+                fontSize: '1.1rem',
+                fontVariantNumeric: 'tabular-nums',
+                flex: '0 0 auto',
+              }}
+            >
               {entry.score}
             </strong>
           </div>

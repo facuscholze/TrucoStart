@@ -177,8 +177,8 @@ export function GameTableView({
           team,
           label:
             team === myTeam
-              ? messagesEsAr.mesa.usLabel
-              : `${messagesEsAr.mesa.themLabel} ${team + 1}`,
+              ? messagesEsAr.mesa.usLabelShort
+              : `${messagesEsAr.mesa.themLabelShort} ${team + 1}`,
           score: Number(view.scoresByTeam[String(team)] ?? 0),
         }))
     : [];
@@ -296,10 +296,15 @@ export function GameTableView({
       <div className="flex items-center gap-2 flex-wrap">
         {hasThreeTeams ? (
           <span
-            className="text-xs font-bold tabular-nums text-ivory"
+            className="flex flex-wrap items-center justify-center gap-x-1.5 text-xs font-bold tabular-nums text-ivory"
             aria-label={teamScores.map((t) => `${t.label} ${t.score}`).join(', ')}
           >
-            {teamScores.map((t) => `${t.label} ${t.score}`).join(' · ')}
+            {teamScores.map((team, index) => (
+              <span key={`score-${team.team}`} className="whitespace-nowrap">
+                {index > 0 && <span aria-hidden="true"> · </span>}
+                {`${team.label} ${team.score}`}
+              </span>
+            ))}
           </span>
         ) : (
           <ScoreBoard
@@ -577,7 +582,13 @@ export function GameTableView({
         {eventFeed.length === 0 ? (
           <p className="text-xs text-muted">{messagesEsAr.mesa.sidePanelEmptyFeed}</p>
         ) : (
-          <ul className="space-y-1 text-xs text-ivory/90 max-h-40 overflow-y-auto">
+          // `tabIndex={0}`: la lista tiene scroll propio y, sin foco, quien navega con teclado
+          // no puede leer el historial completo (axe: scrollable-region-focusable).
+          <ul
+            tabIndex={0}
+            aria-label={messagesEsAr.mesa.sidePanelFeedTitle}
+            className="space-y-1 text-xs text-ivory/90 max-h-40 overflow-y-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
+          >
             {eventFeed.slice(-8).map((line, idx) => (
               <li key={idx} className="border-b border-ivory/10 pb-1">
                 {line}

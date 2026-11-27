@@ -298,3 +298,87 @@ describe('Strict information-hiding guarantees of viewFor & projectEventsForSeat
     expect(formatDomainEvent(sampleEvents[0]!)).toContain('ar-standard-v1');
   });
 });
+
+/**
+ * Truco de 6: con **tres** equipos conviven dos rivales distintos por cada asiento. La regla es
+ * la misma que en 2v2 (nadie ve cartas ajenas ni señales de otro equipo), pero el universo de
+ * "otros" crece, así que se cubre explícitamente con trayectorias aleatorias de 6 asientos.
+ */
+describe('Truco de 6 — información oculta entre tres equipos', () => {
+  const SEATS_3X2: PlayerSeat[] = [
+    { seat: 0, team: 0, playerId: 'p0' },
+    { seat: 1, team: 0, playerId: 'p1' },
+    { seat: 2, team: 1, playerId: 'p2' },
+    { seat: 3, team: 1, playerId: 'p3' },
+    { seat: 4, team: 2, playerId: 'p4' },
+    { seat: 5, team: 2, playerId: 'p5' },
+  ];
+
+  it('property-based: 60 trayectorias de 6 asientos sin una sola carta ni seña filtrada', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 500_000 }), (seed) => {
+        const rng = createSeededRng(seed);
+        let state = createGame(AR_STANDARD_V1, SEATS_3X2, rng);
+
+        for (let step = 0; step < 25 && state.status === 'IN_PROGRESS'; step++) {
+          const events: DomainEvent[] = [];
+          // Antes de actuar, cada uno de los 6 asientos solo puede ver lo suyo y lo público.
+          for (let seat = 0; seat < 6; seat++) {
+            assertNoCardOrSignalLeak(state, events, seat);
+          }
+
+          const active = state.hand.activeSeat;
+          const actions = viewFor(state, active).legalActions;
+          expect(actions.length).toBeGreaterThan(0);
+          const chosen = actions[Math.floor(rng.nextFloat() * actions.length)]!;
+          const res = applyAction(state, chosen);
+          expect(res.ok).toBe(true);
+          if (!res.ok) return;
+          state = res.value.state;
+          for (let seat = 0; seat < 6; seat++) {
+            assertNoCardOrSignalLeak(state, res.value.events, seat);
+          }
+        }
+      }),
+      { numRuns: 60 },
+    );
+  }, 60_000);
+
+  it('una seña de un equipo de 6 asientos no aparece en la vista de los otros dos equipos', () => {
+    let state = createGame(AR_STANDARD_V1, SEATS_3X2, createSeededRng(4242));
+    // Busca el primer momento en que el equipo 0 tenga seña disponible.
+    let sent: DomainEvent[] = [];
+    for (let step = 0; step < 40 && state.status === 'IN_PROGRESS' && sent.length === 0; step++) {
+      const seat = state.hand.activeSeat;
+      const signal = viewFor(state, seat).legalActions.find((a) => a.type === 'SEND_SIGNAL');
+      if (signal && SEATS_3X2[seat]!.team === 0) {
+        const res = applyAction(state, signal);
+        expect(res.ok).toBe(true);
+        if (!res.ok) return;
+        sent = res.value.events;
+        state = res.value.state;
+        break;
+      }
+      const actions = viewFor(state, seat).legalActions;
+      const play = actions.find((a) => a.type === 'PLAY_CARD') ?? {
+        type: 'FOLD_HAND' as const,
+        seat,
+      };
+      const res = applyAction(state, play);
+      if (!res.ok) break;
+      state = res.value.state;
+    }
+
+    expect(sent.some((e) => e.type === 'SIGNAL_SENT')).toBe(true);
+    for (let seat = 0; seat < 6; seat++) {
+      const projected = projectEventsForSeat(sent, state.seats, seat);
+      const team = SEATS_3X2[seat]!.team;
+      for (const ev of projected) {
+        if (ev.type === 'SIGNAL_SENT') expect(ev.team).toBe(team);
+      }
+      const view = viewFor(state, seat);
+      for (const sig of view.hand.visibleSignals) expect(sig.team).toBe(team);
+      if (team !== 0) expect(view.hand.visibleSignals).toHaveLength(0);
+    }
+  });
+});

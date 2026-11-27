@@ -1,6 +1,7 @@
 import { acceptPendingTruco, applyTrucoBid } from '../calls.js';
 import { advanceRoundProgress, awardTeamPoints, finishHandAndAdvance } from '../hand-lifecycle.js';
-import { findNextOpposingTeam, getActiveTeams, selectActiveResponderSeat } from '../rounds.js';
+import { getActiveTeams } from '../rounds.js';
+import { resolveRespondingSeat, resolveRespondingTeam } from '../team-responder.js';
 import type { TrucoBidType } from '../rulesets.js';
 import type { DomainEvent, GameState, TrucoDecision } from '../state.types.js';
 import {
@@ -117,8 +118,15 @@ export function handleCallTruco(
     bid,
   });
 
-  const responderTeam = findNextOpposingTeam(seat, team, state.seats, state.hand.foldedSeats);
-  const activeSeat = selectActiveResponderSeat(
+  const responderTeam = resolveRespondingTeam(
+    seat,
+    team,
+    state.seats,
+    state.hand.foldedSeats,
+    state.scoresByTeam,
+    state.ruleset.teamResponderMode,
+  );
+  const activeSeat = resolveRespondingSeat(
     seat,
     responderTeam,
     state.hand.manoSeat,

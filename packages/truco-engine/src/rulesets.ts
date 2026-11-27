@@ -9,6 +9,11 @@ export type EnvidoFirstMode = 'CANCEL_TRUCO' | 'SUSPEND_TRUCO' | 'DISABLED';
 export type PendingEnvidoOnFoldMode = 'AWARD_DECLINED_POINTS' | 'CANCEL';
 export type TimeoutOnTurnMode = 'FOLD_HAND' | 'PLAY_LOWEST_CARD';
 export type ResponderSelectionMode = 'NEXT_IN_TURN' | 'PIE_OF_TEAM' | 'ANY_TEAM_MEMBER';
+/**
+ * Cómo se elige el equipo rival que contesta un canto cuando hay **más de dos** equipos
+ * (truco de 6 con tres equipos de 2). Con dos equipos no hay elección y el valor es inerte.
+ */
+export type TeamResponderMode = 'NEXT_IN_TURN' | 'HIGHEST_SCORE';
 
 export interface EnvidoRules {
   readonly envidoPoints: number;
@@ -59,6 +64,8 @@ export interface RuleSet {
   readonly targetScore: number;
   readonly malasScoreThreshold: number;
   readonly responderSelectionMode: ResponderSelectionMode;
+  /** Equipo rival que responde cantos en mesas de 3+ equipos. Inerte con 2 equipos. */
+  readonly teamResponderMode?: TeamResponderMode;
   readonly envido: EnvidoRules;
   readonly flor: FlorRules;
   readonly truco: TrucoRules;
@@ -199,6 +206,16 @@ export function validateRuleSet(ruleset: RuleSet): Result<RuleSet, RuleError> {
   }
   if (ruleset.system.maxConsecutiveTimeoutsBeforeAbandon < 1) {
     return ruleError('INVALID_RULESET', 'maxConsecutiveTimeoutsBeforeAbandon debe ser al menos 1');
+  }
+  if (
+    ruleset.teamResponderMode !== undefined &&
+    ruleset.teamResponderMode !== 'NEXT_IN_TURN' &&
+    ruleset.teamResponderMode !== 'HIGHEST_SCORE'
+  ) {
+    return ruleError(
+      'INVALID_RULESET',
+      `teamResponderMode desconocido: ${ruleset.teamResponderMode}`,
+    );
   }
   return ok(ruleset);
 }

@@ -7,7 +7,7 @@ import {
 } from '../calls.js';
 import { awardTeamPoints, resumeAfterSecondaryTrack } from '../hand-lifecycle.js';
 import { seatHoldsEnabledFlor } from '../legal-actions.js';
-import { findNextOpposingTeam, selectActiveResponderSeat } from '../rounds.js';
+import { resolveRespondingSeat, resolveRespondingTeam } from '../team-responder.js';
 import type { EnvidoBidType, FlorBidType } from '../rulesets.js';
 import { resolveShowdownWinner, scoreEnvido, scoreFlor } from '../scoring.js';
 import type { DomainEvent, EnvidoDecision, FlorDecision, GameState } from '../state.types.js';
@@ -38,8 +38,15 @@ export function handleCallEnvido(
   const pushed = pushEnvidoBid(state.ruleset, state.hand.envidoChain, bid, seat, team);
   if (!pushed.ok) return pushed;
 
-  const responderTeam = findNextOpposingTeam(seat, team, state.seats, state.hand.foldedSeats);
-  const activeSeat = selectActiveResponderSeat(
+  const responderTeam = resolveRespondingTeam(
+    seat,
+    team,
+    state.seats,
+    state.hand.foldedSeats,
+    state.scoresByTeam,
+    state.ruleset.teamResponderMode,
+  );
+  const activeSeat = resolveRespondingSeat(
     seat,
     responderTeam,
     state.hand.manoSeat,
@@ -219,8 +226,14 @@ export function handleCallFlor(
     return ok({ state: resumeAfterSecondaryTrack(scored, events), events });
   }
 
-  const responderTeam = rivalsWithFlor[0]!.team;
-  const activeSeat = selectActiveResponderSeat(
+  // Con tres equipos puede haber varios rivales con Flor: contesta el primero en el orden de
+  // turnos desde el cantor (nunca "el primero del arreglo de asientos", que era un artefacto).
+  const totalSeats = state.seats.length;
+  const responderTeam = [...rivalsWithFlor].sort(
+    (a, b) =>
+      ((a.seat - seat + totalSeats) % totalSeats) - ((b.seat - seat + totalSeats) % totalSeats),
+  )[0]!.team;
+  const activeSeat = resolveRespondingSeat(
     seat,
     responderTeam,
     state.hand.manoSeat,

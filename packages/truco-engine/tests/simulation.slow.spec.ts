@@ -20,11 +20,15 @@ describe('Property-based invariants (fast-check) & Massive Multi-Seat Simulation
       fc.property(
         fc.integer({ min: 1, max: 500_000 }),
         fc.constantFrom(2, 4, 6),
-        (seed, numSeats) => {
-          const seats = buildSeats(numSeats, 2);
+        // Con 6 asientos se cubren las dos variantes: 3v3 (dos equipos de 3) y 3 equipos de 2.
+        fc.constantFrom(2, 3),
+        (seed, numSeats, numTeams) => {
+          const teams = numSeats === 6 ? numTeams : 2;
+          const seats = buildSeats(numSeats, teams);
           let stateA = createGame(AR_CORTO_15_V1, seats, createSeededRng(seed));
           let stateB = createGame(AR_CORTO_15_V1, seats, createSeededRng(seed));
           expect(stateA).toEqual(stateB);
+          expect(stateA.teams).toHaveLength(teams);
 
           const actionRng = createSeededRng(seed ^ 0x55aa55aa);
           for (let step = 0; step < 35 && stateA.status === 'IN_PROGRESS'; step++) {
@@ -93,6 +97,22 @@ describe('Property-based invariants (fast-check) & Massive Multi-Seat Simulation
     const stats3v3 = simulateBatch(300, { ruleset: AR_CORTO_15_V1, numSeats: 6 }, 400_000);
     expect(stats3v3.matchesPlayed).toBe(300);
     expect(stats3v3.eventCounts['MATCH_ENDED']).toBe(300);
+
+    // 4b) 1,000 partidas del truco de 6 con TRES equipos de 2 (la variante que suma M10b):
+    // cada partida debe terminar con un equipo ganador entre los tres y sin acciones infinitas.
+    const stats3x2 = simulateBatch(
+      1_000,
+      { ruleset: AR_CORTO_15_V1, numSeats: 6, numTeams: 3 },
+      600_000,
+    );
+    expect(stats3x2.matchesPlayed).toBe(1_000);
+    expect(stats3x2.eventCounts['MATCH_ENDED']).toBe(1_000);
+    const wins3x2 = stats3x2.winsByTeam;
+    expect((wins3x2[0] ?? 0) + (wins3x2[1] ?? 0) + (wins3x2[2] ?? 0)).toBe(1_000);
+    for (const team of [0, 1, 2]) {
+      expect(wins3x2[team] ?? 0).toBeGreaterThan(150);
+    }
+    expect(stats3x2.maxActionsInSingleMatch).toBeLessThan(1_500);
 
     // 5) 300 partidas Random-vs-Random (stress de terminación ante agentes caóticos)
     const statsRandom = simulateBatch(

@@ -32,8 +32,13 @@ import { viewFor } from '../src/view.js';
 
 const TEAMS_2V2 = buildSeats(4, 2);
 
+/**
+ * El modo no es un *override* anidado: vive en la raíz del `RuleSet` (el truco de 6 lo lee de
+ * ahí), así que se compone con `createRuleSetVariant` para conservar el resto del conjunto y se
+ * fija encima. Pasarlo dentro de los overrides no compila, y ése era el error de este archivo.
+ */
 function rulesetWith(mode: 'NEXT_IN_TURN' | 'HIGHEST_SCORE', base: RuleSet = AR_STANDARD_V1) {
-  return createRuleSetVariant(base, { teamResponderMode: mode });
+  return { ...createRuleSetVariant(base, {}), teamResponderMode: mode };
 }
 
 /** Huella estable de un estado: sin ella, un estado distinto podría colarse en un empate de cartas. */
@@ -48,11 +53,15 @@ function fingerprint(state: GameState): string {
     activeSeat: state.hand.activeSeat,
     foldedSeats: state.hand.foldedSeats,
     truco: state.hand.truco,
-    envido: state.hand.envido,
-    flor: state.hand.flor,
-    played: state.hand.playedCards,
+    envidoStatus: state.hand.envidoStatus,
+    envidoChain: state.hand.envidoChain,
+    florStatus: state.hand.florStatus,
+    florChain: state.hand.florChain,
+    // Las cartas jugadas de la mano: las de la vuelta en curso y las de las vueltas cerradas.
+    currentRoundPlays: state.hand.currentRoundPlays,
+    completedRounds: state.hand.completedRounds,
     remaining: state.hand.remainingHandsBySeat,
-    vidas: state.hand.bazasByTeam,
+    responderTeam: state.hand.responderTeam,
   });
 }
 
@@ -250,8 +259,8 @@ describe('control negativo — con tres equipos el modo sí cambia la partida', 
 
     // Y en una partida completa de 3v3 las grabaciones difieren.
     const rulesets = [
-      createRuleSetVariant(AR_CORTO_15_V1, { teamResponderMode: 'NEXT_IN_TURN' as const }),
-      createRuleSetVariant(AR_CORTO_15_V1, { teamResponderMode: 'HIGHEST_SCORE' as const }),
+      rulesetWith('NEXT_IN_TURN', AR_CORTO_15_V1),
+      rulesetWith('HIGHEST_SCORE', AR_CORTO_15_V1),
     ];
     const recordings = rulesets.map((ruleset) => {
       const rng = createSeededRng(5);

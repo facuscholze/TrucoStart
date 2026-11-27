@@ -186,15 +186,27 @@ test.describe('M10b — truco de 6 (3v3) de punta a punta', () => {
       expect(scoreboardText).toMatch(/Ellos 3/);
 
       // 8. El resultado se verifica en la API, nunca en la vista del cliente.
-      const history = await apiCall(
-        owner.cookie,
-        'GET',
-        `/v1/users/${owner.userId}/matches?limit=10`,
-      );
-      expect(history.status).toBe(200);
-      const sixSeatMatch = (history.json!.items as JsonObject[]).find(
-        (item) => item.mode === '3v3',
-      );
+      // La partida se guarda por el bus de ciclo de vida cuando termina: esa escritura es
+      // asíncrona y puede tardar más que el último evento del WebSocket (con PostgreSQL tarda
+      // más que con el PGlite de una corrida local). Se espera en vez de leer una sola vez.
+      let sixSeatMatch: JsonObject | undefined;
+      await expect
+        .poll(
+          async () => {
+            const history = await apiCall(
+              owner.cookie,
+              'GET',
+              `/v1/users/${owner.userId}/matches?limit=10`,
+            );
+            if (history.status !== 200) return false;
+            sixSeatMatch = (history.json!.items as JsonObject[]).find(
+              (item) => item.mode === '3v3',
+            );
+            return sixSeatMatch !== undefined;
+          },
+          { timeout: 120_000, intervals: [500, 1_000, 2_000] },
+        )
+        .toBe(true);
       expect(sixSeatMatch, 'la partida 3v3 quedó registrada en la API').toBeDefined();
       const matchDetail = await apiCall(
         owner.cookie,

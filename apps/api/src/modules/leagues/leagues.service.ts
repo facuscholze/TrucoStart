@@ -45,16 +45,16 @@ import {
   walletTransactionsTable,
 } from '../../db/schema/index.js';
 import type { AdminPrincipal } from '../admin/admin-auth.service.js';
-import { type AuditRepository } from '../audit/audit.repository.js';
+import { AuditRepository } from '../audit/audit.repository.js';
 import type { AuthenticatedPrincipal } from '../auth/guards/session-auth.guard.js';
 import {
   LOBBY_RUNTIME_CONFIG,
   resolveRuleSetByCode,
   type LobbyRuntimeConfig,
 } from '../lobby/lobby.config.js';
-import { type LobbyRepository } from '../lobby/lobby.repository.js';
+import { LobbyRepository } from '../lobby/lobby.repository.js';
 import { LobbyRealtimeGateway } from '../lobby/lobby-realtime.gateway.js';
-import { type MatchCompletionBridge } from '../lobby/ports/match-completion-bridge.js';
+import { MatchCompletionBridge } from '../lobby/ports/match-completion-bridge.js';
 import {
   GAME_ROOM_PROVISIONER,
   type GameRoomProvisioner,
@@ -62,11 +62,11 @@ import {
 import { buildSchedule, roundsForParticipants } from './league-schedule.js';
 import { LEAGUES_RUNTIME_CONFIG, type LeaguesRuntimeConfig } from './leagues.config.js';
 import {
+  LeaguesRepository,
   type LeagueMatchRow,
   type LeagueParticipantRow,
   type LeagueRoundRow,
   type LeagueRow,
-  type LeaguesRepository,
 } from './leagues.repository.js';
 
 /**
@@ -96,16 +96,28 @@ import {
 export class LeaguesService implements OnApplicationBootstrap, OnApplicationShutdown {
   private maintenanceTimer: NodeJS.Timeout | null = null;
 
+  /**
+   * Todos los parámetros llevan `@Inject` explícito, y no es decoración de más.
+   *
+   * Sin `@Inject`, Nest resuelve el parámetro por la metadata de tipo (`design:paramtypes`). Esa
+   * metadata la emite `tsc` con `emitDecoratorMetadata`, pero **no** la emiten `tsx`/esbuild, que
+   * es con lo que corre el stack E2E y el modo desarrollo. Resultado medido: con los cinco
+   * parámetros sin token, la API no arrancaba
+   * («Nest can't resolve dependencies of the LeaguesService (?, …)») y ningún test unitario lo
+   * veía, porque construyen el servicio a mano.
+   *
+   * Por eso también los tipos se importan como valores: un `import type` los borra del JS.
+   */
   constructor(
-    private readonly repository: LeaguesRepository,
+    @Inject(LeaguesRepository) private readonly repository: LeaguesRepository,
     @Inject(LEAGUES_RUNTIME_CONFIG) private readonly config: LeaguesRuntimeConfig,
     @Inject(LOBBY_RUNTIME_CONFIG) private readonly lobbyConfig: LobbyRuntimeConfig,
-    private readonly lobbyRepository: LobbyRepository,
+    @Inject(LobbyRepository) private readonly lobbyRepository: LobbyRepository,
     @Inject(GAME_ROOM_PROVISIONER) private readonly provisioner: GameRoomProvisioner,
     @Inject(RATE_LIMIT_STORE) private readonly rateLimitStore: RateLimitStore,
-    private readonly auditRepository: AuditRepository,
+    @Inject(AuditRepository) private readonly auditRepository: AuditRepository,
     @Inject(LobbyRealtimeGateway) private readonly realtime: LobbyRealtimeGateway,
-    private readonly matchCompletion: MatchCompletionBridge,
+    @Inject(MatchCompletionBridge) private readonly matchCompletion: MatchCompletionBridge,
   ) {
     // El puente de fin de partida lo ocupa este servicio al arrancar, igual que torneos: es la
     // única vía por la que una partida real cierra su cruce de liga.

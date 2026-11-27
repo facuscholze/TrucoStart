@@ -18,6 +18,9 @@ export default defineConfig({
     {
       command: 'pnpm --filter @truco/api exec tsx scripts/e2e-stack.ts',
       cwd: '../..',
+      // El E2E de ligas cierra la temporada desde el panel, que exige 2FA: el stack siembra
+      // el admin fijo (mismo secreto TOTP que usa `apps/admin/playwright.config.ts`).
+      env: { E2E_ADMIN: '1' },
       url: 'http://127.0.0.1:3001/v1/health',
       reuseExistingServer: !process.env['CI'],
       timeout: 60_000,

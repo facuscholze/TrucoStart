@@ -17,6 +17,7 @@ Todos los cambios notables de este proyecto se documentan por módulo siguiendo 
 
 ### Corregido (encontrado por el E2E y la auditoría visual)
 
+- **Un asiento con dos conexiones quedaba mudo:** el actor de sala guardaba un solo socket por asiento, así que un segundo `join` del mismo jugador (dos pestañas, o la mesa en el navegador junto a un cliente de juego) dejaba al primero sin eventos sin desconectarlo. Ahora cada asiento tiene un conjunto de sockets y sólo el último que se va dispara la desconexión (`multi-socket-seat.spec.ts`).
 - El paño de la mesa no podía encogerse (`flex: 1 1 600px` sin `minWidth: 0`): el documento desbordaba a 385 px en una pantalla de 360. La fila de bazas ahora también envuelve las cartas.
 - El tanteador de tres equipos recortaba el nombre del equipo en el panel angosto; usa etiquetas cortas con el nombre completo accesible.
 - El historial de la mesa (`ul` con scroll) no era enfocable con teclado.

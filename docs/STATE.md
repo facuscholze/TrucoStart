@@ -566,16 +566,21 @@ Además, en el panel: el cliente mandaba `content-type: application/json` en POS
 
 ### Lo que el E2E y la auditoría visual encontraron
 
+0. **El actor de sala guardaba un solo socket por asiento.** Con dos conexiones del mismo jugador (la mesa en el navegador y un cliente de juego, o dos pestañas) el segundo `join` reemplazaba al primero y ese cliente dejaba de recibir eventos sin desconectarse: la mesa se le congelaba. Ahora cada asiento tiene un conjunto de sockets; el E2E del truco de 6 lo destapó y `apps/game-server/tests/multi-socket-seat.spec.ts` lo fija (falla contra el código anterior).
 1. **El paño de la mesa no podía encogerse.** `Table` usaba `flex: 1 1 600px` sin `minWidth: 0`: en la mesa de seis el documento medía 385 px en una pantalla de 360. Corregido en `packages/ui`, junto con la fila de bazas que no envolvía las cartas.
 2. **El tanteador recortaba el nombre del equipo** en el anotador angosto del panel lateral ("Nosotr…"). Pasa a etiquetas cortas con el nombre completo en el `aria-label`.
 3. **El historial de la mesa no era enfocable** con teclado (lista con scroll propio). Ahora es `tabIndex=0` con foco visible.
-4. **El E2E de seis no podía terminar:** cinco asientos jugaban por WebSocket y el sexto miraba la mesa. Ahora juegan los seis y el navegador valida lo que hay que ver.
+4. **El E2E de seis no podía terminar:** cinco asientos jugaban por WebSocket y el sexto miraba la mesa. Ahora juegan los seis y el navegador del dueño valida lo que hay que ver (asientos, tanteador y resultado) sin necesidad de jugar.
+
+> Nota sobre la práctica: una mesa de práctica o con bots **no** entra al historial ni a las estadísticas (filtro `isPractice = false` / `hasBots = false` en el repositorio de usuarios). Por eso el E2E de la mesa de seis usa seis personas reales y no bots: es la única forma de verificar que la partida de seis queda registrada en la API.
+
 5. **Con tres equipos el cartel de resultado resumía la mesa a "nosotros contra ellos"**, mostrando un rival arbitrario. Ahora lleva el tanteador completo.
 
 ### Verificación
 
 - API: **208 pruebas | 8 omitidas**; `m10b-six-seat.spec.ts` 9, paridad OpenAPI 3.
-- shared **172** (15 nuevas de geometría), web **79** (8 nuevas de la mesa de seis), admin 18, game-server 42 | 3, engine 54 y slow 7 (incluye 1 000 partidas de tres equipos).
+- shared **172** (15 nuevas de geometría), web **79** (8 nuevas de la mesa de seis), admin 18, game-server **44 | 3** (2 nuevas de sockets por asiento), engine 54 y slow 7 (incluye 1 000 partidas de tres equipos).
+- E2E corridos en local contra el stack real (PGlite): mesa de seis **1/1 en 8,5 s**, multicliente y práctica **4/4 en 2,7 min**, torneo 2v2 **2/2 en 4,7 min**.
 - `pnpm lint`, `typecheck`, `format:check`, `build`, `check-no-real-money` en verde.
 - axe WCAG 2.2 A/AA sin hallazgos nuevos en las tres escenas de la mesa de seis a 360 y 1200 px, y sin overflow horizontal.
 - E2E de la mesa de seis en CI (PostgreSQL 16 + Redis 7 reales).

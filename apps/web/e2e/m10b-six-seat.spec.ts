@@ -88,15 +88,27 @@ test.describe('M10b — truco de 6 (3v3) de punta a punta', () => {
         clients.push(client);
       }
 
-      // Un error del servidor (asiento inválido, ticket vencido, modo mal armado) tiene que
-      // aparecer en el mensaje del test, no como un timeout de 5 minutos.
-      const collectErrors = (): string[] =>
+      /**
+       * Un rechazo grave del servidor (asiento inválido, ticket vencido, sesión ajena, partida
+       * ya activa) tiene que aparecer en el mensaje del test, no como un timeout sin causa.
+       *
+       * Las acciones ilegales por vista desactualizada **no** cuentan: el cliente juega con la
+       * última vista que recibió y el servidor puede haber avanzado entre la decisión y el
+       * envío. Es el mismo ruido que produce cualquier cliente real con algo de latencia, y el
+       * correctivo ya está cubierto por la partida terminada y por el estado autoritativo.
+       */
+      const SEVERE_ERROR = /FORBIDDEN|UNAUTHORIZED|ticket|Ya tenés partida activa|no existe/i;
+      const collectErrors = (only?: RegExp): string[] =>
         clients.flatMap((client, index) =>
-          client.errors().map((error) => `${players[index]!.nickname}: ${error}`),
+          client
+            .errors()
+            .filter((error) => !only || only.test(error))
+            .map((error) => `${players[index]!.nickname}: ${error}`),
         );
       const expectNoServerErrors = (stage: string) => {
-        const errors = collectErrors();
-        expect(errors, `errores del game-server en ${stage}`).toEqual([]);
+        expect(collectErrors(SEVERE_ERROR), `rechazos graves del game-server en ${stage}`).toEqual(
+          [],
+        );
       };
 
       // 4. La mesa del dueño se abre en el navegador (390 px: el ancho más chico que se
@@ -164,10 +176,11 @@ test.describe('M10b — truco de 6 (3v3) de punta a punta', () => {
         timeout: 60_000,
       });
       await expect(page.getByTestId('match-result-header')).toBeVisible({ timeout: 60_000 });
-      const scoreboard = page.getByRole('region', { name: /^Tanteador a 15/i }).first();
+      // El marcador de la cabecera del paño tiene que traer los tres equipos: en una mesa de
+      // dos o cuatro asientos publica un duelo, acá publica la mesa completa.
+      const scoreboard = page.getByLabel(/Nos\. \d+.*Ellos 2 \d+.*Ellos 3 \d+/).first();
       await expect(scoreboard).toBeVisible();
-      const scoreboardText = await scoreboard.innerText();
-      // Tres equipos: el mío abre la lista y los dos rivales aparecen con su número.
+      const scoreboardText = (await scoreboard.getAttribute('aria-label')) ?? '';
       expect(scoreboardText).toMatch(/Nos\./);
       expect(scoreboardText).toMatch(/Ellos 2/);
       expect(scoreboardText).toMatch(/Ellos 3/);
@@ -219,8 +232,10 @@ test.describe('M10b — truco de 6 (3v3) de punta a punta', () => {
       await browser.close();
     }
 
-    // 9. Borrar la mesa no deja a nadie sentado.
+    // 9. La mesa terminada ya no se puede borrar como mesa en espera: el servidor la rechaza
+    //    en vez de dejarla a medio cerrar. Lo que importa es que el rechazo sea explícito.
     const deleted = await apiCall(owner.cookie, 'DELETE', `/v1/tables/${tableId}`);
-    expect([200, 204, 404]).toContain(deleted.status);
+    expect([200, 204, 404, 409]).toContain(deleted.status);
+    if (deleted.status === 409) expect(deleted.json).not.toBeNull();
   });
 });

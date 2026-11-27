@@ -167,7 +167,13 @@ export class RoomActor {
   private botTimer: ReturnType<typeof setTimeout> | null = null;
   private botTurnCounter = 0;
   private readonly timers = new RoomTimerController();
-  private readonly socketsBySeat = new Map<number, Socket>();
+  /**
+   * Sockets por asiento. Un mismo asiento puede tener más de uno: pestaña y reconexión
+   * conviven mientras el servidor no cierra la vieja, y jugar en dos pestañas es legítimo
+   * (torneo en el navegador + cliente de escritorio). Guardar uno solo hacía que el segundo
+   * `join` dejara al primero sin eventos: el jugador seguía "conectado" y no veía nada.
+   */
+  private readonly socketsBySeat = new Map<number, Set<Socket>>();
   private writeChain: Promise<void> = Promise.resolve();
 
   /** Estado público de la mesa (sin datos de juego), usado por el barrido de inactividad. */
@@ -338,8 +344,9 @@ export class RoomActor {
     await this.deps.store.saveRoomStateAndEvents(this.buildSnapshot(nowMs), events);
     for (const ev of events) {
       for (const s of this.seats) {
-        const sock = this.socketsBySeat.get(s.seat);
-        if (sock && isEventVisibleToSeat(ev.audience, s.seat, s.team)) {
+        const sockets = this.socketsBySeat.get(s.seat);
+        if (!sockets || !isEventVisibleToSeat(ev.audience, s.seat, s.team)) continue;
+        for (const sock of sockets) {
           sock.emit('envelope', {
             eventId: ev.eventId,
             seq: ev.seq,
@@ -496,7 +503,7 @@ export class RoomActor {
       return;
     }
 
-    this.socketsBySeat.set(outcome.seatIdx, socket);
+    this.attachSocket(outcome.seatIdx, socket);
     if (!outcome.alreadySeated) await this.deps.store.setUserActiveRoom(claims.userId, this.roomId);
     const now = this.deps.nowFn();
     await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
@@ -506,6 +513,13 @@ export class RoomActor {
       this.seats[outcome.seatIdx] = { ...this.seats[outcome.seatIdx]!, ready: true };
       await this.startMatchIfAllReady(now);
     }
+  }
+
+  /** Suma un socket al asiento sin reemplazar los que ya estaban conectados. */
+  private attachSocket(seatIdx: number, socket: Socket): void {
+    const sockets = this.socketsBySeat.get(seatIdx) ?? new Set<Socket>();
+    sockets.add(socket);
+    this.socketsBySeat.set(seatIdx, sockets);
   }
 
   private async onTableLeave(seatIdx: number): Promise<void> {
@@ -540,13 +554,13 @@ export class RoomActor {
     const seatIdx = this.seats.findIndex((s) => s.userId === userId);
     if (seatIdx === -1) return false;
 
-    const socket = this.socketsBySeat.get(seatIdx);
-    if (socket) {
-      this.sendSocketError(socket, 'FORBIDDEN', reason);
-      if (disconnect) {
-        socket.disconnect(true);
-        this.socketsBySeat.delete(seatIdx);
+    const sockets = this.socketsBySeat.get(seatIdx);
+    if (sockets && sockets.size > 0) {
+      for (const socket of sockets) {
+        this.sendSocketError(socket, 'FORBIDDEN', reason);
+        if (disconnect) socket.disconnect(true);
       }
+      if (disconnect) this.socketsBySeat.delete(seatIdx);
     }
 
     if (!disconnect) {
@@ -914,8 +928,12 @@ export class RoomActor {
   async handleDisconnect(socket: Socket, userId: string): Promise<void> {
     return this.enqueue(async () => {
       const seatIdx = this.seats.findIndex((s) => s.userId === userId);
-      if (seatIdx === -1 || this.socketsBySeat.get(seatIdx) !== socket) return;
-
+      if (seatIdx === -1) return;
+      const sockets = this.socketsBySeat.get(seatIdx);
+      // Un socket que no es el registrado, o que deja el asiento con otro socket vivo, no
+      // desconecta al jugador: sólo se saca de la lista.
+      if (!sockets?.delete(socket)) return;
+      if (sockets.size > 0) return;
       this.socketsBySeat.delete(seatIdx);
       const now = this.deps.nowFn();
       if (this.status !== 'IN_GAME') {
@@ -974,7 +992,7 @@ export class RoomActor {
     const now = this.deps.nowFn();
     const prevSeq = this.seq;
     this.timers.clearDisconnectGrace(seatIdx);
-    this.socketsBySeat.set(seatIdx, socket);
+    this.attachSocket(seatIdx, socket);
     this.seats[seatIdx] = {
       ...this.seats[seatIdx]!,
       connected: true,

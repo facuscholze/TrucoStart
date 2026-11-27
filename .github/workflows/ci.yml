@@ -242,7 +242,6 @@ jobs:
       # job) y el 3v3 con cinco asientos por WebSocket y el sexto en la mesa del navegador.
       # Tarda minutos, no segundos: la salida se guarda para publicarla si falla.
       - name: Tournament E2E (llave, partidas y campeón en 1v1 y 2v2)
-        id: tournament-e2e
         run: |
           set -o pipefail
           pnpm --filter @truco/web exec playwright test \
@@ -252,23 +251,22 @@ jobs:
 
       # El truco de 6 corre aparte: si un torneo se cae, la mesa de seis se sigue viendo
       # en su propio paso y viceversa.
+      # La salida se publica como anotación en el mismo paso: si el test falla, la causa queda
+      # escrita en el run sin depender de descargar logs ni artefactos.
       - name: Six-seat E2E (mesa 3v3 real con cinco WebSocket y un navegador)
-        id: six-seat-e2e
         run: |
           set -o pipefail
           pnpm --filter @truco/web exec playwright test \
             e2e/m10b-six-seat.spec.ts \
-            2>&1 | tee /tmp/six-seat.log
-
-      - name: Publish six-seat failure details
-        if: steps.six-seat-e2e.outcome == 'failure'
-        run: |
-          message=$(tail -80 /tmp/six-seat.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
-          echo "::error title=Six-seat E2E failed::${message}"
-          exit 1
+            2>&1 | tee /tmp/six-seat.log || {
+            message=$(head -30 /tmp/six-seat.log; echo '...'; tail -60 /tmp/six-seat.log)
+            message=$(printf '%s' "$message" | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Six-seat E2E failed::${message}"
+            exit 1
+          }
 
       - name: Publish tournament failure details
-        if: steps.tournament-e2e.outcome == 'failure'
+        if: failure()
         run: |
           message=$(tail -80 /tmp/tournament.log 2>/dev/null | head -c 60000 | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Tournament E2E failed::${message}"

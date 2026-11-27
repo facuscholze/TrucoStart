@@ -50,3 +50,23 @@
 - **Estado:** Abierto — requiere infraestructura.
 - **Detalle:** `scripts/smoke-staging.mjs` pasó 23/23 contra API, game-server y SPA **reales levantados localmente**, pero no contra el despliegue (necesita DNS y TLS). Del mismo modo, p95 < 150 ms y las 100 partidas simultáneas están medidos en loopback y en el sandbox, no con red real ni contra Postgres/Redis reales en staging. `docs/STATE.md` § «M8 — criterios de salida del MVP» marca exactamente qué falta.
 - **Mitigación:** Una vez desplegado, el smoke test es un comando; los escenarios de carga ya están escritos en `perf.yml` y `infra/`.
+
+### ISSUE-007: `ratings.service.spec.ts` tenía un test al filo del timeout global
+
+- **Severidad:** Baja (inestabilidad de CI, no de producto).
+- **Estado:** Mitigado; deuda de costo registrada.
+- **Detalle:** El caso «falls back to PostgreSQL when leaderboard writes fail and when Redis rankOf
+  throws or returns null» levantaba **tres** bases efímeras (una por escenario: escritura del
+  leaderboard caída, `rankOf` nulo y `rankOf` con error) y cada una corre todas las migraciones.
+  Medido en el sandbox: **5854 ms** contra el límite global de 5000 ms, y en una corrida de la
+  suite completa falló con `Test timed out in 5000ms`. En las tres corridas siguientes pasó
+  (9/9), o sea que era una falla por tiempo y no por producto: el riesgo era que un runner lento
+  lo tumbara sin que nada estuviera roto.
+- **Mitigación aplicada:** el caso declara `{ timeout: 20_000 }` con la justificación en el propio
+  test, en vez de relajar el límite global del proyecto. Se midió después del cambio: 5662 ms, con
+  margen de ~3,5×.
+- **Deuda pendiente (si se quiere bajar el costo, no sólo el límite):** compartir una sola base
+  entre los tres escenarios del test lo dejaría en ~2 s, pero cambia el aislamiento: los tres
+  caminos de respaldo dejan filas en `rating_redis_outbox` y hoy no se pisan. Antes de hacerlo hay
+  que verificar que el `onApplicationShutdown` de un escenario no afecte a los otros, o rearmar el
+  caso en tres `it` separados con su propia base cada uno (mismo costo total, mejor diagnóstico).

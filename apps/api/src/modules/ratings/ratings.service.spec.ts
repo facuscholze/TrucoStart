@@ -434,63 +434,82 @@ describe('RatingsService — durable competitive rating lifecycle', () => {
     }
   });
 
-  it('falls back to PostgreSQL when leaderboard writes fail and when Redis rankOf throws or returns null', async () => {
-    const failingStore = new InMemoryLeaderboardStore();
-    failingStore.replaceLeaderboard = async () => {
-      throw new Error('Redis unavailable');
-    };
-    const fallbackContext = await createContext({}, failingStore);
-    try {
-      const players = await createPlayers(fallbackContext.handle, fallbackContext.now, 'fallback-');
-      const matchId = await insertMatch({
-        handle: fallbackContext.handle,
-        now: fallbackContext.now,
-        seasonId: fallbackContext.seasonId,
-        players,
-      });
-      await fallbackContext.service.processMatch(matchId);
-      const leaderboard = await fallbackContext.service.getLeaderboard({
-        period: 'GLOBAL',
-        mode: '1v1',
-        limit: 10,
-      });
-      expect(leaderboard.items.map((item) => item.userId)).toEqual([
-        players[0]!.id,
-        players[1]!.id,
-      ]);
-    } finally {
-      await fallbackContext.service.onApplicationShutdown();
-      await fallbackContext.handle.close();
-    }
-
-    for (const rankResult of ['NULL', 'ERROR'] as const) {
-      const store = new InMemoryLeaderboardStore();
-      const context = await createContext({}, store);
+  /**
+   * Este caso levanta **tres** bases efímeras (una por escenario: escritura del leaderboard
+   * caída, `rankOf` nulo y `rankOf` con error), y cada una corre todas las migraciones. Medido
+   * en el sandbox: 5854 ms contra el límite global de 5000 ms, o sea que el margen no existe y
+   * en un runner lento falla por tiempo, no por producto.
+   *
+   * El límite se sube acá y sólo acá, en vez de bajar el costo, porque las tres bases son lo que
+   * hace que el caso pruebe de verdad los tres caminos de respaldo contra el motor real. Se puede
+   * bajar el costo compartiendo una sola base entre los escenarios, pero eso cambia el
+   * aislamiento del test. Deuda registrada en `docs/ISSUES.md` (ISSUE-007).
+   */
+  it(
+    'falls back to PostgreSQL when leaderboard writes fail and when Redis rankOf throws or returns null',
+    { timeout: 20_000 },
+    async () => {
+      const failingStore = new InMemoryLeaderboardStore();
+      failingStore.replaceLeaderboard = async () => {
+        throw new Error('Redis unavailable');
+      };
+      const fallbackContext = await createContext({}, failingStore);
       try {
-        const players = await createPlayers(context.handle, context.now, `rank-${rankResult}-`);
+        const players = await createPlayers(
+          fallbackContext.handle,
+          fallbackContext.now,
+          'fallback-',
+        );
         const matchId = await insertMatch({
-          handle: context.handle,
-          now: context.now,
-          seasonId: context.seasonId,
+          handle: fallbackContext.handle,
+          now: fallbackContext.now,
+          seasonId: fallbackContext.seasonId,
           players,
         });
-        await context.service.processMatch(matchId);
-        store.rankOf = async () => {
-          if (rankResult === 'ERROR') throw new Error('Redis rank lookup failed');
-          return null;
-        };
-
-        const response = await context.service.getPlayerRatingProfiles(
+        await fallbackContext.service.processMatch(matchId);
+        const leaderboard = await fallbackContext.service.getLeaderboard({
+          period: 'GLOBAL',
+          mode: '1v1',
+          limit: 10,
+        });
+        expect(leaderboard.items.map((item) => item.userId)).toEqual([
           players[0]!.id,
-          players[0]!.id,
-        );
-        expect(response.ratings.find((rating) => rating.mode === '1v1')?.position).toBe(1);
+          players[1]!.id,
+        ]);
       } finally {
-        await context.service.onApplicationShutdown();
-        await context.handle.close();
+        await fallbackContext.service.onApplicationShutdown();
+        await fallbackContext.handle.close();
       }
-    }
-  });
+
+      for (const rankResult of ['NULL', 'ERROR'] as const) {
+        const store = new InMemoryLeaderboardStore();
+        const context = await createContext({}, store);
+        try {
+          const players = await createPlayers(context.handle, context.now, `rank-${rankResult}-`);
+          const matchId = await insertMatch({
+            handle: context.handle,
+            now: context.now,
+            seasonId: context.seasonId,
+            players,
+          });
+          await context.service.processMatch(matchId);
+          store.rankOf = async () => {
+            if (rankResult === 'ERROR') throw new Error('Redis rank lookup failed');
+            return null;
+          };
+
+          const response = await context.service.getPlayerRatingProfiles(
+            players[0]!.id,
+            players[0]!.id,
+          );
+          expect(response.ratings.find((rating) => rating.mode === '1v1')?.position).toBe(1);
+        } finally {
+          await context.service.onApplicationShutdown();
+          await context.handle.close();
+        }
+      }
+    },
+  );
 
   it('creates human-review evidence for repeat opponents and closes a season once with soft reset and frozen eligible ranks', async () => {
     const context = await createContext({ repeatedPairSignalCount: 2, repeatRivalLimit: 2 });

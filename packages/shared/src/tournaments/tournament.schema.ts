@@ -107,6 +107,43 @@ export const CreateTournamentRequestSchema = z
   .strict();
 export type CreateTournamentRequest = z.infer<typeof CreateTournamentRequestSchema>;
 
+/** Inscripción de un equipo (sólo torneos 2v2). */
+export const RegisterTeamRequestSchema = z
+  .object({
+    name: z.string().trim().min(2).max(40),
+    teammateUserIds: z.array(z.string().uuid()).min(1).max(1),
+  })
+  .strict();
+export type RegisterTeamRequest = z.infer<typeof RegisterTeamRequestSchema>;
+
+export const RegisterTeamResponseSchema = z
+  .object({
+    teamId: z.string().uuid(),
+    participants: z.number().int(),
+  })
+  .strict();
+export type RegisterTeamResponse = z.infer<typeof RegisterTeamResponseSchema>;
+
+/** Equipo visto en el detalle del torneo. */
+export const TournamentTeamViewSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    seed: z.number().int().nullable(),
+    captainUserId: z.string().uuid(),
+    members: z.array(
+      z
+        .object({
+          userId: z.string().uuid(),
+          nickname: z.string(),
+          status: TournamentParticipantStatusSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type TournamentTeamView = z.infer<typeof TournamentTeamViewSchema>;
+
 export const TournamentPrizeViewSchema = TournamentPrizeSchema.extend({
   /** Etiqueta legible del cosmético, cuando aplica. */
   cosmeticName: z.string().nullable(),
@@ -200,6 +237,13 @@ export const TournamentMatchViewSchema = z
     homeUserId: z.string().uuid().nullable(),
     awayUserId: z.string().uuid().nullable(),
     winnerUserId: z.string().uuid().nullable(),
+    /**
+     * Equipos que ocupan cada lado y el ganador, en torneos 2v2. En 1v1 son `null` y
+     * mandan los ids de usuario.
+     */
+    homeTeamId: z.string().uuid().nullable(),
+    awayTeamId: z.string().uuid().nullable(),
+    winnerTeamId: z.string().uuid().nullable(),
     /** Sala de juego creada por el aprovisionamiento existente. */
     roomId: z.string().uuid().nullable(),
     /** Reloj límite para presentarse; pasado el plazo se define por incomparecencia. */
@@ -228,6 +272,8 @@ export const TournamentDetailResponseSchema = z
   .object({
     tournament: TournamentSummarySchema,
     participants: z.array(TournamentParticipantViewSchema),
+    /** Equipos del torneo 2v2; en 1v1 viene vacío. */
+    teams: z.array(TournamentTeamViewSchema),
     matches: z.array(TournamentMatchViewSchema),
     standings: z.array(TournamentStandingSchema),
     /** Próxima partida del jugador actual, si tiene una pendiente. */

@@ -208,6 +208,9 @@ const match = (overrides) => ({
   homeUserId: null,
   awayUserId: null,
   winnerUserId: null,
+  homeTeamId: null,
+  awayTeamId: null,
+  winnerTeamId: null,
   roomId: null,
   deadlineAt: null,
   forfeitReason: null,
@@ -273,6 +276,8 @@ const matches = [
 const detail = {
   tournament: summary,
   participants,
+  // Un torneo 1v1 no tiene equipos: el campo viene vacío, no ausente.
+  teams: [],
   matches,
   standings: [
     {
@@ -380,6 +385,163 @@ const list = {
   ],
 };
 
+const TEAM_TOURNAMENT_ID = '019a7e40-0000-7000-8000-00000000c002';
+
+/** Fixture del torneo 2v2: la pantalla que muestra equipos y un cuadro por equipo. */
+const teamDetail = {
+  tournament: {
+    ...summary,
+    id: TEAM_TOURNAMENT_ID,
+    name: 'Copa de Equipos',
+    mode: '2v2',
+    capacity: 4,
+    registeredCount: 4,
+    checkedInCount: 4,
+    isParticipant: true,
+  },
+  participants: [],
+  teams: [
+    {
+      id: '019a7e40-0000-7000-8000-00000000f001',
+      name: 'Los Pibes',
+      seed: 1,
+      captainUserId: USER_ID,
+      members: [
+        { userId: USER_ID, nickname: 'TanaDelSur', status: 'CHECKED_IN' },
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c002',
+          nickname: 'MateAmargo',
+          status: 'CHECKED_IN',
+        },
+      ],
+    },
+    {
+      id: '019a7e40-0000-7000-8000-00000000f002',
+      name: 'La Banda',
+      seed: 2,
+      captainUserId: '019a7e40-0000-7000-8000-00000000c003',
+      members: [
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c003',
+          nickname: 'LaViejaEscuela',
+          status: 'CHECKED_IN',
+        },
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c004',
+          nickname: 'CantoFirme',
+          status: 'CHECKED_IN',
+        },
+      ],
+    },
+    {
+      id: '019a7e40-0000-7000-8000-00000000f003',
+      name: 'Los del Fondo',
+      seed: 3,
+      captainUserId: '019a7e40-0000-7000-8000-00000000c005',
+      members: [
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c005',
+          nickname: 'EnvidoFiel',
+          status: 'CHECKED_IN',
+        },
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c006',
+          nickname: 'FlorDePalo',
+          status: 'CHECKED_IN',
+        },
+      ],
+    },
+    {
+      id: '019a7e40-0000-7000-8000-00000000f004',
+      name: 'Los Vecinos',
+      seed: 4,
+      captainUserId: '019a7e40-0000-7000-8000-00000000c007',
+      members: [
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c007',
+          nickname: 'AnchoSur',
+          status: 'CHECKED_IN',
+        },
+        {
+          userId: '019a7e40-0000-7000-8000-00000000c008',
+          nickname: 'MesaChica',
+          status: 'CHECKED_IN',
+        },
+      ],
+    },
+  ],
+  matches: [
+    match({
+      id: '019a7e40-0000-7000-8000-00000000d101',
+      round: 1,
+      slot: 0,
+      status: 'COMPLETED',
+      homeTeamId: '019a7e40-0000-7000-8000-00000000f001',
+      homeNickname: 'Los Pibes',
+      awayTeamId: '019a7e40-0000-7000-8000-00000000f004',
+      awayNickname: 'Los Vecinos',
+      winnerTeamId: '019a7e40-0000-7000-8000-00000000f001',
+      completedAt: '2026-11-26T12:52:00.000Z',
+    }),
+    match({
+      id: '019a7e40-0000-7000-8000-00000000d102',
+      round: 1,
+      slot: 1,
+      status: 'READY',
+      homeTeamId: '019a7e40-0000-7000-8000-00000000f002',
+      homeNickname: 'La Banda',
+      awayTeamId: '019a7e40-0000-7000-8000-00000000f003',
+      awayNickname: 'Los del Fondo',
+      roomId: '019a7e40-0000-7000-8000-00000000r201',
+      deadlineAt: '2026-11-26T13:20:00.000Z',
+    }),
+    match({
+      id: '019a7e40-0000-7000-8000-00000000d103',
+      round: 2,
+      slot: 0,
+      status: 'SCHEDULED',
+    }),
+  ],
+  standings: [
+    {
+      position: 1,
+      userId: USER_ID,
+      nickname: 'Los Pibes',
+      seed: 1,
+      eliminationRound: null,
+      tiebreakNote: 'Sigue en carrera',
+    },
+    {
+      position: 2,
+      userId: '019a7e40-0000-7000-8000-00000000c003',
+      nickname: 'La Banda',
+      seed: 2,
+      eliminationRound: null,
+      tiebreakNote: 'Sigue en carrera',
+    },
+    {
+      position: 3,
+      userId: '019a7e40-0000-7000-8000-00000000c005',
+      nickname: 'Los del Fondo',
+      seed: 3,
+      eliminationRound: null,
+      tiebreakNote: 'Sigue en carrera',
+    },
+    {
+      position: 4,
+      userId: '019a7e40-0000-7000-8000-00000000c007',
+      nickname: 'Los Vecinos',
+      seed: 4,
+      eliminationRound: 1,
+      tiebreakNote: 'Cayó en la ronda 1',
+    },
+  ],
+  myNextMatch: null,
+  canRegister: false,
+  canCheckIn: false,
+  registrationClosedReason: null,
+};
+
 async function fulfillJson(route, status, body) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -420,6 +582,9 @@ async function installFixtures(page) {
     }
     if (pathname === '/v1/tournaments') return fulfillJson(route, 200, list);
     if (pathname === `/v1/tournaments/${TOURNAMENT_ID}`) return fulfillJson(route, 200, detail);
+    if (pathname === `/v1/tournaments/${TEAM_TOURNAMENT_ID}`) {
+      return fulfillJson(route, 200, teamDetail);
+    }
     if (pathname === '/v1/tournaments/my-next-match') {
       return fulfillJson(route, 200, { match: null, tournament: null });
     }
@@ -487,6 +652,8 @@ async function main() {
 
       await capture(page, viewport, '/torneos', 'lista', 'Copa de Otoño');
       await capture(page, viewport, `/torneos/${TOURNAMENT_ID}`, 'detalle', 'Llave de ganadores');
+      // Pantalla nueva de esta tanda: un torneo por equipos con sus equipos y su cuadro.
+      await capture(page, viewport, `/torneos/${TEAM_TOURNAMENT_ID}`, 'equipos', 'Equipos (4)');
       await context.close();
     }
   } finally {

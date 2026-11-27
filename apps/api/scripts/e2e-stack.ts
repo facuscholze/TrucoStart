@@ -44,6 +44,24 @@ const E2E_TARGET_EMAIL = 'e2e-target@truco.ar';
 const E2E_PLAYER_PASSWORD = 'JugadorE2E2026!';
 const GAME_PORT = Number(process.env['GAME_SERVER_PORT'] ?? 3002);
 
+/**
+ * Topes de producto para el stack de pruebas.
+ *
+ * Los límites anti-abuso (torneos privados activos por cuenta, altas por cuenta y por IP)
+ * existen para el producto real, no para una suite que crea varios torneos seguidos desde
+ * la misma IP del runner en pocos minutos. Se elevan acá y no en el E2E: el código que se
+ * prueba sigue siendo el de siempre y el producto conserva sus límites.
+ */
+function raiseTournamentLimitsForE2E(): void {
+  process.env['TOURNAMENTS_MAX_ACTIVE_PRIVATE'] =
+    process.env['TOURNAMENTS_MAX_ACTIVE_PRIVATE'] ?? '50';
+  process.env['TOURNAMENTS_CREATE_PER_ACCOUNT'] =
+    process.env['TOURNAMENTS_CREATE_PER_ACCOUNT'] ?? '200';
+  process.env['TOURNAMENTS_CREATE_PER_IP'] = process.env['TOURNAMENTS_CREATE_PER_IP'] ?? '500';
+  process.env['TOURNAMENTS_REGISTER_PER_ACCOUNT'] =
+    process.env['TOURNAMENTS_REGISTER_PER_ACCOUNT'] ?? '200';
+}
+
 /** Siembra el admin del panel y una partida terminada con eventos (replay auditable). */
 async function seedAdminPanelFixtures(
   dbHandle: Awaited<ReturnType<typeof createAdaptiveTestDatabase>>,
@@ -179,6 +197,8 @@ async function seedAdminPanelFixtures(
 }
 
 async function main() {
+  // Antes de crear la app: la configuración de torneos se arma al construir el módulo.
+  raiseTournamentLimitsForE2E();
   const dbHandle = await createAdaptiveTestDatabase();
   const inMemoryBus = new InMemoryMatchLifecycleBus();
 

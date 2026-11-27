@@ -11,6 +11,7 @@ import {
   tournamentMatchesTable,
   tournamentParticipantsTable,
   tournamentPrizesTable,
+  tournamentTeamsTable,
   tournamentsTable,
   usersTable,
 } from '../../db/schema/index.js';
@@ -49,10 +50,32 @@ export interface TournamentRow {
   readonly updatedAt: Date;
 }
 
+export interface TeamRow {
+  readonly id: string;
+  readonly tournamentId: string;
+  readonly name: string;
+  readonly captainUserId: string;
+  readonly seed: number | null;
+  readonly seedRating: number | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+/** Integrante de un equipo, con su inscripción en el torneo. */
+export interface TeamMemberRow {
+  readonly teamId: string;
+  readonly userId: string;
+  readonly participantId: string;
+  readonly status: ParticipantRow['status'];
+  readonly nickname: string;
+}
+
 export interface ParticipantRow {
   readonly id: string;
   readonly tournamentId: string;
   readonly userId: string;
+  /** Equipo del inscripto en torneos 2v2; `NULL` en 1v1. */
+  readonly teamId: string | null;
   readonly status:
     | 'REGISTERED'
     | 'CHECKED_IN'
@@ -76,6 +99,14 @@ export interface TournamentMatchRow {
   readonly slot: number;
   readonly homeUserId: string | null;
   readonly awayUserId: string | null;
+  /** Lados por equipo en torneos 2v2; `NULL` en 1v1. */
+  readonly homeTeamId: string | null;
+  readonly awayTeamId: string | null;
+  readonly winnerTeamId: string | null;
+  readonly loserTeamId: string | null;
+  /** Cuándo se presentó cada lado (base de la incomparecencia en equipos). */
+  readonly homePresentAt: Date | null;
+  readonly awayPresentAt: Date | null;
   readonly homeSeed: number | null;
   readonly awaySeed: number | null;
   readonly status: 'SCHEDULED' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'FORFEITED';
@@ -341,6 +372,107 @@ export class TournamentsRepository {
       .where(eq(tournamentParticipantsTable.id, id));
   }
 
+  // ------------------------------------------------------------------- equipos
+
+  async insertTeam(
+    tx: AppTransaction,
+    values: typeof tournamentTeamsTable.$inferInsert,
+  ): Promise<TeamRow> {
+    const [row] = await tx.insert(tournamentTeamsTable).values(values).returning();
+    return row!;
+  }
+
+  async findTeam(
+    tournamentId: string,
+    teamId: string,
+    tx?: AppTransaction,
+  ): Promise<TeamRow | null> {
+    const [row] = await (tx ?? this.db)
+      .select()
+      .from(tournamentTeamsTable)
+      .where(
+        and(
+          eq(tournamentTeamsTable.tournamentId, tournamentId),
+          eq(tournamentTeamsTable.id, teamId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findTeamByCaptain(
+    tournamentId: string,
+    captainUserId: string,
+    tx?: AppTransaction,
+  ): Promise<TeamRow | null> {
+    const [row] = await (tx ?? this.db)
+      .select()
+      .from(tournamentTeamsTable)
+      .where(
+        and(
+          eq(tournamentTeamsTable.tournamentId, tournamentId),
+          eq(tournamentTeamsTable.captainUserId, captainUserId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async listTeams(tournamentId: string, tx?: AppTransaction): Promise<TeamRow[]> {
+    return (tx ?? this.db)
+      .select()
+      .from(tournamentTeamsTable)
+      .where(eq(tournamentTeamsTable.tournamentId, tournamentId))
+      .orderBy(asc(tournamentTeamsTable.createdAt), asc(tournamentTeamsTable.id));
+  }
+
+  /**
+   * Integrantes de cada equipo con el estado de su inscripción. Es la entrada de las
+   * reglas de asistencia: sin la inscripción no se sabe quién se presentó.
+   */
+  async listTeamMembers(tournamentId: string, tx?: AppTransaction): Promise<TeamMemberRow[]> {
+    const rows = await (tx ?? this.db)
+      .select({
+        teamId: tournamentParticipantsTable.teamId,
+        userId: tournamentParticipantsTable.userId,
+        participantId: tournamentParticipantsTable.id,
+        status: tournamentParticipantsTable.status,
+        nickname: usersTable.nickname,
+      })
+      .from(tournamentParticipantsTable)
+      .innerJoin(usersTable, eq(usersTable.id, tournamentParticipantsTable.userId))
+      .where(
+        and(
+          eq(tournamentParticipantsTable.tournamentId, tournamentId),
+          isNotNull(tournamentParticipantsTable.teamId),
+        ),
+      )
+      .orderBy(asc(tournamentParticipantsTable.registeredAt));
+    return rows.map((row) => ({ ...row, teamId: row.teamId! }));
+  }
+
+  /** Marca eliminados a todos los integrantes de un equipo que perdió su cruce. */
+  async markTeamEliminated(tournamentId: string, teamId: string): Promise<void> {
+    await this.db
+      .update(tournamentParticipantsTable)
+      .set({ status: 'ELIMINATED' })
+      .where(
+        and(
+          eq(tournamentParticipantsTable.tournamentId, tournamentId),
+          eq(tournamentParticipantsTable.teamId, teamId),
+          eq(tournamentParticipantsTable.status, 'CHECKED_IN'),
+        ),
+      );
+  }
+
+  async updateTeam(
+    tx: AppTransaction,
+    id: string,
+    patch: Partial<typeof tournamentTeamsTable.$inferInsert>,
+  ): Promise<void> {
+    await tx.update(tournamentTeamsTable).set(patch).where(eq(tournamentTeamsTable.id, id));
+  }
+
   /** Ratings vigentes de la temporada activa para sembrar el cuadro. */
   async ratingsFor(
     userIds: readonly string[],
@@ -546,7 +678,13 @@ export class TournamentsRepository {
       .insert(tournamentAwardsTable)
       .values(values)
       .onConflictDoNothing({
-        target: [tournamentAwardsTable.tournamentId, tournamentAwardsTable.position],
+        // Único por (torneo, posición, persona): en equipos el premio lo cobra cada
+        // integrante y un reintento no duplica.
+        target: [
+          tournamentAwardsTable.tournamentId,
+          tournamentAwardsTable.position,
+          tournamentAwardsTable.userId,
+        ],
       })
       .returning({ id: tournamentAwardsTable.id });
     return row ?? null;
@@ -579,17 +717,45 @@ export class TournamentsRepository {
     return rows.map((row) => row.tournamentId);
   }
 
+  /**
+   * Cruces pendientes del jugador. Incluye los de 2v2: ahí el lado del cuadro es un
+   * EQUIPO, así que también cuentan los cruces donde juega el equipo del jugador. Sin
+   * esto, un torneo por equipos no mostraba "mi próxima partida" ni el botón de la mesa.
+   */
   async listMatchesForUser(userId: string): Promise<TournamentMatchRow[]> {
+    const teamIds = await this.db
+      .select({ teamId: tournamentParticipantsTable.teamId })
+      .from(tournamentParticipantsTable)
+      .where(
+        and(
+          eq(tournamentParticipantsTable.userId, userId),
+          isNotNull(tournamentParticipantsTable.teamId),
+        ),
+      );
+    const myTeams = teamIds
+      .map((row) => row.teamId)
+      .filter((teamId): teamId is string => teamId !== null);
+    const sides = [
+      or(
+        eq(tournamentMatchesTable.homeUserId, userId),
+        eq(tournamentMatchesTable.awayUserId, userId),
+      )!,
+      ...(myTeams.length > 0
+        ? [
+            or(
+              inArray(tournamentMatchesTable.homeTeamId, myTeams),
+              inArray(tournamentMatchesTable.awayTeamId, myTeams),
+            )!,
+          ]
+        : []),
+    ];
     return this.db
       .select()
       .from(tournamentMatchesTable)
       .where(
         and(
           inArray(tournamentMatchesTable.status, ['SCHEDULED', 'READY', 'IN_PROGRESS']),
-          or(
-            eq(tournamentMatchesTable.homeUserId, userId),
-            eq(tournamentMatchesTable.awayUserId, userId),
-          ),
+          or(...sides),
         ),
       )
       .orderBy(asc(tournamentMatchesTable.deadlineAt));

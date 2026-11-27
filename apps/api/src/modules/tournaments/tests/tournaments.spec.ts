@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildTournamentTopology, simulateTournament } from '@truco/shared';
 import {
@@ -13,9 +13,12 @@ import {
   profilesTable,
   ratingProfilesTable,
   ratingSeasonsTable,
+  tableSeatsTable,
   tablesTable,
+  tournamentAwardsTable,
   tournamentMatchesTable,
   tournamentParticipantsTable,
+  tournamentTeamsTable,
   tournamentsTable,
   usersTable,
   walletAccountsTable,
@@ -782,6 +785,369 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(final.homeUserId ?? final.awayUserId).toBe(semi.homeUserId);
   }, 120_000);
 
+  /**
+   * M10a — torneo 2v2 de punta a punta contra PostgreSQL (PGlite local, PostgreSQL real
+   * en CI): equipos, check-in por integrante, cuadro, mesas de cuatro asientos, cierre
+   * por equipo y premios por integrante.
+   */
+  it('un torneo 2v2 se juega con equipos: mesa de 4 asientos, campeón y premios por integrante', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    // 4 equipos de 2 = 8 personas.
+    const players = await seedUsers(8, (index) => 1900 - index * 40);
+    const tournament = await service.create(
+      organizer.principal,
+      {
+        ...createInput,
+        capacity: 4,
+        rules: { ...createInput.rules, mode: '2v2' },
+      },
+      { ip: '10.0.0.31' },
+    );
+    expect(tournament.mode).toBe('2v2');
+
+    for (let team = 0; team < 4; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+
+    // Un equipo de 2v2 no puede inscribirse con un solo integrante ni con alguien que ya
+    // está en otro equipo.
+    await expect(
+      service.registerTeam(players[0]!.principal, tournament.id, {
+        name: 'Incompleto',
+        teammateUserIds: [],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Check-in: todos los integrantes, uno por uno.
+    for (const player of players) await service.checkIn(player.principal, tournament.id);
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    // El cuadro tiene 4 lados (equipos), no 8.
+    const firstRound = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    expect(firstRound).toHaveLength(3);
+    for (const match of firstRound) {
+      expect(match.homeUserId).toBeNull();
+      expect(match.awayUserId).toBeNull();
+      if (match.status === 'READY') {
+        expect(match.homeTeamId).not.toBeNull();
+        expect(match.awayTeamId).not.toBeNull();
+      }
+    }
+
+    // "Mi próxima partida" tiene que encontrar el cruce por EQUIPO: en 2v2 el lado del
+    // cuadro no es la persona, así que sin esto la pantalla no ofrece entrar a la mesa.
+    const next = await service.myNextMatch(players[0]!.id);
+    expect(next.match).not.toBeNull();
+    expect(next.match!.roomId).toBeTruthy();
+    const detail2v2 = await service.detail(players[0]!.id, tournament.id);
+    expect(detail2v2.myNextMatch).not.toBeNull();
+
+    // Cada cruce listo tiene su mesa con 4 asientos intercalados por equipo.
+    const ready = firstRound.filter((match) => match.roomId !== null);
+    expect(ready.length).toBeGreaterThan(0);
+    for (const match of ready) {
+      const seats = await db
+        .select()
+        .from(tableSeatsTable)
+        .where(eq(tableSeatsTable.tableId, match.roomId!));
+      expect(seats).toHaveLength(4);
+      const teamA = seats.filter((seat) => seat.team === 0).map((seat) => seat.userId);
+      const teamB = seats.filter((seat) => seat.team === 1).map((seat) => seat.userId);
+      expect(teamA).toHaveLength(2);
+      expect(teamB).toHaveLength(2);
+      // Cada equipo es el de su lado del cuadro, y nadie se repite.
+      expect(new Set([...teamA, ...teamB]).size).toBe(4);
+      // Los asientos respetan la intercalación que espera el motor (`seat % 2 === team`).
+      for (const seat of seats) expect(seat.seat % 2).toBe(seat.team);
+    }
+
+    // Se juegan todos los cruces con el resultado de la mesa (equipo 0 o 1).
+    const teams = await db
+      .select()
+      .from(tournamentTeamsTable)
+      .where(eq(tournamentTeamsTable.tournamentId, tournament.id));
+    expect(teams).toHaveLength(4);
+    for (let guard = 0; guard < 8; guard++) {
+      const pending = await db
+        .select()
+        .from(tournamentMatchesTable)
+        .where(
+          and(
+            eq(tournamentMatchesTable.tournamentId, tournament.id),
+            inArray(tournamentMatchesTable.status, ['READY', 'SCHEDULED']),
+          ),
+        );
+      const playable = pending.filter((match) => match.homeTeamId && match.awayTeamId);
+      if (playable.length === 0) break;
+      for (const match of playable) {
+        const winningTeamId = match.homeTeamId!;
+        const gameMatchId = await seedGameMatch(tournament.id, match.id);
+        await service.completeTeamMatch({
+          tournamentMatchId: match.id,
+          matchId: gameMatchId,
+          winnerTeamId: winningTeamId,
+          now: new Date(clockMs),
+        });
+      }
+      at(42 + guard);
+    }
+
+    const [finished] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, tournament.id));
+    expect(finished!.status).toBe('FINISHED');
+
+    // La tabla es por equipo y el campeón es un equipo con sus dos integrantes.
+    const standings = await service.standingsFor(finished!);
+    expect(standings).toHaveLength(4);
+    expect(standings[0]!.nickname).toBe('Equipo 1');
+    expect(standings[0]!.tiebreakNote).toContain('Campeón');
+
+    // El DETALLE tiene que publicar la misma tabla por equipo: armar la vista con la tabla
+    // de personas dejaba un torneo terminado con todos "Sigue en carrera" y sin campeón.
+    const finishedDetail = await service.detail(players[0]!.id, tournament.id);
+    expect(finishedDetail.standings[0]!.nickname).toBe('Equipo 1');
+    expect(finishedDetail.standings[0]!.tiebreakNote).toContain('Campeón');
+    // Y el campeón son las DOS personas del equipo, no la que esté primera.
+    const winners = finishedDetail.participants
+      .filter((participant) => participant.status === 'WINNER')
+      .map((participant) => participant.userId)
+      .sort();
+    expect(winners).toEqual([players[0]!.id, players[1]!.id].sort());
+
+    // Premios: cada integrante del campeón cobra las 100 monedas y los subcampeones 40.
+    const awards = await db
+      .select()
+      .from(tournamentAwardsTable)
+      .where(eq(tournamentAwardsTable.tournamentId, tournament.id));
+    expect(awards).toHaveLength(4);
+    expect(awards.filter((award) => award.position === 1)).toHaveLength(2);
+    expect(awards.filter((award) => award.position === 2)).toHaveLength(2);
+    expect(awards.every((award) => award.teamId !== null)).toBe(true);
+    const credits = await db
+      .select()
+      .from(walletTransactionsTable)
+      .where(eq(walletTransactionsTable.referenceId, tournament.id));
+    expect(credits).toHaveLength(4);
+
+    // Reintentar el pago no duplica nada, ni por equipo ni por persona.
+    expect(await service.payout(tournament.id, new Date(clockMs))).toBe(0);
+
+    // Idempotencia del cierre por equipo: el mismo resultado no se aplica dos veces.
+    const closed = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(
+        and(
+          eq(tournamentMatchesTable.tournamentId, tournament.id),
+          eq(tournamentMatchesTable.status, 'COMPLETED'),
+        ),
+      );
+    const finalMatch = closed.find((match) => match.round === 2)!;
+    expect(
+      await service.completeTeamMatch({
+        tournamentMatchId: finalMatch.id,
+        matchId: finalMatch.resolvedFromMatchId!,
+        winnerTeamId: finalMatch.winnerTeamId!,
+        now: new Date(clockMs),
+      }),
+    ).toBe(false);
+  }, 120_000);
+
+  it('en 2v2 un equipo al que le falta un integrante no entra al cuadro ni gana por walkover', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(6, (index) => 1900 - index * 40);
+    const tournament = await service.create(
+      organizer.principal,
+      {
+        ...createInput,
+        capacity: 4,
+        rules: { ...createInput.rules, mode: '2v2' },
+      },
+      { ip: '10.0.0.32' },
+    );
+
+    // Equipo 1 completo, equipo 2 con un solo integrante presente, equipo 3 completo.
+    for (let team = 0; team < 3; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+    await service.checkIn(players[0]!.principal, tournament.id);
+    await service.checkIn(players[1]!.principal, tournament.id);
+    // Del equipo 2 sólo se presenta el capitán.
+    await service.checkIn(players[2]!.principal, tournament.id);
+    await service.checkIn(players[4]!.principal, tournament.id);
+    await service.checkIn(players[5]!.principal, tournament.id);
+
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    // El equipo incompleto queda fuera entero: no hay lado suyo en ningún cruce.
+    const teamTwo = await db
+      .select()
+      .from(tournamentTeamsTable)
+      .where(
+        and(
+          eq(tournamentTeamsTable.tournamentId, tournament.id),
+          eq(tournamentTeamsTable.name, 'Equipo 2'),
+        ),
+      );
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    expect(
+      matches.some(
+        (match) => match.homeTeamId === teamTwo[0]!.id || match.awayTeamId === teamTwo[0]!.id,
+      ),
+    ).toBe(false);
+
+    // Y sus integrantes quedan como ausentes, sin sanción de partida.
+    const absent = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    expect(absent.filter((row) => row.status === 'NO_SHOW')).toHaveLength(2);
+
+    // Con dos equipos completos la final se arma entre ellos.
+    const ready = matches.filter((match) => match.homeTeamId && match.awayTeamId);
+    expect(ready).toHaveLength(1);
+    expect(ready[0]!.status).toBe('READY');
+  }, 120_000);
+
+  it('2v2: el equipo al que le falta un compañero en el check-in queda desinscripto entero y no gana por walkover', async () => {
+    // El reloj del archivo es monotónico: se ancla al inicio para que las ventanas del
+    // torneo (inscripción 30 min + check-in 10) cierren recién a los 40.
+    at(0);
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(8, (index) => 1900 - index * 30);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4, rules: { ...createInput.rules, mode: '2v2' } },
+      { ip: '10.0.0.34' },
+    );
+    for (let team = 0; team < 4; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+
+    // Se presentan siete de los ocho: al equipo 3 le falta su compañero (players[7]).
+    for (const player of players.slice(0, 7))
+      await service.checkIn(player.principal, tournament.id);
+
+    // Vencida la ventana, el barrido arranca el torneo: no puede quedarse esperando al
+    // que nunca llegó (docs/RULES.md § Torneos: el equipo entra completo o no entra).
+    at(41);
+    expect(await service.startTournament(tournament.id, new Date(clockMs))).toBe(true);
+
+    const [row] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, tournament.id));
+    expect(row!.status).toBe('IN_PROGRESS');
+
+    // El equipo incompleto es el 4 (se presentó players[6], faltó players[7]). Queda fuera
+    // entero: sus DOS integrantes como ausentes, incluido el capitán que sí se presentó.
+    const participants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, tournament.id));
+    const teamThree = await db
+      .select()
+      .from(tournamentTeamsTable)
+      .where(
+        and(
+          eq(tournamentTeamsTable.tournamentId, tournament.id),
+          eq(tournamentTeamsTable.name, 'Equipo 4'),
+        ),
+      );
+    const excluded = participants.filter((p) => p.teamId === teamThree[0]!.id);
+    expect(excluded).toHaveLength(2);
+    expect(excluded.map((p) => p.status)).toEqual(['NO_SHOW', 'NO_SHOW']);
+
+    // No ocupa ningún lado del cuadro: no hay cruce que le regale nada al rival.
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, tournament.id));
+    for (const match of matches) {
+      expect(match.homeTeamId).not.toBe(teamThree[0]!.id);
+      expect(match.awayTeamId).not.toBe(teamThree[0]!.id);
+      // Y ningún cruce quedó ya ganado sin jugarse por esa ausencia.
+      expect(match.status).not.toBe('FORFEITED');
+    }
+
+    // Con tres equipos completos la llave se arma entre ellos, sin lados vacíos.
+    const teamsInBracket = new Set(
+      matches.flatMap((match) =>
+        [match.homeTeamId, match.awayTeamId].filter((id): id is string => id !== null),
+      ),
+    );
+    expect(teamsInBracket).toEqual(
+      new Set(
+        (
+          await db
+            .select()
+            .from(tournamentTeamsTable)
+            .where(eq(tournamentTeamsTable.tournamentId, tournament.id))
+        )
+          .filter((team) => team.id !== teamThree[0]!.id)
+          .map((team) => team.id),
+      ),
+    );
+
+    // La tabla no inventa al ausente: aparece sin victorias, no como clasificado.
+    const detail = await service.detail(organizer.id, tournament.id);
+    const standings = detail.standings.map((standing) => standing.nickname);
+    expect(standings).not.toContain('Equipo 4');
+    expect(standings).toContain('Equipo 1');
+  }, 120_000);
+
+  it('el cupo de un torneo 2v2 cuenta equipos: nunca muestra más inscriptos que cupo', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(8);
+    const tournament = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4, rules: { ...createInput.rules, mode: '2v2' } },
+      { ip: '10.0.0.33' },
+    );
+    for (let team = 0; team < 4; team++) {
+      await service.registerTeam(players[team * 2]!.principal, tournament.id, {
+        name: `Equipo ${team + 1}`,
+        teammateUserIds: [players[team * 2 + 1]!.id],
+      });
+    }
+    for (const player of players) await service.checkIn(player.principal, tournament.id);
+
+    // 4 equipos de 2 personas sobre un cupo de 4: el resumen dice 4/4, no 8/4.
+    const detail = await service.detail(organizer.id, tournament.id);
+    expect(detail.tournament.registeredCount).toBe(4);
+    expect(detail.tournament.checkedInCount).toBe(4);
+    expect(detail.tournament.registeredCount).toBeLessThanOrEqual(tournament.capacity);
+    // Y el cupo se agota de verdad: un quinto equipo no entra.
+    const extra = await seedUsers(2);
+    await expect(
+      service.registerTeam(extra[0]!.principal, tournament.id, {
+        name: 'Equipo 5',
+        teammateUserIds: [extra[1]!.id],
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(detail.canRegister).toBe(false);
+    expect(detail.registrationClosedReason).toBe('El torneo está completo.');
+  }, 90_000);
+
   it('quien no hace check-in queda fuera sin arrancar una llave de una sola persona', async () => {
     const organizer = (await seedUsers(1))[0]!;
     const players = await seedUsers(3);
@@ -808,6 +1174,123 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
     expect(participants.filter((p) => p.status === 'NO_SHOW')).toHaveLength(2);
     expect(participants.filter((p) => p.status === 'CHECKED_IN')).toHaveLength(1);
   }, 60_000);
+
+  /**
+   * Hueco de verificación de M10a: ventana de check-in, ausentes y cruce vencido.
+   *
+   * El reloj lo inyecta el servicio (`nowFn`), así que el caso recorre un torneo de días
+   * en milisegundos: no espera tiempo real en ningún paso.
+   */
+  it('check-in vencido: echa a los ausentes, define el cruce por incomparecencia y avanza', async () => {
+    const organizer = (await seedUsers(1))[0]!;
+    const players = await seedUsers(4, (index) => 1900 - index * 50);
+    // Los dos torneos se crean en el mismo instante: sus ventanas (inscripción 30 min,
+    // check-in 10 más) quedan ancladas al reloj inyectado.
+    const abandoned = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4 },
+      { ip: '10.0.0.21' },
+    );
+    const played = await service.create(
+      organizer.principal,
+      { ...createInput, capacity: 4 },
+      { ip: '10.0.0.22' },
+    );
+    for (const player of players) {
+      await service.register(player.principal, abandoned.id);
+      await service.register(player.principal, played.id);
+    }
+
+    // 1) La inscripción ya cerró pero el check-in sigue abierto: se puede llegar tarde
+    //    a inscribirse no, a presentarse sí.
+    at(35);
+    expect(await service.startTournament(abandoned.id, new Date(clockMs))).toBe(false);
+    await service.checkIn(players[0]!.principal, played.id);
+    await service.checkIn(players[1]!.principal, played.id);
+
+    // 2) Vencida la ventana, quien no se presentó no puede colarse en el cuadro.
+    at(41);
+    await expect(service.checkIn(players[2]!.principal, played.id)).rejects.toMatchObject({
+      status: 409,
+    });
+
+    // 3) El torneo sin nadie presente se cancela y todos quedan como ausentes.
+    expect(await service.startTournament(abandoned.id, new Date(clockMs))).toBe(false);
+    const absent = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, abandoned.id));
+    expect(absent.every((row) => row.status === 'NO_SHOW')).toBe(true);
+    const [cancelled] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, abandoned.id));
+    expect(cancelled!.status).toBe('CANCELLED');
+
+    // 4) Con dos presentados la llave se arma igual: los ausentes quedan fuera del cuadro
+    //    y nadie juega contra alguien que no está.
+    expect(await service.startTournament(played.id, new Date(clockMs))).toBe(true);
+    const participants = await db
+      .select()
+      .from(tournamentParticipantsTable)
+      .where(eq(tournamentParticipantsTable.tournamentId, played.id));
+    expect(participants.filter((row) => row.status === 'CHECKED_IN')).toHaveLength(2);
+    expect(participants.filter((row) => row.status === 'NO_SHOW')).toHaveLength(2);
+
+    const matches = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.tournamentId, played.id));
+    expect(matches).toHaveLength(1);
+    const final = matches[0]!;
+    expect(final.status).toBe('READY');
+    expect(final.homeUserId).not.toBeNull();
+    expect(final.awayUserId).not.toBeNull();
+    // El plazo de presentación sale de `noShowMinutes` (10) contado desde que quedó listo.
+    expect(final.deadlineAt!.getTime()).toBe(new Date(clockMs).getTime() + 10 * 60_000);
+
+    // 5) Nadie se presenta al cruce: vence y se cierra por incomparecencia, sin inventar
+    //    ganador (doble ausencia).
+    at(52);
+    expect(await service.expireMatch(final, new Date(clockMs))).toBe(true);
+    const [forfeited] = await db
+      .select()
+      .from(tournamentMatchesTable)
+      .where(eq(tournamentMatchesTable.id, final.id));
+    expect(forfeited!.status).toBe('FORFEITED');
+    expect(forfeited!.forfeitReason).toBe('NO_SHOW');
+    expect(forfeited!.winnerUserId).toBeNull();
+
+    // 6) La definición es idempotente: volver a pasarla no reabre ni redefine el cruce.
+    //    (El barrido general se prueba aparte: acá interesa este cruce, no los torneos
+    //    que dejaron abiertos los otros casos del archivo.)
+    at(53);
+    expect(await service.expireMatch(final, new Date(clockMs))).toBe(false);
+    const [still] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, played.id));
+    expect(still!.status).toBe('IN_PROGRESS');
+
+    // 7) La llave no se traba: el panel cierra el cuadro sin ganador y el torneo termina
+    //    sin pagar premio de campeón.
+    await service.forceAdvance(
+      { userId: organizer.id, sessionId: generateUuidV7(), permissions: [] } as never,
+      played.id,
+      { reason: 'Doble incomparecencia en la final.' },
+      { ip: '10.0.0.22' },
+    );
+    const [closed] = await db
+      .select()
+      .from(tournamentsTable)
+      .where(eq(tournamentsTable.id, played.id));
+    expect(closed!.status).toBe('FINISHED');
+    const awards = await db
+      .select()
+      .from(tournamentAwardsTable)
+      .where(eq(tournamentAwardsTable.tournamentId, played.id));
+    expect(awards).toHaveLength(0);
+  }, 90_000);
 
   it('la tabla no inventa eliminaciones: quien sigue en carrera lo dice', async () => {
     const organizer = (await seedUsers(1))[0]!;
@@ -872,6 +1355,10 @@ describe('M10a torneos: ciclo completo sobre PostgreSQL (PGlite)', () => {
   }, 60_000);
 
   it('el panel ve los torneos privados, pero el jugador ajeno no', async () => {
+    // El listado ordena por fecha de creación (más reciente primero) y tiene tope. El caso
+    // lo crea en un instante posterior al resto del archivo para que esté primero: así
+    // prueba la visibilidad del privado, no cuántos torneos crearon los otros casos.
+    at(120);
     const organizer = (await seedUsers(1))[0]!;
     const stranger = (await seedUsers(1))[0]!;
     const tournament = await service.create(organizer.principal, createInput, { ip: '10.0.0.3' });

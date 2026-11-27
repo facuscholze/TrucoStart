@@ -119,6 +119,12 @@ export const tournamentParticipantsTable = pgTable(
     seed: integer('seed'),
     /** Rating con el que se sembró, para poder reconstruir y auditar la llave. */
     seedRating: integer('seed_rating'),
+    /**
+     * Equipo al que pertenece el inscripto. `NULL` en torneos 1v1: el equipo de una
+     * persona es ella misma. En 2v2 cada integrante es un inscripto con su equipo, así
+     * el check-in, la baja y los premios siguen siendo por persona.
+     */
+    teamId: uuid('team_id').references(() => tournamentTeamsTable.id, { onDelete: 'cascade' }),
     registeredAt: timestamp('registered_at', { withTimezone: true }).notNull().defaultNow(),
     checkedInAt: timestamp('checked_in_at', { withTimezone: true }),
     withdrawnAt: timestamp('withdrawn_at', { withTimezone: true }),
@@ -132,6 +138,43 @@ export const tournamentParticipantsTable = pgTable(
     uniqueIndex('tournament_participants_unique').on(t.tournamentId, t.userId),
     index('tournament_participants_tournament_status_idx').on(t.tournamentId, t.status),
     index('tournament_participants_user_idx').on(t.userId, t.registeredAt),
+    index('tournament_participants_team_idx').on(t.tournamentId, t.teamId),
+  ],
+);
+
+/**
+ * Equipos de un torneo 2v2. Un equipo ocupa un lado del cuadro; sus integrantes son
+ * inscriptos del torneo (`tournament_participants.team_id`).
+ *
+ * El capitán arma el equipo y responde por él. La asistencia es personal: cada
+ * integrante hace su propio check-in, y si falta uno el equipo queda incompleto y se
+ * define como está documentado en `docs/RULES.md` § Torneos.
+ */
+export const tournamentTeamsTable = pgTable(
+  'tournament_teams',
+  {
+    id: uuid('id').primaryKey(),
+    tournamentId: uuid('tournament_id')
+      .notNull()
+      .references(() => tournamentsTable.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 40 }).notNull(),
+    captainUserId: uuid('captain_user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    /** Semilla del equipo y rating medio con el que se sembró. */
+    seed: integer('seed'),
+    seedRating: integer('seed_rating'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'tournament_teams_seed_chk',
+      sql`${t.seed} IS NULL OR (${t.seed} >= 1 AND ${t.seed} <= 64)`,
+    ),
+    uniqueIndex('tournament_teams_name_uniq').on(t.tournamentId, t.name),
+    uniqueIndex('tournament_teams_captain_uniq').on(t.tournamentId, t.captainUserId),
+    index('tournament_teams_tournament_idx').on(t.tournamentId),
   ],
 );
 
@@ -174,6 +217,28 @@ export const tournamentMatchesTable = pgTable(
      * pasado este instante sin partida iniciada, el servicio define el cruce.
      */
     deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+    /**
+     * Lados del cruce cuando el torneo es por equipos (2v2). En 1v1 quedan en `NULL` y
+     * mandan las columnas de usuario.
+     */
+    homeTeamId: uuid('home_team_id').references(() => tournamentTeamsTable.id, {
+      onDelete: 'set null',
+    }),
+    awayTeamId: uuid('away_team_id').references(() => tournamentTeamsTable.id, {
+      onDelete: 'set null',
+    }),
+    winnerTeamId: uuid('winner_team_id').references(() => tournamentTeamsTable.id, {
+      onDelete: 'set null',
+    }),
+    loserTeamId: uuid('loser_team_id').references(() => tournamentTeamsTable.id, {
+      onDelete: 'set null',
+    }),
+    /**
+     * Cuándo se presentó cada lado. En equipos, un solo integrante presente no alcanza
+     * para jugar una mesa de 2v2: no debe ganar por walkover.
+     */
+    homePresentAt: timestamp('home_present_at', { withTimezone: true }),
+    awayPresentAt: timestamp('away_present_at', { withTimezone: true }),
     /** Idempotencia del avance: la partida del torneo sólo se resuelve una vez. */
     resolvedFromMatchId: uuid('resolved_from_match_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -196,6 +261,8 @@ export const tournamentMatchesTable = pgTable(
     index('tournament_matches_tournament_round_idx').on(t.tournamentId, t.bracket, t.round),
     index('tournament_matches_user_idx').on(t.homeUserId, t.awayUserId),
     index('tournament_matches_deadline_idx').on(t.status, t.deadlineAt),
+    index('tournament_matches_home_team_idx').on(t.homeTeamId),
+    index('tournament_matches_away_team_idx').on(t.awayTeamId),
   ],
 );
 
@@ -236,14 +303,17 @@ export const tournamentAwardsTable = pgTable(
       .notNull()
       .references(() => usersTable.id, { onDelete: 'cascade' }),
     position: integer('position').notNull(),
+    /** Equipo premiado, cuando el torneo es por equipos. */
+    teamId: uuid('team_id').references(() => tournamentTeamsTable.id, { onDelete: 'cascade' }),
     coins: integer('coins').notNull().default(0),
     cosmeticId: varchar('cosmetic_id', { length: 64 }),
     walletTransactionId: uuid('wallet_transaction_id'),
     awardedAt: timestamp('awarded_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Un premio por posición y torneo: reintentar no duplica monedas.
-    uniqueIndex('tournament_awards_position_uniq').on(t.tournamentId, t.position),
+    // Un premio por posición, torneo y persona: en equipos lo cobra cada integrante y
+    // reintentar sigue sin duplicar monedas.
+    uniqueIndex('tournament_awards_position_uniq').on(t.tournamentId, t.position, t.userId),
     index('tournament_awards_user_idx').on(t.userId, t.awardedAt),
   ],
 );

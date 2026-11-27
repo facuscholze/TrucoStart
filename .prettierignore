@@ -4,3 +4,5 @@ coverage
 .turbo
 pnpm-lock.yaml
 docs/MASTER_PROMPT.md
+# Los snapshots y el journal de drizzle-kit los escribe la herramienta con su formato.
+apps/api/drizzle/meta

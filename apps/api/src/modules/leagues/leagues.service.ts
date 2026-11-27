@@ -277,12 +277,14 @@ export class LeaguesService implements OnApplicationBootstrap, OnApplicationShut
       now,
     });
 
-    return this.toSummary(created, {
-      participantCount: 0,
-      currentRound: null,
-      isParticipant: false,
-      prizes: await this.repository.listPrizes(created.id),
-    });
+    return this.toSummary(
+      created,
+      await this.summaryExtras(created, principal, {
+        participantCount: 0,
+        currentRound: null,
+        isParticipant: false,
+      }),
+    );
   }
 
   // --------------------------------------------------------------- listado
@@ -302,12 +304,15 @@ export class LeaguesService implements OnApplicationBootstrap, OnApplicationShut
     const items: LeagueSummary[] = [];
     for (const row of page) {
       items.push(
-        await this.toSummary(row, {
-          participantCount: await this.repository.countActiveParticipants(row.id),
-          currentRound: await this.currentRoundNumber(row.id),
-          isParticipant: (await this.repository.findParticipant(row.id, principal.userId)) !== null,
-          prizes: await this.repository.listPrizes(row.id),
-        }),
+        await this.toSummary(
+          row,
+          await this.summaryExtras(row, principal, {
+            participantCount: await this.repository.countActiveParticipants(row.id),
+            currentRound: await this.currentRoundNumber(row.id),
+            isParticipant:
+              (await this.repository.findParticipant(row.id, principal.userId)) !== null,
+          }),
+        ),
       );
     }
     const last = page[page.length - 1];
@@ -378,14 +383,19 @@ export class LeaguesService implements OnApplicationBootstrap, OnApplicationShut
           : 'NONE';
 
     return {
-      ...this.toSummary(row, {
-        participantCount: participants.filter(
-          (participant) => participant.status === 'REGISTERED' || participant.status === 'ACTIVE',
-        ).length,
-        currentRound: rounds.find((round) => round.status === 'OPEN')?.number ?? null,
-        isParticipant: mine !== null && mine.status !== 'WITHDRAWN',
-        prizes: await this.repository.listPrizes(row.id),
-      }),
+      ...this.toSummary(
+        row,
+        await this.summaryExtras(row, principal, {
+          participantCount: participants.filter(
+            (participant) => participant.status === 'REGISTERED' || participant.status === 'ACTIVE',
+          ).length,
+          currentRound: rounds.find((round) => round.status === 'OPEN')?.number ?? null,
+          isParticipant: mine !== null && mine.status !== 'WITHDRAWN',
+          // El detalle ya resolvió organizador y apodos: no hace falta preguntarlos de nuevo.
+          isOrganizer,
+          createdByNickname: nicknames.get(row.createdBy) ?? null,
+        }),
+      ),
       promotion: this.promotionRules(row),
       schedule: {
         format: row.scheduleFormat,
@@ -1285,13 +1295,23 @@ export class LeaguesService implements OnApplicationBootstrap, OnApplicationShut
   async audit(actor: { readonly userId: string; readonly role: string }, leagueId: string) {
     const league = await this.requireLeague(leagueId);
     this.assertOrganizer(actor, league);
-    const [closure, movements] = await Promise.all([
+    const [closure, movements, rounds] = await Promise.all([
       this.repository.findClosure(leagueId),
       this.repository.listMovements(leagueId),
+      this.repository.listRounds(leagueId),
     ]);
+    const openRound = rounds.find((round) => round.status === 'OPEN') ?? null;
     return {
       leagueId,
       status: league.status,
+      // El panel necesita saber **qué** jornada cerrar; sin esto el botón tendría que adivinarlo.
+      currentRound: openRound
+        ? {
+            id: openRound.id,
+            number: openRound.number,
+            deadlineAt: openRound.deadlineAt.toISOString(),
+          }
+        : null,
       closure: closure
         ? {
             closedAt: closure.closedAt.toISOString(),
@@ -1339,16 +1359,60 @@ export class LeaguesService implements OnApplicationBootstrap, OnApplicationShut
     return rounds.find((round) => round.status === 'OPEN')?.number ?? null;
   }
 
+  /**
+   * Extras del resumen que dependen de otros datos: quién organiza, si el que mira organiza y
+   * el nombre de los cosméticos. Antes `createdByNickname` era `''` y `isOrganizer` siempre
+   * `false`, así que una liga del propio jugador no mostraba sus herramientas de administración
+   * y la lista de premios decía «un cosmético» sin nombre.
+   */
+  private async summaryExtras(
+    row: LeagueRow,
+    principal: AuthenticatedPrincipal,
+    known: {
+      readonly participantCount: number;
+      readonly currentRound: number | null;
+      readonly isParticipant: boolean;
+      readonly createdByNickname?: string | null;
+      readonly isOrganizer?: boolean;
+    },
+  ): Promise<Parameters<LeaguesService['toSummary']>[1]> {
+    const prizes = await this.repository.listPrizes(row.id);
+    const cosmeticNames = await this.repository.cosmeticNamesFor(
+      prizes.flatMap((prize) => (prize.cosmeticId ? [prize.cosmeticId] : [])),
+    );
+    const createdByNickname =
+      known.createdByNickname ??
+      (await this.repository.nicknamesFor([row.createdBy])).get(row.createdBy) ??
+      null;
+    return {
+      participantCount: known.participantCount,
+      currentRound: known.currentRound,
+      isParticipant: known.isParticipant,
+      isOrganizer:
+        known.isOrganizer ?? (row.createdBy === principal.userId || isStaff(principal.role)),
+      createdByNickname,
+      prizes: prizes.map((prize) => ({
+        position: prize.position,
+        coins: prize.coins,
+        cosmeticId: prize.cosmeticId,
+        cosmeticName: prize.cosmeticId ? (cosmeticNames.get(prize.cosmeticId) ?? null) : null,
+      })),
+    };
+  }
+
   private toSummary(
     row: LeagueRow,
     extra: {
       readonly participantCount: number;
       readonly currentRound: number | null;
       readonly isParticipant: boolean;
+      readonly isOrganizer: boolean;
+      readonly createdByNickname: string | null;
       readonly prizes: ReadonlyArray<{
         readonly position: number;
         readonly coins: number;
         readonly cosmeticId: string | null;
+        readonly cosmeticName: string | null;
       }>;
     },
   ): LeagueSummary {
@@ -1371,14 +1435,14 @@ export class LeaguesService implements OnApplicationBootstrap, OnApplicationShut
       currentRound: extra.currentRound,
       registrationClosesAt: row.registrationClosesAt.toISOString(),
       finishedAt: row.finishedAt?.toISOString() ?? null,
-      createdByNickname: '',
+      createdByNickname: extra.createdByNickname ?? '',
       isParticipant: extra.isParticipant,
-      isOrganizer: false,
+      isOrganizer: extra.isOrganizer,
       prizes: extra.prizes.map((prize) => ({
         position: prize.position,
         coins: prize.coins,
         cosmeticId: prize.cosmeticId,
-        cosmeticName: null,
+        cosmeticName: prize.cosmeticName,
       })),
     };
   }

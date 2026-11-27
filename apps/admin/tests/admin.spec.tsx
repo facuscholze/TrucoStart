@@ -10,6 +10,7 @@ import { LoginView } from '../src/components/LoginView.js';
 import { ReportDetailView } from '../src/components/ReportDetailView.js';
 import { ReportsView } from '../src/components/ReportsView.js';
 import { ProgressionConfigView } from '../src/components/ProgressionConfigView.js';
+import { LeaguesAdminView } from '../src/components/LeaguesAdminView.js';
 import { TournamentsView } from '../src/components/TournamentsView.js';
 import { UserDetailPanel, UsersView } from '../src/components/UsersView.js';
 import { createDemoClient } from '../src/lib/demo.js';
@@ -406,5 +407,209 @@ describe('@truco/admin · torneos M10a', () => {
     // Sin detalle abierto no hay formularios de cancelación a medio llenar.
     expect(html).not.toContain('Cancelar torneo');
     expect(html).toContain('Crear torneo oficial');
+  });
+});
+
+describe('@truco/admin · ligas M10b', () => {
+  function renderLeagues(overrides: Partial<Parameters<typeof LeaguesAdminView>[0]> = {}): string {
+    return renderToStaticMarkup(
+      <LeaguesAdminView
+        data={{ items: [] }}
+        filters={{}}
+        audit={null}
+        busy={false}
+        error={null}
+        onFilterChange={() => undefined}
+        onOpenAudit={() => undefined}
+        onCloseAudit={() => undefined}
+        onStart={() => undefined}
+        onCloseRound={() => undefined}
+        onCloseSeason={() => undefined}
+        {...overrides}
+      />,
+    );
+  }
+
+  it('lista las ligas con división, estado y organizador', () => {
+    const html = renderLeagues({
+      data: {
+        items: [
+          {
+            id: '019a7e40-0000-7000-8000-00000000c001',
+            name: 'Liga de los jueves',
+            mode: '1v1',
+            division: 'PLATA',
+            status: 'ACTIVE',
+            official: false,
+            seasonLabel: 'Temporada 2027-1',
+            startsAt: '2027-01-04T12:00:00.000Z',
+            endsAt: '2027-03-01T12:00:00.000Z',
+            rulesetCode: 'ar-standard-v1',
+            targetScore: 30,
+            florEnabled: true,
+            turnTimeoutMs: 25_000,
+            capacity: 16,
+            participantCount: 8,
+            currentRound: 2,
+            registrationClosesAt: '2027-01-03T12:00:00.000Z',
+            finishedAt: null,
+            createdByNickname: 'Ana',
+            isParticipant: false,
+            isOrganizer: false,
+            prizes: [],
+          },
+        ],
+      },
+    });
+    expect(html).toContain('Liga de los jueves');
+    expect(html).toContain('PLATA');
+    expect(html).toContain('En juego');
+    expect(html).toContain('organiza');
+    expect(html).toContain('Ana');
+  });
+
+  it('con la liga en juego ofrece cerrar la temporada, no iniciarla', () => {
+    const base = {
+      id: '019a7e40-0000-7000-8000-00000000c001',
+      name: 'Liga',
+      mode: '1v1' as const,
+      division: 'ORO' as const,
+      status: 'ACTIVE' as const,
+      official: false,
+      seasonLabel: 'T',
+      startsAt: '2027-01-04T12:00:00.000Z',
+      endsAt: '2027-03-01T12:00:00.000Z',
+      rulesetCode: 'ar-standard-v1' as const,
+      targetScore: 30,
+      florEnabled: true,
+      turnTimeoutMs: 25_000,
+      capacity: 16,
+      participantCount: 8,
+      currentRound: 1,
+      registrationClosesAt: '2027-01-03T12:00:00.000Z',
+      finishedAt: null,
+      createdByNickname: 'Ana',
+      isParticipant: false,
+      isOrganizer: false,
+      prizes: [],
+    };
+    const inGame = renderLeagues({ data: { items: [base] } });
+    expect(inGame).toContain('Cerrar temporada');
+    expect(inGame).not.toContain('>Iniciar<');
+
+    const registering = renderLeagues({ data: { items: [{ ...base, status: 'REGISTRATION' }] } });
+    expect(registering).toContain('Iniciar');
+    expect(registering).not.toContain('Cerrar temporada');
+  });
+
+  it('la auditoría muestra cierre, movimientos y la jornada abierta con su plazo', () => {
+    const html = renderLeagues({
+      audit: {
+        leagueId: '019a7e40-0000-7000-8000-00000000c001',
+        status: 'ACTIVE',
+        currentRound: {
+          id: '019a7e40-0000-7000-8000-00000000c101',
+          number: 2,
+          deadlineAt: '2027-02-15T23:00:00.000Z',
+        },
+        closure: {
+          closedAt: '2027-01-01T10:00:00.000Z',
+          championUserId: null,
+          promoted: ['019a7e40-0000-7000-8000-000000000001'],
+          relegated: [],
+          forfeitedMatches: 3,
+        },
+        movements: [
+          {
+            userId: '019a7e40-0000-7000-8000-000000000001',
+            kind: 'PROMOTION',
+            fromDivision: 'PLATA',
+            toDivision: 'ORO',
+            createdAt: '2027-01-01T10:00:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(html).toContain('Auditoría de la liga');
+    expect(html).toContain('Jornada abierta: la 2');
+    expect(html).toContain('3 partida(s) sin jugar');
+    expect(html).toContain('PROMOTION');
+    expect(html).toContain('PLATA');
+    expect(html).toContain('ORO');
+    expect(html).toContain('Cerrar jornada 2');
+  });
+
+  it('sin jornada abierta no ofrece cerrar jornada y lo dice', () => {
+    const html = renderLeagues({
+      audit: {
+        leagueId: '019a7e40-0000-7000-8000-00000000c001',
+        status: 'FINISHED',
+        currentRound: null,
+        closure: null,
+        movements: [],
+      },
+    });
+    expect(html).toContain('No hay una jornada abierta');
+    expect(html).not.toContain('Cerrar jornada');
+    expect(html).toContain('Todavía sin cerrar');
+  });
+
+  it('el cierre de jornada pide motivo con su mínimo a la vista', () => {
+    const html = renderLeagues({
+      audit: {
+        leagueId: '019a7e40-0000-7000-8000-00000000c001',
+        status: 'ACTIVE',
+        currentRound: {
+          id: '019a7e40-0000-7000-8000-00000000c101',
+          number: 1,
+          deadlineAt: '2027-02-15T23:00:00.000Z',
+        },
+        closure: null,
+        movements: [],
+      },
+    });
+    expect(html).toContain('Motivo del cierre de jornada');
+    expect(html).toContain('Se guarda en la auditoría');
+  });
+
+  it('el error del servidor se muestra sin perder el listado', () => {
+    const html = renderLeagues({ error: 'Falta el permiso leagues:manage' });
+    expect(html).toContain('Falta el permiso leagues:manage');
+    expect(html).toContain('No hay ligas en este filtro');
+  });
+
+  it('nunca promete dinero: los premios son cosméticos o monedas simbólicas', () => {
+    const html = renderLeagues({
+      data: {
+        items: [
+          {
+            id: '019a7e40-0000-7000-8000-00000000c001',
+            name: 'Liga',
+            mode: '2v2',
+            division: 'BRONCE',
+            status: 'ACTIVE',
+            official: false,
+            seasonLabel: 'T',
+            startsAt: '2027-01-04T12:00:00.000Z',
+            endsAt: '2027-03-01T12:00:00.000Z',
+            rulesetCode: 'ar-standard-v1',
+            targetScore: 30,
+            florEnabled: true,
+            turnTimeoutMs: 25_000,
+            capacity: 16,
+            participantCount: 4,
+            currentRound: 1,
+            registrationClosesAt: '2027-01-03T12:00:00.000Z',
+            finishedAt: null,
+            createdByNickname: 'Ana',
+            isParticipant: false,
+            isOrganizer: false,
+            prizes: [],
+          },
+        ],
+      },
+    });
+    expect(html).not.toMatch(/gan[aá] (dinero|plata|efectivo)/i);
+    expect(html).not.toMatch(/premios? en (dinero|efectivo)/i);
   });
 });

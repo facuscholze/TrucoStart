@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, count, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { type AppDatabase, type AppTransaction, DRIZZLE_DB } from '../../db/database.provider.js';
 import {
+  cosmeticCatalogTable,
   leagueClosuresTable,
   leagueMatchesTable,
   leagueMovementsTable,
@@ -606,6 +607,19 @@ export class LeaguesRepository {
       .from(leaguePrizesTable)
       .where(eq(leaguePrizesTable.leagueId, leagueId))
       .orderBy(asc(leaguePrizesTable.position));
+  }
+
+  /** `nameKey` de los cosméticos de una lista de premios: es lo que la web muestra como nombre. */
+  async cosmeticNamesFor(
+    cosmeticIds: readonly string[],
+    tx?: AppTransaction,
+  ): Promise<Map<string, string>> {
+    if (cosmeticIds.length === 0) return new Map();
+    const rows = await this.exec(tx)
+      .select({ id: cosmeticCatalogTable.id, nameKey: cosmeticCatalogTable.nameKey })
+      .from(cosmeticCatalogTable)
+      .where(inArray(cosmeticCatalogTable.id, [...cosmeticIds]));
+    return new Map(rows.map((row) => [row.id, row.nameKey]));
   }
 
   async insertPrize(

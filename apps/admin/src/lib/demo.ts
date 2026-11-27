@@ -14,6 +14,7 @@ import {
   type ProgressionConfigUpdateRequest,
   type TournamentListResponse,
   type TournamentSummary,
+  type LeagueListResponse,
 } from '@truco/shared';
 import type { AdminClient } from './api.js';
 
@@ -434,8 +435,65 @@ export function createDemoClient(): AdminClient {
     cancelTournament: async () => ({ cancelled: true }),
     advanceTournament: async () => ({ advanced: true }),
     resolveTournamentIncident: async () => ({ resolved: true }),
+    listLeagues: async () => DEMO_LEAGUES,
+    leagueAudit: async () => ({
+      leagueId: DEMO_LEAGUES.items[0]!.id,
+      status: DEMO_LEAGUES.items[0]!.status,
+      currentRound: {
+        id: '019a7e40-0000-7000-8000-00000000c101',
+        number: 2,
+        deadlineAt: '2027-02-15T23:00:00.000Z',
+      },
+      closure: null,
+      movements: [],
+    }),
+    startLeague: async () => ({ started: true }),
+    closeLeagueRound: async () => ({ closed: true }),
+    closeLeagueSeason: async (leagueId) => ({
+      leagueId,
+      finishedAt: '2027-03-01T12:00:00.000Z',
+      championUserId: null,
+      promoted: [],
+      relegated: [],
+      awardedPrizes: 0,
+      forfeitedMatches: 0,
+    }),
   };
 }
+
+/**
+ * Liga de ejemplo para las capturas del panel: una en juego con división, cupo y organizador.
+ * Sirve para ver la pantalla con datos realistas sin depender de una base sembrada.
+ */
+const DEMO_LEAGUES: LeagueListResponse = {
+  nextCursor: null,
+  items: [
+    {
+      id: '019a7e40-0000-7000-8000-00000000c001',
+      name: 'Liga de los jueves',
+      mode: '1v1',
+      division: 'PLATA',
+      status: 'ACTIVE',
+      official: false,
+      seasonLabel: 'Temporada 2027-1',
+      startsAt: '2027-01-04T12:00:00.000Z',
+      endsAt: '2027-03-01T12:00:00.000Z',
+      rulesetCode: 'ar-standard-v1',
+      targetScore: 30,
+      florEnabled: true,
+      turnTimeoutMs: 25_000,
+      capacity: 16,
+      participantCount: 8,
+      currentRound: 2,
+      registrationClosesAt: '2027-01-03T12:00:00.000Z',
+      finishedAt: null,
+      createdByNickname: 'Ana',
+      isParticipant: false,
+      isOrganizer: false,
+      prizes: [{ position: 1, coins: 250, cosmeticId: null, cosmeticName: null }],
+    },
+  ],
+};
 
 /**
  * Torneo de ejemplo para las capturas del panel. Refleja los dos estados que

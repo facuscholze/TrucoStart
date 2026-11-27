@@ -20,6 +20,10 @@ import type {
   TournamentDetailResponse,
   TournamentListResponse,
   TournamentStatus,
+  AdminLeagueAuditResponse,
+  LeagueCloseResult,
+  LeagueListResponse,
+  LeagueStatus,
   TournamentSummary,
   ResolveReportRequest,
   ReportReasonCode,
@@ -106,6 +110,11 @@ export interface AdminClient {
     tournamentId: string,
     input: { matchId: string; winnerUserId: string | null; reason: string },
   ): Promise<{ resolved: true }>;
+  listLeagues(params: { status?: LeagueStatus }): Promise<LeagueListResponse>;
+  leagueAudit(leagueId: string): Promise<AdminLeagueAuditResponse>;
+  startLeague(leagueId: string, input: { reason: string }): Promise<{ started: true }>;
+  closeLeagueRound(roundId: string, input: { reason: string }): Promise<{ closed: true }>;
+  closeLeagueSeason(leagueId: string, input: { reason: string }): Promise<LeagueCloseResult>;
 }
 
 export class AdminApiError extends Error {
@@ -300,5 +309,29 @@ export const httpAdminClient: AdminClient = {
       `/tournaments/${encodeURIComponent(tournamentId)}/resolve-incident`,
       { method: 'POST', body: JSON.stringify(input) },
     );
+  },
+  listLeagues(params) {
+    return request<LeagueListResponse>(withQuery('/leagues', { status: params.status }));
+  },
+  leagueAudit(leagueId) {
+    return request<AdminLeagueAuditResponse>(`/leagues/${encodeURIComponent(leagueId)}/audit`);
+  },
+  startLeague(leagueId, input) {
+    return request<{ started: true }>(`/leagues/${encodeURIComponent(leagueId)}/start`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  closeLeagueRound(roundId, input) {
+    return request<{ closed: true }>(`/leagues/rounds/${encodeURIComponent(roundId)}/close`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  closeLeagueSeason(leagueId, input) {
+    return request<LeagueCloseResult>(`/leagues/${encodeURIComponent(leagueId)}/close`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   },
 };

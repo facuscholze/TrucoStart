@@ -14,6 +14,9 @@ import {
   type TournamentDetailResponse,
   type TournamentListResponse,
   type TournamentStatus,
+  type AdminLeagueAuditResponse,
+  type LeagueListResponse,
+  type LeagueStatus,
 } from '@truco/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { AuditView } from './components/AuditView.js';
@@ -23,6 +26,7 @@ import { ProgressionConfigView } from './components/ProgressionConfigView.js';
 import { LoginView } from './components/LoginView.js';
 import { ReportDetailView } from './components/ReportDetailView.js';
 import { ReportsView } from './components/ReportsView.js';
+import { LeaguesAdminView } from './components/LeaguesAdminView.js';
 import { TournamentsView } from './components/TournamentsView.js';
 import { UserDetailPanel, UsersView } from './components/UsersView.js';
 import { Button, StatusPill } from './components/primitives.js';
@@ -37,6 +41,7 @@ type View =
   | { readonly name: 'competitive-reviews'; readonly status?: CompetitiveReviewStatus }
   | { readonly name: 'progression' }
   | { readonly name: 'tournaments'; readonly status?: TournamentStatus | undefined }
+  | { readonly name: 'leagues'; readonly status?: LeagueStatus | undefined }
   | { readonly name: 'audit' };
 
 const NAV: ReadonlyArray<{
@@ -49,7 +54,8 @@ const NAV: ReadonlyArray<{
     | 'audit:read'
     | 'competitive:review'
     | 'gamification:configure'
-    | 'tournaments:manage';
+    | 'tournaments:manage'
+    | 'leagues:manage';
 }> = [
   { key: 'dashboard', label: 'Dashboard', permission: 'dashboard:read' },
   { key: 'reports', label: 'Reportes', permission: 'reports:read' },
@@ -57,6 +63,7 @@ const NAV: ReadonlyArray<{
   { key: 'competitive-reviews', label: 'Fair play', permission: 'competitive:review' },
   { key: 'progression', label: 'Gamificación', permission: 'gamification:configure' },
   { key: 'tournaments', label: 'Torneos', permission: 'tournaments:manage' },
+  { key: 'leagues', label: 'Ligas', permission: 'leagues:manage' },
   { key: 'audit', label: 'Auditoría', permission: 'audit:read' },
 ];
 
@@ -104,6 +111,8 @@ export function AdminApp({
   const [progressionConfig, setProgressionConfig] = useState<ProgressionConfig | null>(null);
   const [tournamentList, setTournamentList] = useState<TournamentListResponse | null>(null);
   const [tournamentDetail, setTournamentDetail] = useState<TournamentDetailResponse | null>(null);
+  const [leagueList, setLeagueList] = useState<LeagueListResponse | null>(null);
+  const [leagueAudit, setLeagueAudit] = useState<AdminLeagueAuditResponse | null>(null);
 
   useEffect(() => {
     if (!demoMode) {
@@ -187,6 +196,10 @@ export function AdminApp({
           const list = await activeClient.listTournaments({ status: view.status });
           if (cancelled) return;
           setTournamentList(list);
+        } else if (view.name === 'leagues') {
+          const list = await activeClient.listLeagues({ status: view.status });
+          if (cancelled) return;
+          setLeagueList(list);
         } else {
           const audit = await activeClient.listAudit({});
           if (cancelled) return;
@@ -298,7 +311,9 @@ export function AdminApp({
                               ? { name: 'progression' }
                               : item.key === 'tournaments'
                                 ? { name: 'tournaments' }
-                                : { name: item.key as 'dashboard' | 'audit' },
+                                : item.key === 'leagues'
+                                  ? { name: 'leagues' }
+                                  : { name: item.key as 'dashboard' | 'audit' },
                     )
                   }
                   className={`rounded-lg px-3 py-1.5 text-left text-sm font-semibold transition ${
@@ -584,6 +599,56 @@ export function AdminApp({
                   setTournamentList(await activeClient.listTournaments({ status: view.status }));
                   setNotice(
                     `Torneo "${tournament.name}" creado. El motivo informado quedó en la auditoría.`,
+                  );
+                })
+              }
+            />
+          )}
+
+          {view.name === 'leagues' && leagueList && (
+            <LeaguesAdminView
+              data={leagueList}
+              filters={{ status: view.status }}
+              audit={leagueAudit}
+              busy={busy}
+              error={error}
+              onFilterChange={(status) => {
+                setLeagueAudit(null);
+                navigate({ name: 'leagues', status });
+              }}
+              onOpenAudit={(leagueId) =>
+                void withBusy(async () => {
+                  setLeagueAudit(await activeClient.leagueAudit(leagueId));
+                })
+              }
+              onCloseAudit={() => setLeagueAudit(null)}
+              onStart={(leagueId, reason) =>
+                void withBusy(async () => {
+                  await activeClient.startLeague(leagueId, { reason });
+                  setLeagueList(await activeClient.listLeagues({ status: view.status }));
+                  setLeagueAudit(await activeClient.leagueAudit(leagueId));
+                  setNotice('Liga iniciada; el motivo quedó en la auditoría.');
+                })
+              }
+              onCloseRound={(roundId, reason) =>
+                void withBusy(async () => {
+                  await activeClient.closeLeagueRound(roundId, { reason });
+                  setLeagueAudit(
+                    leagueAudit
+                      ? await activeClient.leagueAudit(leagueAudit.leagueId)
+                      : leagueAudit,
+                  );
+                  setNotice('Jornada cerrada; idempotente, no duplica tabla ni premios.');
+                })
+              }
+              onCloseSeason={(leagueId, reason) =>
+                void withBusy(async () => {
+                  const result = await activeClient.closeLeagueSeason(leagueId, { reason });
+                  setLeagueList(await activeClient.listLeagues({ status: view.status }));
+                  setLeagueAudit(await activeClient.leagueAudit(leagueId));
+                  setNotice(
+                    `Temporada cerrada: ${result.promoted.length} ascenso(s), ` +
+                      `${result.relegated.length} descenso(s), ${result.awardedPrizes} premio(s).`,
                   );
                 })
               }

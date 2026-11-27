@@ -8,6 +8,7 @@ import {
 } from '../../../db/database.provider.js';
 import {
   auditLogsTable,
+  cosmeticCatalogTable,
   leagueClosuresTable,
   leagueMatchesTable,
   leagueMovementsTable,
@@ -24,6 +25,7 @@ import {
   walletTransactionsTable,
 } from '../../../db/schema/index.js';
 import { generateUuidV7 } from '../../../common/uuidv7.js';
+import { parseWithZod } from '../../../common/zod-validation.js';
 import { InMemoryRateLimitStore } from '../../../common/rate-limit/in-memory-rate-limit-store.js';
 import { AuditRepository } from '../../audit/audit.repository.js';
 import { buildLobbyRuntimeConfigFromEnv } from '../../lobby/lobby.config.js';
@@ -34,7 +36,11 @@ import { buildLeaguesRuntimeConfig } from '../leagues.config.js';
 import { LeaguesRepository } from '../leagues.repository.js';
 import { LeaguesService } from '../leagues.service.js';
 import type { AuthenticatedPrincipal } from '../../auth/guards/session-auth.guard.js';
-import type { CreateLeagueRequest, LeagueDivision } from '@truco/shared';
+import {
+  LeagueListQuerySchema,
+  type CreateLeagueRequest,
+  type LeagueDivision,
+} from '@truco/shared';
 
 const SECRET = 'leagues-m10b-test-secret-32chars-ok!!!';
 const START = new Date('2027-01-04T12:00:00.000Z');
@@ -844,5 +850,61 @@ describe('M10b ligas: ciclo completo sobre PostgreSQL (PGlite)', () => {
       .from(auditLogsTable)
       .where(eq(auditLogsTable.entityId, leagueId));
     expect(audits.some((row) => row.action === 'LEAGUE_CLOSED')).toBe(true);
+  });
+
+  // ------------------------------------------------- vista pública de la liga
+
+  it('el resumen dice quién organiza y si el que mira es el organizador', async () => {
+    const { leagueId, organizer } = await setUpLeague({ players: 2 });
+
+    const asOrganizer = await service.detail(organizer.principal, leagueId);
+    // Antes eran `''` y `false` fijos: quien organizaba no veía sus herramientas en la pantalla.
+    expect(asOrganizer.createdByNickname).toBe(organizer.nickname);
+    expect(asOrganizer.isOrganizer).toBe(true);
+
+    const otherUser = await seedUsers(1);
+    const asStranger = await service.detail(otherUser[0]!.principal, leagueId);
+    expect(asStranger.createdByNickname).toBe(organizer.nickname);
+    expect(asStranger.isOrganizer).toBe(false);
+  });
+
+  it('el listado también trae el apodo del organizador', async () => {
+    const { organizer } = await setUpLeague({ players: 2 });
+    const page = await service.list(
+      organizer.principal,
+      parseWithZod(LeagueListQuerySchema, { limit: 50 }),
+    );
+    expect(page.items.length).toBeGreaterThan(0);
+    for (const item of page.items) {
+      expect(item.createdByNickname).not.toBe('');
+    }
+    expect(page.items.some((item) => item.isOrganizer)).toBe(true);
+  });
+
+  it('los premios con cosmético muestran el nombre del catálogo', async () => {
+    const { leagueId, organizer } = await setUpLeague({
+      players: 2,
+      overrides: {
+        prizes: [
+          { position: 1, coins: 100, cosmeticId: 'avatar-gold' },
+          { position: 2, coins: 50, cosmeticId: null },
+        ],
+      },
+    });
+    await db.insert(cosmeticCatalogTable).values({
+      id: 'avatar-gold',
+      nameKey: 'cosmetics.avatarGolden.name',
+      descriptionKey: 'cosmetics.avatarGolden.description',
+      category: 'AVATAR',
+      priceCoins: 100,
+      icon: 'star',
+    });
+
+    const detail = await service.detail(organizer.principal, leagueId);
+    const first = detail.prizes.find((prize) => prize.position === 1)!;
+    expect(first.cosmeticId).toBe('avatar-gold');
+    // Antes el nombre era `null` fijo y la web decía «un cosmético» sin poder nombrarlo.
+    expect(first.cosmeticName).toBe('cosmetics.avatarGolden.name');
+    expect(detail.prizes.find((prize) => prize.position === 2)!.cosmeticName).toBeNull();
   });
 });

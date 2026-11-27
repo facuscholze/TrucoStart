@@ -439,6 +439,48 @@ export const RescheduleLeagueMatchResponseSchema = z
 export type RescheduleLeagueMatchResponse = z.infer<typeof RescheduleLeagueMatchResponseSchema>;
 
 /**
+ * Identificación de una liga en el panel. `leagueId` se repite dentro del objeto porque el
+ * detalle de auditoría se consume solo, sin el listado al lado: el panel tiene que poder pedir
+ * el cierre de jornada de esa liga sin adivinar a cuál pertenece.
+ */
+export const AdminLeagueAuditSchema = z
+  .object({
+    leagueId: z.string().uuid(),
+    status: LeagueStatusSchema,
+    currentRound: z
+      .object({
+        id: z.string().uuid(),
+        number: z.number().int().min(1),
+        deadlineAt: z.string(),
+      })
+      .strict()
+      .nullable(),
+    closure: z
+      .object({
+        closedAt: z.string(),
+        championUserId: z.string().uuid().nullable(),
+        promoted: z.array(z.string().uuid()),
+        relegated: z.array(z.string().uuid()),
+        forfeitedMatches: z.number().int().min(0),
+      })
+      .strict()
+      .nullable(),
+    movements: z.array(
+      z
+        .object({
+          userId: z.string().uuid(),
+          kind: z.enum(['PROMOTION', 'RELEGATION', 'TIE_AT_CUT', 'NONE']),
+          fromDivision: LeagueDivisionSchema,
+          toDivision: LeagueDivisionSchema,
+          createdAt: z.string(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type AdminLeagueAuditResponse = z.infer<typeof AdminLeagueAuditSchema>;
+
+/**
  * Resultado del cierre de temporada. Se devuelve igual en el primer intento y en un reintento:
  * los asientos del libro mayor son idempotentes por liga y posición (ADR-035).
  */

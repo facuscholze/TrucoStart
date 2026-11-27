@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AuthUserSummarySchema, RawNicknameInputSchema } from '../auth/auth.schema.js';
+import { GameModeSchema } from '../ws/client-events.schema.js';
 
 export const PrivacyVisibilitySchema = z.enum(['ALL', 'FRIENDS', 'NOBODY']);
 export type PrivacyVisibility = z.infer<typeof PrivacyVisibilitySchema>;
@@ -100,6 +101,7 @@ export const UserStatsResponseSchema = z.object({
   byMode: z.object({
     '1v1': UserModeStatsSchema,
     '2v2': UserModeStatsSchema,
+    '3v3': UserModeStatsSchema,
   }),
 });
 export type UserStatsResponse = z.infer<typeof UserStatsResponseSchema>;
@@ -116,7 +118,7 @@ export const UserMatchHistoryQuerySchema = z
   .object({
     cursor: z.string().uuid().optional(),
     limit: z.coerce.number().int().min(1).max(50).optional().default(20),
-    mode: z.enum(['1v1', '2v2']).optional(),
+    mode: GameModeSchema.optional(),
     outcome: MatchOutcomeSchema.optional(),
     bots: z.enum(['ANY', 'BOTS', 'HUMANS']).optional().default('ANY'),
   })
@@ -125,7 +127,7 @@ export type UserMatchHistoryQuery = z.infer<typeof UserMatchHistoryQuerySchema>;
 
 export const UserMatchHistoryItemSchema = z.object({
   matchId: z.string().uuid(),
-  mode: z.enum(['1v1', '2v2']),
+  mode: GameModeSchema,
   rulesetCode: z.string(),
   seat: z.number().int().nonnegative(),
   team: z.number().int().nonnegative(),
@@ -139,7 +141,7 @@ export type UserMatchHistoryItem = z.infer<typeof UserMatchHistoryItemSchema>;
 
 export const UserMatchDetailResponseSchema = z.object({
   matchId: z.string().uuid(),
-  mode: z.enum(['1v1', '2v2']),
+  mode: GameModeSchema,
   rulesetCode: z.string(),
   hasBots: z.boolean(),
   seedCommitment: z.string(),

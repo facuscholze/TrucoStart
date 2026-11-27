@@ -70,6 +70,7 @@ const USER_STATS: UserStatsResponse = {
   byMode: {
     '1v1': { ...EMPTY_MODE_STATS, matchesPlayed: 1, wins: 1, winRate: 1, currentStreak: 1 },
     '2v2': EMPTY_MODE_STATS,
+    '3v3': EMPTY_MODE_STATS,
   },
 };
 

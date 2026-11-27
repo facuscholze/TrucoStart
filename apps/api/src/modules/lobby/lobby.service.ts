@@ -23,6 +23,7 @@ import {
   type TableInviteResponse,
   TableInviteResponseSchema,
   type TableVisibility,
+  teamForSeat,
   verifyTableInviteToken,
 } from '@truco/shared';
 import { DomainApiException } from '../../common/api-exception.js';
@@ -297,7 +298,7 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
     readonly players: ReadonlyArray<{
       readonly userId: string;
       readonly nickname: string;
-      readonly team?: 0 | 1;
+      readonly team?: number;
     }>;
   }): Promise<TableAggregate> {
     await this.sweepExpiredTables();
@@ -314,7 +315,8 @@ export class LobbyService implements OnApplicationBootstrap, OnApplicationShutdo
       userId: p.userId,
       nickname: p.nickname,
       seat: idx,
-      team: p.team ?? idx % 2,
+      // En 3v3 hay tres equipos: `idx % 2` juntaría a dos equipos en el mismo.
+      team: p.team ?? teamForSeat(input.mode, idx),
     }));
 
     const aggregate = await this.lobbyRepository.createTableWithSeatsTx({

@@ -14,6 +14,9 @@ import {
   type ClientMessage,
   DEFAULT_RECONNECT_GRACE_MS,
   DEFAULT_TURN_TIMEOUT_MS,
+  seatsForMode,
+  teamCountForMode,
+  teamForSeat,
   type ErrorCode,
   type BotDifficulty,
   type GameMode,
@@ -580,6 +583,19 @@ export class RoomActor {
     if (this.status === 'IN_GAME' || (this.gameState && this.gameState.status !== 'FINISHED'))
       return;
     if (!this.seats.every((s) => s.userId !== null && s.ready)) {
+      await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
+      return;
+    }
+    // Invariante de mesa: los equipos se derivan del modo. Si alguien sentó a los jugadores con
+    // `seat % 2` en una mesa de 6, aquí se detecta antes de repartir cartas.
+    const expectedSeats = seatsForMode(this.mode);
+    const teamsOk =
+      this.seats.length === expectedSeats &&
+      this.seats.every((s, idx) => s.team === teamForSeat(this.mode, idx)) &&
+      new Set(this.seats.map((s) => s.team)).size === teamCountForMode(this.mode);
+    if (!teamsOk) {
+      // Nunca se reparten cartas con una mesa inconsistente: se deja la mesa en WAITING y se
+      // avisa por el canal de eventos para que el operador lo vea.
       await this.persistAndEmit(now, [this.buildTableStateEvent(now)]);
       return;
     }

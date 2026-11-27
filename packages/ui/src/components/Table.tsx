@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { SpanishRank, SpanishSuit } from '../cards/deck-catalog.js';
-import { designTokens } from '../tokens/theme.js';
+import { designTokens, teamColor } from '../tokens/theme.js';
 import { Badge } from './Badge.js';
 import { Card } from './Card.js';
 
@@ -180,10 +180,7 @@ export function Table({
                                 style={{
                                   fontSize: '0.64rem',
                                   fontWeight: 600,
-                                  color:
-                                    p.team % 2 === 0
-                                      ? designTokens.colors.accentGold
-                                      : designTokens.colors.accentSky,
+                                  color: teamColor(p.team),
                                 }}
                               >
                                 {p.playerNickname}

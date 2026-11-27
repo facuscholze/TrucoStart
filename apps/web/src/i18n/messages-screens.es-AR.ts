@@ -79,6 +79,10 @@ export const screenMessagesEsAr = {
     quickPlay1v1Sub: 'Emparejamiento automático a 30 puntos',
     quickPlay2v2Title: 'Buscar mesa 2 vs 2',
     quickPlay2v2Sub: 'Por parejas con señas a 30 puntos',
+    quickPlay3v3Title: 'Buscar mesa 3 vs 3',
+    quickPlay3v3Sub: 'Truco de 6: tres equipos de dos',
+    quickPlay3v3Note:
+      'El truco de 6 es social: no suma al ranking competitivo, no tiene torneos ni ligas.',
     practiceSecondaryBadge: 'Práctica · no suma puntaje',
     competitiveTitle: 'Cola competitiva',
     competitiveBody:

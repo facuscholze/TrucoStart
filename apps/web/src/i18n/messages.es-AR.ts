@@ -27,6 +27,8 @@ export const messagesEsAr = {
   },
   mesa: {
     liveTableAria: 'Mesa de truco en vivo',
+    extraSeatsAria: 'Otros asientos de la mesa de seis',
+    threeTeamModeBadge: 'Truco de 6 · 3 equipos',
     handCounter: (handNumber: number) => `Mano #${handNumber}`,
     usLabel: 'Nosotros',
     themLabel: 'Ellos',

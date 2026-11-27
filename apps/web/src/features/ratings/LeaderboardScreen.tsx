@@ -1,4 +1,4 @@
-import type { GameMode, LeaderboardResponse, RankingPeriod } from '@truco/shared';
+import type { CompetitiveMode, LeaderboardResponse, RankingPeriod } from '@truco/shared';
 import { Badge, CallButton } from '@truco/ui';
 import { useEffect, useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
@@ -36,7 +36,7 @@ function PlayerProfileButton({
 }
 
 export function LeaderboardScreen({ onNavigate }: { readonly onNavigate: (path: string) => void }) {
-  const [mode, setMode] = useState<GameMode>('1v1');
+  const [mode, setMode] = useState<CompetitiveMode>('1v1');
   const [period, setPeriod] = useState<RankingPeriod>('GLOBAL');
   const [data, setData] = useState<LeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,7 +130,7 @@ export function LeaderboardScreen({ onNavigate }: { readonly onNavigate: (path: 
             <select
               className="min-h-[42px] w-full rounded-lg border border-ivory/20 bg-elevated px-3 text-sm text-ivory"
               value={mode}
-              onChange={(event) => setMode(event.target.value as GameMode)}
+              onChange={(event) => setMode(event.target.value as CompetitiveMode)}
             >
               <option value="1v1">{messagesEsAr.rankings.mode1v1}</option>
               <option value="2v2">{messagesEsAr.rankings.mode2v2}</option>

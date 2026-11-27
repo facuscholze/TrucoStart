@@ -1,6 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { RuleSet } from '@truco/engine';
-import type { GameMode, ListTablesQuery, RulesetCode, TableVisibility } from '@truco/shared';
+import {
+  teamForSeat,
+  type GameMode,
+  type ListTablesQuery,
+  type RulesetCode,
+  type TableVisibility,
+} from '@truco/shared';
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { DomainApiException } from '../../common/api-exception.js';
 import { generateUuidV7 } from '../../common/uuidv7.js';
@@ -846,7 +852,8 @@ export class LobbyRepository {
           .values({
             tableId: tableRow.id,
             seat: nextSeat,
-            team: nextSeat % 2,
+            // El equipo sale del modo: en 3v3 hay tres equipos y `seat % 2` rompería la mesa.
+            team: teamForSeat(tableRow.mode, nextSeat),
             userId: input.userId,
             nickname: input.nickname,
             isActive: true,

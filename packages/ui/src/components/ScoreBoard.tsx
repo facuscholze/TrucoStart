@@ -1,4 +1,90 @@
-import { designTokens } from '../tokens/theme.js';
+import { designTokens, teamColor } from '../tokens/theme.js';
+
+export interface TeamScoreEntry {
+  readonly team: number;
+  readonly label: string;
+  readonly score: number;
+}
+
+export interface TeamScoreBoardProps {
+  readonly entries: readonly TeamScoreEntry[];
+  readonly targetScore: number;
+  readonly ariaLabel?: string;
+}
+
+/**
+ * Tanteador para mesas de **tres equipos** (truco de 6). Mantiene el mismo dibujo de fósforos
+ * que el duelo clásico, pero con una columna por equipo y el color de cada uno.
+ */
+export function TeamScoreBoard({ entries, targetScore, ariaLabel }: TeamScoreBoardProps) {
+  const halfLimit = targetScore === 30 ? 15 : targetScore;
+  const label =
+    ariaLabel ??
+    `Tanteador a ${targetScore}: ${entries
+      .map((e) => `${e.label} ${e.score} (${describeStage(e.score, targetScore)})`)
+      .join(', ')}`;
+
+  return (
+    <section
+      aria-label={label}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${Math.max(1, entries.length)}, minmax(0, 1fr))`,
+        gap: '0.6rem',
+        padding: '0.7rem 0.8rem',
+        borderRadius: '14px',
+        backgroundColor: designTokens.colors.surface,
+        border: '1px solid rgba(224, 184, 76, 0.32)',
+        color: designTokens.colors.textPrimary,
+        fontFamily: designTokens.typography.sansFamily,
+        fontVariantNumeric: designTokens.typography.scoreNumericVariant,
+      }}
+    >
+      {entries.map((entry, idx) => (
+        <div
+          key={entry.team}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.35rem',
+            minWidth: 0,
+            borderLeft: idx === 0 ? undefined : '1px solid rgba(244, 239, 230, 0.14)',
+            paddingLeft: idx === 0 ? undefined : '0.6rem',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'baseline',
+              gap: '0.25rem',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '0.76rem',
+                fontWeight: 700,
+                color: teamColor(entry.team),
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {entry.label}
+            </span>
+            <strong style={{ fontSize: '1.1rem', fontVariantNumeric: 'tabular-nums' }}>
+              {entry.score}
+            </strong>
+          </div>
+          {renderMatchstickGroups(entry.score, halfLimit)}
+          <span style={{ fontSize: '0.68rem', color: designTokens.colors.textMuted }}>
+            {describeStage(entry.score, targetScore)}
+          </span>
+        </div>
+      ))}
+    </section>
+  );
+}
 
 export interface ScoreBoardProps {
   readonly usLabel?: string;

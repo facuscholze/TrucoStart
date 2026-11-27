@@ -1,4 +1,4 @@
-import type { BotDifficulty } from '@truco/shared';
+import type { BotDifficulty, GameMode } from '@truco/shared';
 import { CallButton } from '@truco/ui';
 import { useState } from 'react';
 import { messagesEsAr } from '../../i18n/messages.es-AR.js';
@@ -23,7 +23,7 @@ export function PracticeSetupPanel({
   onNavigate,
   onBeforeCreate,
 }: PracticeSetupPanelProps) {
-  const [mode, setMode] = useState<'1v1' | '2v2'>('1v1');
+  const [mode, setMode] = useState<GameMode>('1v1');
   const [difficulty, setDifficulty] = useState<BotDifficulty>('MEDIUM');
   const [targetScore, setTargetScore] = useState<15 | 30>(15);
   const [busy, setBusy] = useState<boolean>(false);

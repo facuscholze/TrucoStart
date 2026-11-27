@@ -1,6 +1,7 @@
 import {
   DEFAULT_APP_NAME,
   type AuthUserSummary,
+  type GameMode,
   type MatchmakingQueueStatusResponse,
 } from '@truco/shared';
 import { Badge, CallButton, Card, Toast } from '@truco/ui';
@@ -63,7 +64,7 @@ export function HomeScreen({
    * visible (y el ofrecimiento de práctica a partir del umbral configurado). Si la API
    * pide completar la mesa en el Lobby, se navega como antes.
    */
-  const handleQuickMatch = async (mode: '1v1' | '2v2', competitive = false) => {
+  const handleQuickMatch = async (mode: GameMode, competitive = false) => {
     setBusyAction(true);
     setErrorMsg(null);
     try {
@@ -102,11 +103,7 @@ export function HomeScreen({
     }
   };
 
-  const handleQuickPrivateCreate = async (
-    mode: '1v1' | '2v2',
-    targetScore: 15 | 30,
-    flor: boolean,
-  ) => {
+  const handleQuickPrivateCreate = async (mode: GameMode, targetScore: 15 | 30, flor: boolean) => {
     setBusyAction(true);
     setErrorMsg(null);
     try {
@@ -302,7 +299,18 @@ export function HomeScreen({
               >
                 {messagesEsAr.home.quickPlay2v2Title}
               </CallButton>
+              <CallButton
+                tone="neutral"
+                subtitle={messagesEsAr.home.quickPlay3v3Sub}
+                disabled={busyAction || isOffline || isSearching}
+                onClick={() => void handleQuickMatch('3v3')}
+              >
+                {messagesEsAr.home.quickPlay3v3Title}
+              </CallButton>
             </div>
+            <p className="text-[11px] leading-relaxed text-muted">
+              {messagesEsAr.home.quickPlay3v3Note}
+            </p>
           </section>
 
           <section className="rounded-2xl bg-surface border border-gold/35 p-5 space-y-3.5 shadow-lg">

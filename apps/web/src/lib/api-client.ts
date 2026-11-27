@@ -6,6 +6,7 @@ import type {
   DeleteAccountResponse,
   DeleteTableResponse,
   ForgotPasswordRequest,
+  GameMode,
   JoinByCodeRequest,
   LeaveTableResponse,
   LegalStatusResponse,
@@ -259,7 +260,7 @@ export async function getUserStatsRequest(userId: string): Promise<UserStatsResp
 }
 
 export interface UserHistoryFilters {
-  readonly mode?: '1v1' | '2v2';
+  readonly mode?: GameMode;
   readonly outcome?: 'WIN' | 'LOSS' | 'ABANDON';
   readonly bots?: 'ANY' | 'BOTS' | 'HUMANS';
 }
@@ -465,7 +466,7 @@ export async function getMyModerationStateRequest(): Promise<MyModerationState> 
 }
 
 export interface PublicLobbyFilters {
-  mode?: '1v1' | '2v2';
+  mode?: GameMode;
   targetScore?: 15 | 30;
   flor?: boolean;
   status?: 'WAITING' | 'IN_GAME';

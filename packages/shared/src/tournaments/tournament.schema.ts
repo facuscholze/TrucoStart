@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GameModeSchema, RulesetCodeSchema } from '../ws/client-events.schema.js';
+import { RulesetCodeSchema } from '../ws/client-events.schema.js';
 import { TournamentFormatSchema } from './bracket.js';
 
 /**
@@ -35,6 +35,13 @@ export const TOURNAMENT_STATUS_TRANSITIONS: Readonly<
 export function canTransitionTournament(from: TournamentStatus, to: TournamentStatus): boolean {
   return TOURNAMENT_STATUS_TRANSITIONS[from].includes(to);
 }
+
+/**
+ * Modos que puede disputar un torneo: 1v1 y 2v2. El truco de 6 (`3v3`) no tiene torneos en esta
+ * etapa, así que el tipo lo excluye y el compilador impide crear uno por error.
+ */
+export const TournamentModeSchema = z.enum(['1v1', '2v2']);
+export type TournamentMode = z.infer<typeof TournamentModeSchema>;
 
 export const TournamentVisibilitySchema = z.enum(['OFFICIAL', 'PRIVATE']);
 export type TournamentVisibility = z.infer<typeof TournamentVisibilitySchema>;
@@ -72,7 +79,7 @@ export type TournamentPrize = z.infer<typeof TournamentPrizeSchema>;
 
 export const TournamentRulesSchema = z
   .object({
-    mode: GameModeSchema,
+    mode: TournamentModeSchema,
     rulesetCode: RulesetCodeSchema,
     targetScore: z.number().int().min(15).max(30),
     florEnabled: z.boolean(),
@@ -157,7 +164,7 @@ export const TournamentSummarySchema = z
     format: TournamentFormatSchema,
     visibility: TournamentVisibilitySchema,
     status: TournamentStatusSchema,
-    mode: GameModeSchema,
+    mode: TournamentModeSchema,
     rulesetCode: RulesetCodeSchema,
     targetScore: z.number().int(),
     /** El torneo define sus reglas: puntos, flor y reloj no los hereda del lobby. */

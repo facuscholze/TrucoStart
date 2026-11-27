@@ -1,4 +1,9 @@
-import type { GameMode, RulesetCode, TournamentFormat, TournamentStatus } from '@truco/shared';
+import type {
+  RulesetCode,
+  TournamentFormat,
+  TournamentMode,
+  TournamentStatus,
+} from '@truco/shared';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
@@ -36,7 +41,8 @@ export const tournamentsTable = pgTable(
       .notNull()
       .default('PRIVATE'),
     status: varchar('status', { length: 16 }).$type<TournamentStatus>().notNull().default('DRAFT'),
-    mode: varchar('mode', { length: 8 }).$type<GameMode>().notNull(),
+    // Sólo 1v1 y 2v2: el truco de 6 no tiene torneos (ADR-033).
+    mode: varchar('mode', { length: 8 }).$type<TournamentMode>().notNull(),
     rulesetId: uuid('ruleset_id')
       .notNull()
       .references(() => rulesetsTable.id),

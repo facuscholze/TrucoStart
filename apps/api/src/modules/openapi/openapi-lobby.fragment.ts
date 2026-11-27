@@ -42,7 +42,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
     ],
     properties: {
       id: { type: 'string', format: 'uuid' },
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       rulesetCode: {
         type: 'string',
         enum: ['ar-standard-v1', 'ar-sin-flor-v1', 'ar-corto-15-v1', 'ar-corto-15-flor-v1'],
@@ -53,7 +53,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
       status: { type: 'string', enum: ['WAITING', 'IN_GAME'] },
       ownerNickname: { type: 'string' },
       occupiedSeats: { type: 'integer', minimum: 0, maximum: 4 },
-      maxSeats: { type: 'integer', enum: [2, 4] },
+      maxSeats: { type: 'integer', enum: [2, 4, 6] },
       seats: { type: 'array', items: { $ref: '#/components/schemas/PublicLobbySeatSummary' } },
       createdAt: { type: 'string', format: 'date-time' },
     },
@@ -73,7 +73,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
     additionalProperties: false,
     required: ['mode'],
     properties: {
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       visibility: { type: 'string', enum: ['PUBLIC', 'PRIVATE'], default: 'PUBLIC' },
       rulesetCode: {
         type: 'string',
@@ -123,7 +123,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
     properties: {
       id: { type: 'string', format: 'uuid' },
       roomId: { type: 'string', format: 'uuid' },
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       visibility: { type: 'string', enum: ['PUBLIC', 'PRIVATE'] },
       rulesetCode: {
         type: 'string',
@@ -137,7 +137,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
       isOwner: { type: 'boolean' },
       mySeat: { type: ['integer', 'null'] },
       occupiedSeats: { type: 'integer', minimum: 0, maximum: 4 },
-      maxSeats: { type: 'integer', enum: [2, 4] },
+      maxSeats: { type: 'integer', enum: [2, 4, 6] },
       seats: { type: 'array', items: { $ref: '#/components/schemas/TableParticipantSeat' } },
       joinCode: { type: ['string', 'null'] },
       inviteToken: { type: ['string', 'null'] },
@@ -199,7 +199,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
     additionalProperties: false,
     required: ['mode'],
     properties: {
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       rulesetCode: {
         type: 'string',
         enum: ['ar-standard-v1', 'ar-sin-flor-v1', 'ar-corto-15-v1', 'ar-corto-15-flor-v1'],
@@ -217,7 +217,7 @@ export const OPENAPI_LOBBY_SCHEMAS: Record<string, unknown> = {
     required: ['status'],
     properties: {
       status: { type: 'string', enum: ['IDLE', 'QUEUED', 'MATCHED'] },
-      mode: { type: 'string', enum: ['1v1', '2v2'] },
+      mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
       rulesetCode: { type: 'string' },
       competitive: { type: 'boolean', default: false },
       enqueuedAt: { type: 'string', format: 'date-time' },
@@ -244,7 +244,7 @@ export const OPENAPI_LOBBY_PATHS: Record<string, unknown> = {
       tags: ['Lobby'],
       summary: 'Listar mesas estrictamente públicas filtradas por modo, puntos, flor y estado',
       parameters: [
-        { name: 'mode', in: 'query', schema: { type: 'string', enum: ['1v1', '2v2'] } },
+        { name: 'mode', in: 'query', schema: { type: 'string', enum: ['1v1', '2v2', '3v3'] } },
         { name: 'targetScore', in: 'query', schema: { type: 'integer', enum: [15, 30] } },
         { name: 'flor', in: 'query', schema: { type: 'string', enum: ['true', 'false'] } },
         {

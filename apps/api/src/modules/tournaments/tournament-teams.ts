@@ -1,3 +1,5 @@
+import { seatsForMode, type TournamentMode } from '@truco/shared';
+
 /**
  * Reglas de equipos para torneos 2v2 (M10a).
  *
@@ -7,10 +9,16 @@
  */
 
 /** Integrantes necesarios por equipo según el modo del torneo. */
-export const TEAM_SIZE: Record<'1v1' | '2v2', number> = { '1v1': 1, '2v2': 2 };
+export const TEAM_SIZE: Record<TournamentMode, number> = { '1v1': 1, '2v2': 2 };
 
-/** Asientos por modo en la mesa real (`seat % 2 === team`). */
-export const SEATS_PER_MODE: Record<'1v1' | '2v2', number> = { '1v1': 2, '2v2': 4 };
+/**
+ * Asientos por modo en la mesa real. Se toman de `@truco/shared` para que la mesa del torneo y
+ * la mesa del lobby no puedan divergir (1v1→2, 2v2→4).
+ */
+export const SEATS_PER_MODE: Record<TournamentMode, number> = {
+  '1v1': seatsForMode('1v1'),
+  '2v2': seatsForMode('2v2'),
+};
 
 /** Un integrante del equipo con su asistencia. */
 export interface TeamMemberState {
@@ -36,9 +44,9 @@ export type TeamPresence =
  */
 export function teamPresence(
   members: readonly TeamMemberState[],
-  mode: '1v1' | '2v2',
+  mode: TournamentMode,
 ): TeamPresence {
-  const required = TEAM_SIZE[mode];
+  const required = TEAM_SIZE[mode] ?? 1;
   const present = members.filter((member) => member.checkedIn);
   if (present.length >= required) return { kind: 'COMPLETE' };
   if (present.length === 0) return { kind: 'ABSENT' };
@@ -82,7 +90,7 @@ export function walkoverWinner(home: TeamPresence, away: TeamPresence): Walkover
  * debe cerrar un cruce por un abandono individual.
  */
 export function abandonmentKeepsMatchAlive(input: {
-  readonly mode: '1v1' | '2v2';
+  readonly mode: TournamentMode;
   readonly teamMembersTotal: number;
   readonly teamMembersStillActive: number;
 }): boolean {

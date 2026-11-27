@@ -216,16 +216,17 @@ export class UsersRepository {
     const stats = {
       '1v1': this.emptyModeStats(),
       '2v2': this.emptyModeStats(),
+      '3v3': this.emptyModeStats(),
     };
-    const modeByMatch = new Map<string, '1v1' | '2v2'>();
+    const modeByMatch = new Map<string, '1v1' | '2v2' | '3v3'>();
     const teamByMatch = new Map<string, number>();
     let wins = 0;
     let losses = 0;
     let abandons = 0;
-    const streakOpen = { '1v1': true, '2v2': true };
+    const streakOpen = { '1v1': true, '2v2': true, '3v3': true };
 
     for (const row of entries) {
-      if (row.mode !== '1v1' && row.mode !== '2v2') continue;
+      if (row.mode !== '1v1' && row.mode !== '2v2' && row.mode !== '3v3') continue;
       const modeStats = stats[row.mode];
       modeStats.matchesPlayed++;
       if (row.outcome === 'WIN') {
@@ -280,6 +281,7 @@ export class UsersRepository {
       byMode: {
         '1v1': this.finalizeModeStats(stats['1v1']),
         '2v2': this.finalizeModeStats(stats['2v2']),
+        '3v3': this.finalizeModeStats(stats['3v3']),
       },
     };
   }

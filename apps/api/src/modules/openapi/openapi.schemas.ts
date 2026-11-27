@@ -316,10 +316,11 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
       winRate: { type: 'number', minimum: 0, maximum: 1 },
       byMode: {
         type: 'object',
-        required: ['1v1', '2v2'],
+        required: ['1v1', '2v2', '3v3'],
         properties: {
           '1v1': { $ref: '#/components/schemas/UserModeStats' },
           '2v2': { $ref: '#/components/schemas/UserModeStats' },
+          '3v3': { $ref: '#/components/schemas/UserModeStats' },
         },
       },
     },
@@ -346,7 +347,7 @@ export const OPENAPI_COMPONENTS_SCHEMAS: Record<string, unknown> = {
           ],
           properties: {
             matchId: { type: 'string', format: 'uuid' },
-            mode: { type: 'string', enum: ['1v1', '2v2'] },
+            mode: { type: 'string', enum: ['1v1', '2v2', '3v3'] },
             rulesetCode: { type: 'string' },
             seat: { type: 'integer' },
             team: { type: 'integer' },

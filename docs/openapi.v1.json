@@ -620,12 +620,15 @@
           },
           "byMode": {
             "type": "object",
-            "required": ["1v1", "2v2"],
+            "required": ["1v1", "2v2", "3v3"],
             "properties": {
               "1v1": {
                 "$ref": "#/components/schemas/UserModeStats"
               },
               "2v2": {
+                "$ref": "#/components/schemas/UserModeStats"
+              },
+              "3v3": {
                 "$ref": "#/components/schemas/UserModeStats"
               }
             }
@@ -659,7 +662,7 @@
                 },
                 "mode": {
                   "type": "string",
-                  "enum": ["1v1", "2v2"]
+                  "enum": ["1v1", "2v2", "3v3"]
                 },
                 "rulesetCode": {
                   "type": "string"
@@ -1162,7 +1165,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "rulesetCode": {
             "type": "string"
@@ -1268,7 +1271,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "rulesetCode": {
             "type": "string"
@@ -1913,7 +1916,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "rulesetCode": {
             "type": "string",
@@ -1945,7 +1948,7 @@
           },
           "maxSeats": {
             "type": "integer",
-            "enum": [2, 4]
+            "enum": [2, 4, 6]
           },
           "seats": {
             "type": "array",
@@ -1978,7 +1981,7 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "visibility": {
             "type": "string",
@@ -2066,7 +2069,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "visibility": {
             "type": "string",
@@ -2106,7 +2109,7 @@
           },
           "maxSeats": {
             "type": "integer",
-            "enum": [2, 4]
+            "enum": [2, 4, 6]
           },
           "seats": {
             "type": "array",
@@ -2231,7 +2234,7 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "rulesetCode": {
             "type": "string",
@@ -2255,7 +2258,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["1v1", "2v2"]
+            "enum": ["1v1", "2v2", "3v3"]
           },
           "rulesetCode": {
             "type": "string"
@@ -6460,7 +6463,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["1v1", "2v2"]
+              "enum": ["1v1", "2v2", "3v3"]
             }
           },
           {

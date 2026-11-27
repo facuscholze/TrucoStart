@@ -8,7 +8,12 @@ export const RoomIdSchema = z
   .max(64)
   .regex(/^[a-zA-Z0-9_-]+$/, 'roomId solo admite caracteres alfanuméricos, guion y guion bajo');
 
-export const GameModeSchema = z.enum(['1v1', '2v2']);
+/**
+ * Modos de mesa. `3v3` es el truco de 6 (tres equipos de 2): se juega igual que el resto,
+ * pero queda **fuera del ranking competitivo** (ver ADR-033) y no admite torneos ni partidas
+ * de liga en esta etapa.
+ */
+export const GameModeSchema = z.enum(['1v1', '2v2', '3v3']);
 export type GameMode = z.infer<typeof GameModeSchema>;
 
 export const RulesetCodeSchema = z.enum([

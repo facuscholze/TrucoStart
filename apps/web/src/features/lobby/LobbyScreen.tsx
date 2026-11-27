@@ -1,5 +1,6 @@
 import type {
   AuthUserSummary,
+  GameMode,
   MatchmakingQueueStatusResponse,
   TableVisibility,
 } from '@truco/shared';
@@ -47,7 +48,7 @@ export function LobbyScreen({
   }, [isSearching]);
 
   // Formulario de creación de mesa
-  const [createMode, setCreateMode] = useState<'1v1' | '2v2'>('1v1');
+  const [createMode, setCreateMode] = useState<GameMode>('1v1');
   const [createVisibility, setCreateVisibility] = useState<TableVisibility>('PUBLIC');
   const [createScore, setCreateScore] = useState<15 | 30>(30);
   const [createFlor, setCreateFlor] = useState<boolean>(false);
@@ -137,7 +138,7 @@ export function LobbyScreen({
     return u;
   };
 
-  const handleEnqueue = async (mode: '1v1' | '2v2') => {
+  const handleEnqueue = async (mode: GameMode) => {
     setBusyAction(true);
     setActionError(null);
     try {
@@ -366,7 +367,7 @@ export function LobbyScreen({
                 const v = e.target.value;
                 setFilters((prev) => {
                   const next = { ...prev };
-                  if (v === '1v1' || v === '2v2') next.mode = v;
+                  if (v === '1v1' || v === '2v2' || v === '3v3') next.mode = v;
                   else delete next.mode;
                   return next;
                 });
@@ -376,6 +377,7 @@ export function LobbyScreen({
               <option value="">{messagesEsAr.lobby.filterAllModes}</option>
               <option value="1v1">1 vs 1</option>
               <option value="2v2">2 vs 2</option>
+              <option value="3v3">3 vs 3</option>
             </select>
 
             <select
@@ -569,11 +571,12 @@ export function LobbyScreen({
                 <select
                   id="create-mode"
                   value={createMode}
-                  onChange={(e) => setCreateMode(e.target.value as '1v1' | '2v2')}
+                  onChange={(e) => setCreateMode(e.target.value as GameMode)}
                   className="w-full min-h-[44px] rounded-xl bg-elevated border border-ivory/25 px-3 text-sm text-ivory"
                 >
                   <option value="1v1">1 vs 1</option>
                   <option value="2v2">2 vs 2 (Parejas)</option>
+                  <option value="3v3">3 vs 3 (Truco de 6 · 3 equipos)</option>
                 </select>
               </div>
 

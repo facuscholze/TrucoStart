@@ -23,14 +23,15 @@ describe('M10a equipos: cuadro y asientos', () => {
   it('los asientos de los dos equipos de un cruce cubren la mesa completa', () => {
     for (const mode of ['1v1', '2v2'] as const) {
       const seats = new Set<number>();
+      const teamSize = TEAM_SIZE[mode];
       for (const team of [0, 1] as const) {
-        for (let member = 0; member < TEAM_SIZE[mode]; member++) {
+        for (let member = 0; member < teamSize; member++) {
           seats.add(seatForTeamMember(team, member));
         }
       }
-      expect(seats.size).toBe(TEAM_SIZE[mode] * 2);
+      expect(seats.size).toBe(teamSize * 2);
       // Nadie comparte asiento y cada equipo queda intercalado.
-      expect([...seats].sort((a, b) => a - b)).toEqual([0, 1, 2, 3].slice(0, TEAM_SIZE[mode] * 2));
+      expect([...seats].sort((a, b) => a - b)).toEqual([0, 1, 2, 3].slice(0, teamSize * 2));
     }
   });
 

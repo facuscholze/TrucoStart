@@ -16,6 +16,7 @@ import {
   QuickChat,
   ScoreBoard,
   type SpanishCardId,
+  TeamScoreBoard,
   Table,
   Toast,
 } from '@truco/ui';
@@ -164,6 +165,24 @@ export function GameTableView({
   const targetScore = view?.ruleset.targetScore ?? 30;
   const usScore = view ? Number(view.scoresByTeam[String(myTeam)] ?? 0) : 0;
   const themScore = view ? Number(view.scoresByTeam[String(otherTeam)] ?? 0) : 0;
+  // Truco de 6: la mesa tiene tres equipos y el tanteador de duelo no alcanza. Se arma una
+  // entrada por equipo, con el mío primero y los rivales por orden de asiento.
+  const teamScores = view
+    ? [
+        ...(view.teams ??
+          view.seats.map((s) => s.team).filter((team, idx, all) => all.indexOf(team) === idx)),
+      ]
+        .sort((a, b) => (a === myTeam ? -1 : b === myTeam ? 1 : a - b))
+        .map((team) => ({
+          team,
+          label:
+            team === myTeam
+              ? messagesEsAr.mesa.usLabel
+              : `${messagesEsAr.mesa.themLabel} ${team + 1}`,
+          score: Number(view.scoresByTeam[String(team)] ?? 0),
+        }))
+    : [];
+  const hasThreeTeams = teamScores.length > 2;
 
   const groupedCalls = groupServerLegalActions(view?.legalActions ?? []);
   const handCards = view ? projectHandCardsFromView(view, groupedCalls.playableCardIds) : [];
@@ -223,7 +242,7 @@ export function GameTableView({
           ? { onOpenProfile: () => onOpenPlayerProfile(profileUserId) }
           : {})}
         nickname={nickname}
-        team={info?.team ?? seatIdx % 2}
+        team={info?.team ?? pubSeat?.team ?? seatIdx % 2}
         isSelf={seatIdx === mySeatIndex}
         isMano={view?.hand.manoSeat === seatIdx}
         isActiveTurn={isActiveTurn}
@@ -275,14 +294,23 @@ export function GameTableView({
   const topBar = (
     <div className="flex items-center justify-between gap-2 flex-wrap">
       <div className="flex items-center gap-2 flex-wrap">
-        <ScoreBoard
-          compact
-          usLabel={messagesEsAr.mesa.usLabel}
-          themLabel={messagesEsAr.mesa.themLabel}
-          usScore={usScore}
-          themScore={themScore}
-          targetScore={targetScore}
-        />
+        {hasThreeTeams ? (
+          <span
+            className="text-xs font-bold tabular-nums text-ivory"
+            aria-label={teamScores.map((t) => `${t.label} ${t.score}`).join(', ')}
+          >
+            {teamScores.map((t) => `${t.label} ${t.score}`).join(' · ')}
+          </span>
+        ) : (
+          <ScoreBoard
+            compact
+            usLabel={messagesEsAr.mesa.usLabel}
+            themLabel={messagesEsAr.mesa.themLabel}
+            usScore={usScore}
+            themScore={themScore}
+            targetScore={targetScore}
+          />
+        )}
         {view && (
           <Badge variant="gold">{messagesEsAr.mesa.handCounter(view.hand.handNumber)}</Badge>
         )}
@@ -447,8 +475,21 @@ export function GameTableView({
     </div>
   );
 
+  const extraSeatsStrip =
+    relSeats.extraSeats.length > 0 ? (
+      <div
+        className="flex items-center justify-center gap-2 flex-wrap"
+        aria-label={messagesEsAr.mesa.extraSeatsAria}
+      >
+        {relSeats.extraSeats.map((seatIdx) => (
+          <div key={`extra-${seatIdx}`}>{renderSeatSlot(seatIdx, true)}</div>
+        ))}
+      </div>
+    ) : null;
+
   const bottomArea = (
     <div className="space-y-2.5">
+      {extraSeatsStrip}
       {groupedCalls.pendingResponses.length > 0 && !callTrayOpen && (
         <div className="flex flex-wrap items-center justify-center gap-2">
           {groupedCalls.pendingResponses.map((resp) => {
@@ -507,13 +548,17 @@ export function GameTableView({
         <h2 className="font-display text-base font-bold text-gold">
           {messagesEsAr.mesa.sidePanelScoreTitle}
         </h2>
-        <ScoreBoard
-          usLabel={messagesEsAr.mesa.usLabel}
-          themLabel={messagesEsAr.mesa.themLabel}
-          usScore={usScore}
-          themScore={themScore}
-          targetScore={targetScore}
-        />
+        {hasThreeTeams ? (
+          <TeamScoreBoard entries={teamScores} targetScore={targetScore} />
+        ) : (
+          <ScoreBoard
+            usLabel={messagesEsAr.mesa.usLabel}
+            themLabel={messagesEsAr.mesa.themLabel}
+            usScore={usScore}
+            themScore={themScore}
+            targetScore={targetScore}
+          />
+        )}
       </div>
 
       <CallTray
